@@ -1,0 +1,25 @@
+# Node.js
+node_modules/
+dist/
+.vite/
+.env
+.npmrc
+
+# Java
+target/
+*.log
+*.jar
+*.war
+*.class
+
+# IntelliJ / Eclipse / VSCode
+.idea/
+.vscode/
+.project
+.classpath
+.settings/
+
+# Maven
+.mvn/
+pom.xml.tag
+pom.xml.releaseBackup
