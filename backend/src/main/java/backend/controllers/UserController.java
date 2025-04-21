@@ -69,8 +69,12 @@ public class UserController {
      */
     @PostMapping("/signup")
     public ResponseEntity<?> signup(@Valid @RequestBody SignupRequestDto request) {
-        userService.signup(request.getEmail(), request.getPassword(), request.getUsertype());
-        return ResponseEntity.status(HttpStatus.CREATED).body(new MessageResponseDto("New user created"));
+        try {
+            userService.signup(request.getEmail(), request.getPassword(), request.getUsertype());
+            return ResponseEntity.status(HttpStatus.CREATED).body(new MessageResponseDto("New user created"));
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(new MessageResponseDto(e.getMessage()));
+        }
     }
 
     /**
@@ -81,8 +85,12 @@ public class UserController {
      */
     @DeleteMapping("/{id}")
     public ResponseEntity<?> deleteUser(@PathVariable long id) {
-        userService.delete(id);
-        return ResponseEntity.ok(new MessageResponseDto("User deleted successfully."));
+        try {
+            userService.delete(id);
+            return ResponseEntity.ok(new MessageResponseDto("User deleted successfully."));
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new MessageResponseDto(e.getMessage()));
+        }
     }
 
     /**
@@ -94,8 +102,12 @@ public class UserController {
      */
     @PutMapping("/change-password/{id}")
     public ResponseEntity<?> changePassword(@PathVariable long id, @RequestBody PasswordChangeRequestDto request) {
-        userService.changePassword(id, request.getNewPassword());
-        return ResponseEntity.ok(new MessageResponseDto("Password changed successfully."));
+        try {
+            userService.changePassword(id, request.getNewPassword());
+            return ResponseEntity.ok(new MessageResponseDto("Password changed successfully."));
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new MessageResponseDto(e.getMessage()));
+        }
     }
 
     /**
