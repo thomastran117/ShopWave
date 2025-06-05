@@ -9,10 +9,10 @@
 		<relativePath/>
 	</parent>
 	<groupId>com.personal</groupId>
-	<artifactId>gamestore</artifactId>
+	<artifactId>onlinestore</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>gamestore</name>
-	<description>Gamestore backend</description>
+	<name>onlinestore</name>
+	<description>onlinestore backend</description>
 	<url/>
 	<licenses>
 		<license/>
