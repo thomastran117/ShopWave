@@ -4,6 +4,7 @@ import LoginPage from "./pages/LoginPage";
 import NavbarComponent from "./components/Navbar";
 import HomePage from "./pages/HomePage";
 import Footer from "./components/Footer";
+import Sidebar from "./components/Sidebar";
 
 function App() {
   return (
