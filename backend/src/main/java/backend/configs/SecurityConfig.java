@@ -57,7 +57,7 @@ public class SecurityConfig extends OncePerRequestFilter {
         http.addFilterBefore(this, UsernamePasswordAuthenticationFilter.class);
 
         http.authorizeHttpRequests(auth -> auth
-                .requestMatchers("/user/login", "/user/signup").permitAll()
+                .requestMatchers("/auth/login", "/auth/signup", "/auth/google").permitAll()
                 .anyRequest().authenticated());
 
         http.cors().and()
@@ -70,7 +70,7 @@ public class SecurityConfig extends OncePerRequestFilter {
     @Bean
     public org.springframework.web.cors.CorsConfigurationSource corsConfigurationSource() {
         org.springframework.web.cors.CorsConfiguration corsConfig = new org.springframework.web.cors.CorsConfiguration();
-        corsConfig.addAllowedOrigin("http://localhost:3080");
+        corsConfig.addAllowedOrigin("http://localhost:3090");
         corsConfig.addAllowedMethod("*");
         corsConfig.addAllowedHeader("*");
         corsConfig.setAllowCredentials(true);

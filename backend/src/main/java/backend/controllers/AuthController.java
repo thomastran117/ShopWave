@@ -1,5 +1,8 @@
 package backend.controllers;
 
+import java.util.Map;
+import java.util.Collections;
+
 // Import java classes
 import backend.interfaces.UserService;
 import backend.services.AuthServiceImpl;
@@ -22,20 +25,31 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.beans.factory.annotation.Value;
+
+//Google API
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken.Payload;
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
+import com.google.api.client.http.javanet.NetHttpTransport;
+import com.google.api.client.json.jackson2.JacksonFactory;
 
 // Other imports
 import jakarta.validation.Valid;
 
-// Controller listening for /user routes
+// Controller listening for /auth routes
 @RestController
-@RequestMapping("/user")
-public class UserController {
+@RequestMapping("/auth")
+public class AuthController {
 
     private final UserService userService;
     private final AuthServiceImpl authService;
 
+    @Value("${google-clientId}")
+    private String googleClientId;
+
     // Constructor to inject dependencies
-    public UserController(UserService userService, AuthServiceImpl authService) {
+    public AuthController(UserService userService, AuthServiceImpl authService) {
         this.userService = userService;
         this.authService = authService;
     }
@@ -108,6 +122,37 @@ public class UserController {
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new MessageResponseDto(e.getMessage()));
         }
+    }
+
+    @PostMapping("/google")
+    public ResponseEntity<?> googleLogin(@RequestBody Map<String, String> body) throws Exception {
+        String idTokenString = body.get("idToken");
+        if (idTokenString == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Missing idToken"));
+        }
+
+        GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(
+                new NetHttpTransport(), JacksonFactory.getDefaultInstance())
+                .setAudience(Collections.singletonList(googleClientId))
+                .build();
+
+        GoogleIdToken idToken = verifier.verify(idTokenString);
+        if (idToken == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid ID token"));
+        }
+
+        Payload payload = idToken.getPayload();
+        String email = payload.getEmail();
+        boolean emailVerified = Boolean.TRUE.equals(payload.getEmailVerified());
+        if (!emailVerified) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Email not verified"));
+        }
+
+        User user = userService.loginOrSignupGoogle(email);
+
+        String jwt = authService.generateToken(user.getId().intValue(), user.getUsertype() != null ? user.getUsertype() : "USER");
+
+        return ResponseEntity.ok(new UserResponseDto(jwt, user.getEmail(), user.getUsertype(), user.getId()));
     }
 
     /**

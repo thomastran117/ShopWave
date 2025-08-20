@@ -14,4 +14,6 @@ public interface UserService {
     User getUserByID(long id);
 
     long getID(String email);
+
+    User loginOrSignupGoogle(String email);
 }

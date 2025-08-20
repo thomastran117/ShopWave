@@ -12,10 +12,10 @@ const NavbarComponent: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [moreTimeoutId, setMoreTimeoutId] = useState<NodeJS.Timeout | null>(
-    null,
+    null
   );
   const [userTimeoutId, setUserTimeoutId] = useState<NodeJS.Timeout | null>(
-    null,
+    null
   );
 
   const handleMoreEnter = () => {
@@ -221,7 +221,7 @@ const NavbarComponent: React.FC = () => {
                 </div>
               ) : (
                 <NavLink
-                  to="/auth"
+                  to="/login"
                   className="flex items-center text-gray-300 hover:text-blue-400"
                 >
                   <FaUserCircle className="mr-1" />

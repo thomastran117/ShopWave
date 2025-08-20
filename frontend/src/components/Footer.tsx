@@ -1,10 +1,5 @@
 import React from "react";
-import {
-  FaGithub,
-  FaTwitter,
-  FaLinkedin,
-  FaEnvelope,
-} from "react-icons/fa";
+import { FaGithub, FaTwitter, FaLinkedin, FaEnvelope } from "react-icons/fa";
 
 const Footer: React.FC = () => {
   const currentYear = new Date().getFullYear();
@@ -23,16 +18,32 @@ const Footer: React.FC = () => {
               A modern, dark-themed UI component library for React applications.
             </p>
             <div className="flex space-x-4 mt-4 text-gray-400">
-              <a href="#" aria-label="Github" className="hover:text-white transition">
+              <a
+                href="#"
+                aria-label="Github"
+                className="hover:text-white transition"
+              >
                 <FaGithub size={20} />
               </a>
-              <a href="#" aria-label="Twitter" className="hover:text-white transition">
+              <a
+                href="#"
+                aria-label="Twitter"
+                className="hover:text-white transition"
+              >
                 <FaTwitter size={20} />
               </a>
-              <a href="#" aria-label="LinkedIn" className="hover:text-white transition">
+              <a
+                href="#"
+                aria-label="LinkedIn"
+                className="hover:text-white transition"
+              >
                 <FaLinkedin size={20} />
               </a>
-              <a href="#" aria-label="Email" className="hover:text-white transition">
+              <a
+                href="#"
+                aria-label="Email"
+                className="hover:text-white transition"
+              >
                 <FaEnvelope size={20} />
               </a>
             </div>

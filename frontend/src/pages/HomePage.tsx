@@ -1,5 +1,15 @@
-import React from 'react';
-import { Truck, Headset, DollarSign, ShieldCheck, RefreshCcw, Users, Sparkles, ThumbsUp, Shield } from 'lucide-react';
+import React from "react";
+import {
+  Truck,
+  Headset,
+  DollarSign,
+  ShieldCheck,
+  RefreshCcw,
+  Users,
+  Sparkles,
+  ThumbsUp,
+  Shield,
+} from "lucide-react";
 import { motion } from "framer-motion";
 const fadeInUp = {
   hidden: { opacity: 0, y: 30 },
@@ -8,49 +18,49 @@ const fadeInUp = {
 
 const services = [
   {
-    title: 'Fast Delivery',
-    description: 'Get your items delivered quickly and safely.',
+    title: "Fast Delivery",
+    description: "Get your items delivered quickly and safely.",
     icon: <Truck className="h-8 w-8 text-blue-600" />,
   },
   {
-    title: '24/7 Support',
-    description: 'Always here to help, any time, any day.',
+    title: "24/7 Support",
+    description: "Always here to help, any time, any day.",
     icon: <Headset className="h-8 w-8 text-blue-600" />,
   },
   {
-    title: 'Affordable Pricing',
-    description: 'Top-notch service at a reasonable price.',
+    title: "Affordable Pricing",
+    description: "Top-notch service at a reasonable price.",
     icon: <DollarSign className="h-8 w-8 text-blue-600" />,
   },
   {
-    title: 'Trusted by Thousands',
-    description: 'Used by thousands of happy customers.',
+    title: "Trusted by Thousands",
+    description: "Used by thousands of happy customers.",
     icon: <Users className="h-8 w-8 text-blue-600" />,
   },
   {
-    title: 'Secure Payments',
-    description: 'Your payment info is protected with us.',
+    title: "Secure Payments",
+    description: "Your payment info is protected with us.",
     icon: <ShieldCheck className="h-8 w-8 text-blue-600" />,
   },
   {
-    title: 'Easy Returns',
-    description: 'No-hassle return policy for peace of mind.',
+    title: "Easy Returns",
+    description: "No-hassle return policy for peace of mind.",
     icon: <RefreshCcw className="h-8 w-8 text-blue-600" />,
   },
 ];
 
 const reviews = [
   {
-    name: 'Alice',
-    comment: 'Amazing experience! Super fast and friendly support.',
+    name: "Alice",
+    comment: "Amazing experience! Super fast and friendly support.",
   },
   {
-    name: 'Bob',
-    comment: 'Affordable and reliable. Will use again.',
+    name: "Bob",
+    comment: "Affordable and reliable. Will use again.",
   },
   {
-    name: 'Carol',
-    comment: 'Everything went smoothly from start to finish.',
+    name: "Carol",
+    comment: "Everything went smoothly from start to finish.",
   },
 ];
 
@@ -71,7 +81,8 @@ const Home: React.FC = () => {
             Welcome to Our Service
           </h1>
           <p className="text-lg md:text-xl max-w-2xl mx-auto text-gray-300">
-            We provide fast, secure, and reliable solutions to simplify your life and business.
+            We provide fast, secure, and reliable solutions to simplify your
+            life and business.
           </p>
         </div>
         <div className="absolute top-0 left-0 w-48 h-48 bg-blue-600 rounded-full opacity-20 blur-3xl animate-pulse -z-10" />
@@ -89,12 +100,13 @@ const Home: React.FC = () => {
           <div>
             <h2 className="text-3xl font-bold mb-6">About Us</h2>
             <p className="mb-4 text-lg text-gray-700">
-              <strong>Our Mission:</strong> To empower individuals and businesses with seamless,
-              secure, and innovative digital services that improve everyday life.
+              <strong>Our Mission:</strong> To empower individuals and
+              businesses with seamless, secure, and innovative digital services
+              that improve everyday life.
             </p>
             <p className="text-lg text-gray-700">
-              <strong>Our Vision:</strong> To become a globally trusted platform known for
-              simplicity, speed, and reliability.
+              <strong>Our Vision:</strong> To become a globally trusted platform
+              known for simplicity, speed, and reliability.
             </p>
           </div>
         </div>
@@ -103,10 +115,13 @@ const Home: React.FC = () => {
       {/* Discover Section */}
       <section className="py-20 px-6 bg-blue-100">
         <div className="max-w-4xl mx-auto text-center">
-          <h2 className="text-3xl font-bold mb-4">Discover the Future of Service</h2>
+          <h2 className="text-3xl font-bold mb-4">
+            Discover the Future of Service
+          </h2>
           <p className="text-lg text-gray-700">
-            We’re redefining what it means to deliver great experiences — with smart technology,
-            customer-first policies, and a passion for simplicity.
+            We’re redefining what it means to deliver great experiences — with
+            smart technology, customer-first policies, and a passion for
+            simplicity.
           </p>
         </div>
       </section>
@@ -140,7 +155,6 @@ const Home: React.FC = () => {
             </motion.div>
           ))}
         </motion.div>
-
       </section>
 
       {/* Why Us Section */}
@@ -150,17 +164,25 @@ const Home: React.FC = () => {
           <div className="bg-blue-100 p-6 rounded-xl shadow hover:shadow-md transition-transform duration-300 hover:-translate-y-1">
             <Sparkles className="w-8 h-8 mx-auto text-blue-600 mb-4" />
             <h3 className="font-semibold text-lg mb-2">Innovative Solutions</h3>
-            <p className="text-sm text-gray-700">We stay ahead by continuously improving and innovating our platform.</p>
+            <p className="text-sm text-gray-700">
+              We stay ahead by continuously improving and innovating our
+              platform.
+            </p>
           </div>
           <div className="bg-blue-100 p-6 rounded-xl shadow hover:shadow-md transition-transform duration-300 hover:-translate-y-1">
             <ThumbsUp className="w-8 h-8 mx-auto text-blue-600 mb-4" />
             <h3 className="font-semibold text-lg mb-2">Top Rated Support</h3>
-            <p className="text-sm text-gray-700">Our users love our responsive and knowledgeable support team.</p>
+            <p className="text-sm text-gray-700">
+              Our users love our responsive and knowledgeable support team.
+            </p>
           </div>
           <div className="bg-blue-100 p-6 rounded-xl shadow hover:shadow-md transition-transform duration-300 hover:-translate-y-1">
             <Shield className="w-8 h-8 mx-auto text-blue-600 mb-4" />
             <h3 className="font-semibold text-lg mb-2">Rock-Solid Security</h3>
-            <p className="text-sm text-gray-700">Your data and transactions are protected with industry-grade security.</p>
+            <p className="text-sm text-gray-700">
+              Your data and transactions are protected with industry-grade
+              security.
+            </p>
           </div>
         </div>
       </section>
@@ -174,15 +196,21 @@ const Home: React.FC = () => {
             className="rounded-xl shadow-md w-full object-cover h-80"
           />
           <div>
-            <h2 className="text-3xl font-bold mb-6 text-center md:text-left">What Our Customers Say</h2>
+            <h2 className="text-3xl font-bold mb-6 text-center md:text-left">
+              What Our Customers Say
+            </h2>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {reviews.map((review, i) => (
                 <div
                   key={i}
                   className="bg-gray-100 p-4 rounded-xl shadow-sm transition-transform duration-300 hover:shadow-md hover:-translate-y-1 hover:scale-[1.02] cursor-pointer"
                 >
-                  <p className="italic text-gray-800 mb-3">"{review.comment}"</p>
-                  <p className="text-right font-medium text-gray-600">— {review.name}</p>
+                  <p className="italic text-gray-800 mb-3">
+                    "{review.comment}"
+                  </p>
+                  <p className="text-right font-medium text-gray-600">
+                    — {review.name}
+                  </p>
                 </div>
               ))}
             </div>
@@ -196,7 +224,8 @@ const Home: React.FC = () => {
           Join Thousands of Happy Customers
         </h2>
         <p className="text-lg mb-8 max-w-xl mx-auto">
-          Start using our platform today and enjoy a seamless, secure, and smart experience.
+          Start using our platform today and enjoy a seamless, secure, and smart
+          experience.
         </p>
         <button className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-8 py-3 rounded-full shadow-md transition">
           Get Started

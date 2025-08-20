@@ -1,5 +1,13 @@
 import React, { useState } from "react";
-import { FaHome, FaUserFriends, FaCalendarAlt, FaBookOpen, FaInfoCircle, FaChevronLeft, FaChevronRight,} from "react-icons/fa";
+import {
+  FaHome,
+  FaUserFriends,
+  FaCalendarAlt,
+  FaBookOpen,
+  FaInfoCircle,
+  FaChevronLeft,
+  FaChevronRight,
+} from "react-icons/fa";
 import { NavLink } from "react-router-dom";
 
 const Sidebar: React.FC = () => {

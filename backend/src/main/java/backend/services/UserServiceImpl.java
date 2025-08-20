@@ -46,6 +46,8 @@ public class UserServiceImpl implements UserService {
         User user = new User();
         user.setEmail(email);
         user.setPassword(passwordEncoder.encode(password));
+        user.setUsertype("USER");
+        user.setProvider("LOCAL");
 
         userRepository.save(user);
         return true;
@@ -79,5 +81,17 @@ public class UserServiceImpl implements UserService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
         userRepository.delete(user);
         return true;
+    }
+
+    @Override
+    public User loginOrSignupGoogle(String email) {
+        return userRepository.findByEmail(email).orElseGet(() -> {
+            User user = new User();
+            user.setEmail(email);
+            user.setPassword(null);
+            user.setUsertype("USER");
+            user.setProvider("GOOGLE");
+            return userRepository.save(user);
+        });
     }
 }

@@ -22,9 +22,12 @@ public class User {
     @Column(unique = true, nullable = false)
     private String email;
 
-    @Column(nullable = false)
+    @Column(nullable = true) 
     private String password;
 
     @Column(nullable = false)
-    private String usertype;
+    private String usertype = "USER";
+
+    @Column(nullable = false)
+    private String provider = "LOCAL";
 }
