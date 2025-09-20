@@ -92,9 +92,9 @@ export default function LoginPage() {
               className="object-cover w-full h-full rounded-2xl fade-in-zoom"
             />
             <div className="absolute top-0 left-0 w-full p-4 flex justify-between items-center z-10">
-              <span className="text-xl font-bold text-white">AMU</span>
+              <span className="text-xl font-bold text-white">SW</span>
               <button className="text-sm border border-gray-500 px-3 py-1 rounded-md hover:bg-gray-800 text-white">
-                Back to website
+                Back to Home
               </button>
             </div>
 

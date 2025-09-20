@@ -1,6 +1,8 @@
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import "./App.css";
 import LoginPage from "./pages/LoginPage";
+import TermsAndConditionPage from "./pages/TermsAndConditionPage";
+import PrivacyPage from "./pages/PrivacyPage";
 import NavbarComponent from "./components/Navbar";
 import HomePage from "./pages/HomePage";
 import Footer from "./components/Footer";
@@ -15,6 +17,27 @@ function App() {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route
+              path="/terms-and-conditions"
+              element={
+                <TermsAndConditionPage
+                  companyName="ShopWave"
+                  contactEmail="support@shopwave.com"
+                  lastUpdated="August 22, 2025"
+                />
+              }
+            />
+            <Route
+              path="/privacy"
+              element={
+                <PrivacyPage
+                  companyName="ShopWave"
+                  contactEmail="support@shopwave.com"
+                  dpoEmail="dpo@shopwave.com"
+                  lastUpdated="August 22, 2025"
+                />
+              }
+            />
             <Route path="/dashboard" element={<LoginPage />} />
           </Routes>
         </div>

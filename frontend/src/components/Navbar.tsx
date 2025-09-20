@@ -107,11 +107,11 @@ const NavbarComponent: React.FC = () => {
               <NavLink to="/" end className={navLinkClass}>
                 Home
               </NavLink>
-              <NavLink to="/login" className={navLinkClass}>
-                Clubs
+              <NavLink to="/about" className={navLinkClass}>
+                About
               </NavLink>
-              <NavLink to="/events" className={navLinkClass}>
-                Events
+              <NavLink to="/browse" className={navLinkClass}>
+                Browse
               </NavLink>
 
               {/* More Dropdown */}
