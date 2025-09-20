@@ -57,7 +57,7 @@ public class SecurityConfig extends OncePerRequestFilter {
         http.addFilterBefore(this, UsernamePasswordAuthenticationFilter.class);
 
         http.authorizeHttpRequests(auth -> auth
-                .requestMatchers("/auth/login", "/auth/signup", "/auth/google").permitAll()
+                .requestMatchers("/health","/auth/login", "/auth/signup", "/auth/google").permitAll()
                 .anyRequest().authenticated());
 
         http.cors().and()
