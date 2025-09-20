@@ -1,5 +1,7 @@
 package backend.resources;
 
+import backend.configs.EnvConfig;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.beans.factory.annotation.Value;
@@ -10,22 +12,19 @@ import javax.sql.DataSource;
 @Configuration
 public class AppDatabase {
 
-    @Value("${spring.datasource.url}")
-    private String dbUrl;
+    private final EnvConfig env;
 
-    @Value("${spring.datasource.username}")
-    private String dbUser;
-
-    @Value("${spring.datasource.password}")
-    private String dbPassword;
+    public AppDatabase(EnvConfig env) {
+        this.env = env;
+    }
 
     @Bean
     public DataSource dataSource() {
         DriverManagerDataSource dataSource = new DriverManagerDataSource();
         dataSource.setDriverClassName("com.mysql.cj.jdbc.Driver");
-        dataSource.setUrl(dbUrl);
-        dataSource.setUsername(dbUser);
-        dataSource.setPassword(dbPassword);
+        dataSource.setUrl(env.getDbUrl());
+        dataSource.setUsername(env.getDbUser());
+        dataSource.setPassword(env.getDbPassword());
         return dataSource;
     }
 }

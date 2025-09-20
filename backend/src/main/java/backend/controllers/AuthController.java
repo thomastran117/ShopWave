@@ -13,6 +13,7 @@ import backend.dtos.SignupRequestDto;
 import backend.dtos.UserResponseDto;
 import backend.exceptions.AuthenticationException;
 import backend.dtos.PasswordChangeRequestDto;
+import backend.configs.EnvConfig;
 
 // Spring imports
 import org.springframework.http.HttpStatus;
@@ -44,14 +45,13 @@ public class AuthController {
 
     private final UserService userService;
     private final AuthServiceImpl authService;
-
-    @Value("${google-clientId}")
-    private String googleClientId;
+    private final EnvConfig env;
 
     // Constructor to inject dependencies
-    public AuthController(UserService userService, AuthServiceImpl authService) {
+    public AuthController(UserService userService, AuthServiceImpl authService, EnvConfig env) {
         this.userService = userService;
         this.authService = authService;
+        this.env = env;
     }
 
     /**
@@ -133,7 +133,7 @@ public class AuthController {
 
         GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(
                 new NetHttpTransport(), JacksonFactory.getDefaultInstance())
-                .setAudience(Collections.singletonList(googleClientId))
+                .setAudience(Collections.singletonList(env.getGoogleClientId()))
                 .build();
 
         GoogleIdToken idToken = verifier.verify(idTokenString);

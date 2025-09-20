@@ -1,5 +1,7 @@
 package backend.services;
 
+import backend.configs.EnvConfig;
+
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
@@ -18,12 +20,12 @@ import java.util.function.Function;
 @Component
 public class AuthServiceImpl implements Serializable {
 
-    @Value("${jwt.token.validity}")
-    private long JWT_TOKEN_VALIDITY;
+    private final EnvConfig env;
 
-    @Value("${jwt.secret}")
-    private String secret;
-
+    public AuthServiceImpl(EnvConfig env) {
+        this.env = env;
+    }
+    
     public int getUserIdFromToken(HttpServletRequest request) {
         String token = request.getHeader("Authorization");
         if (token == null || !token.startsWith("Bearer ")) {
@@ -39,31 +41,21 @@ public class AuthServiceImpl implements Serializable {
     }
 
     private Claims getAllClaimsFromToken(String token) {
-        return Jwts.parser().setSigningKey(secret).parseClaimsJws(token).getBody();
+        return Jwts.parser().setSigningKey(env.getJwtSecret()).parseClaimsJws(token).getBody();
     }
 
     public String generateToken(int userId, String role) {
-        try {
-            Map<String, Object> claims = new HashMap<>();
-            claims.put("role", role);
-
-            String token = Jwts.builder()
-                    .setClaims(claims)
-                    .setSubject(String.valueOf(userId))
-                    .setIssuedAt(new Date(System.currentTimeMillis()))
-                    .setExpiration(new Date(System.currentTimeMillis() + JWT_TOKEN_VALIDITY * 1000))
-                    .signWith(SignatureAlgorithm.HS512, secret)
-                    .compact();
-
-            return token;
-        } catch (Exception e) {
-            e.printStackTrace();
-            throw new RuntimeException("Error generating token: " + e.getMessage());
-        }
+        return Jwts.builder()
+                .setSubject(String.valueOf(userId))
+                .claim("role", role)
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + env.getJwtValidity() * 1000))
+                .signWith(SignatureAlgorithm.HS512, env.getJwtSecret())
+                .compact();
     }
 
     public Authentication getAuthentication(String token) {
-        Claims claims = Jwts.parser().setSigningKey(secret).parseClaimsJws(token).getBody();
+        Claims claims = Jwts.parser().setSigningKey(env.getJwtSecret()).parseClaimsJws(token).getBody();
         int userId = Integer.parseInt(claims.getSubject());
         String role = claims.get("role", String.class);
 
