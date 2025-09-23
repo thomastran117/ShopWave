@@ -38,10 +38,49 @@ export default function LoginPage() {
     }
   };
 
-  const handleGoogleResponse = async (response: any) => {
+  const handleGoogleLogin = () => {
+    const clientId =
+      "770432614028-91g7hj1jsvdsqn60m7hv9baqued0k1lf.apps.googleusercontent.com";
+    const redirectUri = "http://localhost:3090/auth/callback";
+    const scope = "openid email profile";
+
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: "id_token",
+      scope,
+      nonce: crypto.randomUUID(),
+      prompt: "select_account",
+    });
+
+    const url = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+
+    // popup positioning
+    const width = 600;
+    const height = 700;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+
+    const popup = window.open(
+      url,
+      "GoogleLogin",
+      `width=${width},height=${height},left=${left},top=${top},resizable,scrollbars`
+    );
+
+    const listener = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      if (event.data.type === "google_oauth_token") {
+        popup?.close();
+        handleGoogleResponse(event.data.token);
+        window.removeEventListener("message", listener);
+      }
+    };
+    window.addEventListener("message", listener);
+  };
+
+  const handleGoogleResponse = async (idToken: string) => {
     setLoading(true);
     try {
-      const idToken = response.credential;
       const res = await api.post("/auth/google", { idToken });
       localStorage.setItem("token", res.data.accessToken);
       navigate("/dashboard");
@@ -59,30 +98,16 @@ export default function LoginPage() {
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    if (window.google) {
-      window.google.accounts.id.initialize({
-        client_id:
-          "770432614028-91g7hj1jsvdsqn60m7hv9baqued0k1lf.apps.googleusercontent.com",
-        callback: handleGoogleResponse,
-      });
-
-      window.google.accounts.id.renderButton(
-        document.getElementById("googleLoginBtn"),
-        { theme: "filled_black", size: "large", shape: "pill" }
-      );
-    }
-  }, []);
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#0a0f1c] via-[#111827] to-[#0d1a2f] flex items-center justify-center px-4 py-10">
       <div
-        className="w-full max-w-4xl h-[700px] 
-          bg-[#0D1B2A]/90 backdrop-blur-xl 
+        className="w-full max-w-4xl min-h-[600px] md:h-[700px] 
+          bg-[#0D1B2A]/95 backdrop-blur-xl 
           rounded-3xl shadow-[0_0_25px_rgba(0,115,255,0.3)] 
           border border-[#1E3A5F]/70 
           flex flex-col md:flex-row"
       >
+        {/* Left carousel */}
         <div className="md:w-1/2 flex flex-col justify-between p-4">
           <div className="relative w-full h-full overflow-hidden bg-black rounded-2xl">
             <img
@@ -118,7 +143,8 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <div className="md:w-1/2 p-8 flex flex-col justify-center">
+        {/* Right auth form */}
+        <div className="md:w-1/2 flex-1 p-8 flex flex-col justify-center">
           <div className="w-full">
             <h2 className="text-3xl font-bold mt-4 mb-2 text-center text-blue-400">
               Login to your account
@@ -131,6 +157,7 @@ export default function LoginPage() {
             </p>
 
             <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Username input */}
               <div className="flex items-center border border-gray-600 rounded-md bg-[#1e293b] px-3 py-2 focus-within:border-blue-500 transition">
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -146,7 +173,6 @@ export default function LoginPage() {
                     d="M5.121 17.804A9.97 9.97 0 0112 15c2.21 0 4.24.722 5.879 1.939M15 10a3 3 0 11-6 0 3 3 0 016 0z"
                   />
                 </svg>
-
                 <input
                   type="text"
                   name="username"
@@ -158,6 +184,7 @@ export default function LoginPage() {
                 />
               </div>
 
+              {/* Password input */}
               <div className="flex items-center border border-gray-600 rounded-md bg-[#1e293b] px-3 py-2">
                 <svg
                   className="h-5 w-5 text-gray-400 mr-3"
@@ -178,7 +205,6 @@ export default function LoginPage() {
                     d="M6 9V7a6 6 0 1112 0v2M5 11h14v10H5z"
                   />
                 </svg>
-
                 <input
                   type={showPassword ? "text" : "password"}
                   name="password"
@@ -188,7 +214,6 @@ export default function LoginPage() {
                   className="bg-transparent w-full focus:outline-none text-white"
                   required
                 />
-
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
@@ -234,6 +259,7 @@ export default function LoginPage() {
                 </button>
               </div>
 
+              {/* Submit */}
               <button
                 type="submit"
                 disabled={loading}
@@ -269,6 +295,7 @@ export default function LoginPage() {
               </button>
             </form>
 
+            {/* OAuth divider */}
             <div className="mt-8">
               <div className="flex items-center text-gray-500 mb-4">
                 <hr className="flex-grow border-gray-700" />
@@ -276,11 +303,55 @@ export default function LoginPage() {
                 <hr className="flex-grow border-gray-700" />
               </div>
 
-              <div className="flex items-center justify-center space-x-4">
-                <div id="googleLoginBtn"></div>
-                <button className="flex-1 py-2 border border-gray-600 rounded-md flex items-center justify-center gap-2 hover:bg-gray-800 transition">
-                  <img src="/apple-icon.png" alt="Apple" className="w-5 h-5" />
-                  <span className="text-gray-300">Apple</span>
+              {/* OAuth buttons */}
+              <div className="flex flex-wrap justify-center gap-4">
+                <button
+                  onClick={handleGoogleLogin}
+                  className="w-1/2 max-w-[180px] py-2 px-4 border border-gray-600 rounded-md flex items-center justify-center gap-2 
+                    bg-[#1e293b] hover:bg-[#243447] transition duration-200 shadow-md"
+                >
+                  {/* Google Icon */}
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 533.5 544.3"
+                    className="w-5 h-5"
+                  >
+                    <path
+                      fill="#4285F4"
+                      d="M533.5 278.4c0-17.4-1.5-34.1-4.5-50.3H272v95.2h146.9c-6.3 34-25 62.9-53.6 82.2l86.6 67.2c50.6-46.6 81.6-115.3 81.6-194.3z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M272 544.3c72.9 0 134.1-24.1 178.8-65.7l-86.6-67.2c-24 16.1-54.7 25.7-92.2 25.7-70.9 0-130.9-47.8-152.4-111.9l-89.4 69c41.8 82.7 128.1 150.1 242.8 150.1z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M119.6 325.2c-10.9-32.6-10.9-67.7 0-100.3l-89.4-69C10.8 201.1 0 238.5 0 278s10.8 76.9 30.2 122.1l89.4-69z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M272 107.7c39.7 0 75.5 13.7 103.6 40.5l77.3-77.3C406.1 24.1 344.9 0 272 0 157.3 0 71 67.4 30.2 155.9l89.4 69c21.5-64.1 81.5-111.9 152.4-111.9z"
+                    />
+                  </svg>
+                  <span className="text-gray-200 font-medium">Google</span>
+                </button>
+
+                <button
+                  className="w-1/2 max-w-[180px] py-2 px-4 border border-gray-600 rounded-md flex items-center justify-center gap-2 
+                    bg-[#1e293b] hover:bg-[#243447] transition duration-200 shadow-md"
+                >
+                  {/* Microsoft Icon */}
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 23 23"
+                    className="w-5 h-5"
+                  >
+                    <rect x="1" y="1" width="9" height="9" fill="#F25022" />
+                    <rect x="13" y="1" width="9" height="9" fill="#7FBA00" />
+                    <rect x="1" y="13" width="9" height="9" fill="#00A4EF" />
+                    <rect x="13" y="13" width="9" height="9" fill="#FFB900" />
+                  </svg>
+                  <span className="text-gray-200 font-medium">Microsoft</span>
                 </button>
               </div>
             </div>

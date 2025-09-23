@@ -5,6 +5,7 @@ import TermsAndConditionPage from "./pages/TermsAndConditionPage";
 import PrivacyPage from "./pages/PrivacyPage";
 import NavbarComponent from "./components/Navbar";
 import HomePage from "./pages/HomePage";
+import AuthCallback from "./pages/AuthCallback";
 import Footer from "./components/Footer";
 import Sidebar from "./components/Sidebar";
 
@@ -39,6 +40,7 @@ function App() {
               }
             />
             <Route path="/dashboard" element={<LoginPage />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
           </Routes>
         </div>
         <Footer />
