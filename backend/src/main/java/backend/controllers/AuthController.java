@@ -17,6 +17,7 @@ import backend.configs.EnvConfig;
 
 // Spring imports
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -37,6 +38,9 @@ import com.google.api.client.json.jackson2.JacksonFactory;
 
 // Other imports
 import jakarta.validation.Valid;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 // Controller listening for /auth routes
 @RestController
@@ -54,33 +58,32 @@ public class AuthController {
         this.env = env;
     }
 
-    /**
-     * Handles user login. It accepts the email and password, validates them,
-     * and returns a JWT token along with user details on success.
-     * 
-     * @param request LoginRequest containing email and password.
-     * @return ResponseEntity containing a JWT token and user information, or a bad
-     *         request message on failure.
-     */
     @PostMapping("/login")
-    public ResponseEntity<?> login(@Valid @RequestBody LoginRequestDto request) {
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequestDto request, HttpServletResponse response) {
         try {
             User user = userService.login(request.getEmail(), request.getPassword());
-            String token = authService.generateToken(user.getId().intValue(), user.getUsertype());
+            Map<String, Object> tokens = authService.generateTokenPair(user.getId().intValue(), user.getUsertype());
+            String refreshToken = (String) tokens.remove("refreshToken");
+            String accessToken = (String) tokens.remove("accessToken");
 
-            return ResponseEntity.ok(new UserResponseDto(token, user.getEmail(), user.getUsertype(), user.getId()));
+            ResponseCookie cookie = ResponseCookie.from("refreshToken", refreshToken)
+                    .httpOnly(true)
+                    .secure(true)
+                    .path("/")
+                    .maxAge(7 * 24 * 60 * 60)
+                    .sameSite("Strict")
+                    .build();
+
+            response.addHeader("Set-Cookie", cookie.toString());
+
+            return ResponseEntity.ok(
+                    new UserResponseDto(accessToken, user.getEmail(), user.getUsertype(), user.getId())
+                );
         } catch (AuthenticationException e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new MessageResponseDto(e.getMessage()));
         }
     }
 
-    /**
-     * Handles user signup. It takes the user's email, password, and usertype,
-     * creates a new user, and returns a success or failure message.
-     * 
-     * @param request SignupRequest containing email, password, and usertype.
-     * @return ResponseEntity with a message indicating success or failure.
-     */
     @PostMapping("/signup")
     public ResponseEntity<?> signup(@Valid @RequestBody SignupRequestDto request) {
         try {
@@ -91,12 +94,43 @@ public class AuthController {
         }
     }
 
-    /**
-     * Deletes a user by their ID.
-     * 
-     * @param id The ID of the user to be deleted.
-     * @return ResponseEntity indicating success or failure of the operation.
-     */
+    @PostMapping("/refresh")
+    public ResponseEntity<?> refreshToken(HttpServletRequest request, HttpServletResponse response) {
+        String refreshToken = null;
+        if (request.getCookies() != null) {
+            for (Cookie cookie : request.getCookies()) {
+                if ("refreshToken".equals(cookie.getName())) {
+                    refreshToken = cookie.getValue();
+                    break;
+                }
+            }
+        }
+
+        if (refreshToken == null || !authService.validateRefreshToken(refreshToken)) {
+            return ResponseEntity.status(401).body(Map.of("error", "Invalid or expired refresh token"));
+        }
+
+        int userId = Integer.parseInt(authService.getClaimFromToken(refreshToken, claims -> claims.getSubject()));
+        String role = authService.getClaimFromToken(refreshToken, claims -> claims.get("role", String.class));
+
+        String newAccessToken = authService.generateAccessToken(userId, role);
+        String newRefreshToken = authService.rotateRefreshToken(refreshToken);
+        ResponseCookie cookie = ResponseCookie.from("refreshToken", newRefreshToken)
+                .httpOnly(true)
+                .secure(true)
+                .path("/")
+                .maxAge(7 * 24 * 60 * 60)
+                .sameSite("Strict")
+                .build();
+        response.addHeader("Set-Cookie", cookie.toString());
+
+        return ResponseEntity.ok(Map.of(
+                "accessToken", newAccessToken,
+                "tokenType", "Bearer",
+                "expiresIn", env.getJwtValidity()
+        ));
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<?> deleteUser(@PathVariable long id) {
         try {
@@ -107,13 +141,6 @@ public class AuthController {
         }
     }
 
-    /**
-     * Changes the password of a user by their ID.
-     * 
-     * @param id      The ID of the user whose password is to be changed.
-     * @param request PasswordChangeRequest containing the new password.
-     * @return ResponseEntity indicating success or failure of the password change.
-     */
     @PutMapping("/change-password/{id}")
     public ResponseEntity<?> changePassword(@PathVariable long id, @RequestBody PasswordChangeRequestDto request) {
         try {
@@ -150,16 +177,11 @@ public class AuthController {
 
         User user = userService.loginOrSignupGoogle(email);
 
-        String jwt = authService.generateToken(user.getId().intValue(), user.getUsertype() != null ? user.getUsertype() : "USER");
+        String jwt = authService.generateAccessToken(user.getId().intValue(), user.getUsertype() != null ? user.getUsertype() : "USER");
 
         return ResponseEntity.ok(new UserResponseDto(jwt, user.getEmail(), user.getUsertype(), user.getId()));
     }
 
-    /**
-     * A simple test endpoint to return a greeting message for authorized users.
-     * 
-     * @return A greeting message.
-     */
     @GetMapping("/hello")
     public String Hello() {
         return "hello authorized user!";

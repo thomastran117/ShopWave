@@ -20,6 +20,7 @@ public class EnvConfig {
     // JWT
     private String jwtSecret;
     private long jwtValidity;
+    private long jwtRefreshValidity;
 
     // Google
     private String googleClientId;
@@ -48,6 +49,9 @@ public class EnvConfig {
 
     public long getJwtValidity() { return jwtValidity; }
     public void setJwtValidity(long jwtValidity) { this.jwtValidity = jwtValidity; }
+
+    public long getJwtRefreshValidity() { return jwtRefreshValidity; }
+    public void setJwtRefreshValidityy(long jwtRefreshValidity) { this.jwtRefreshValidity = jwtRefreshValidity; }
 
     public String getGoogleClientId() { return googleClientId; }
     public void setGoogleClientId(String googleClientId) { this.googleClientId = googleClientId; }
