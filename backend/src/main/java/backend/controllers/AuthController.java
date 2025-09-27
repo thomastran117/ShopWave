@@ -152,7 +152,7 @@ public class AuthController {
     }
 
     @PostMapping("/google")
-    public ResponseEntity<?> googleLogin(@RequestBody Map<String, String> body) throws Exception {
+    public ResponseEntity<?> googleLogin(@RequestBody Map<String, String> body, HttpServletResponse response) throws Exception {
         String idTokenString = body.get("idToken");
         if (idTokenString == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "Missing idToken"));
@@ -176,10 +176,23 @@ public class AuthController {
         }
 
         User user = userService.loginOrSignupGoogle(email);
+        Map<String, Object> tokens = authService.generateTokenPair(user.getId().intValue(), user.getUsertype());
+        String refreshToken = (String) tokens.remove("refreshToken");
+        String accessToken = (String) tokens.remove("accessToken");
 
-        String jwt = authService.generateAccessToken(user.getId().intValue(), user.getUsertype() != null ? user.getUsertype() : "USER");
+        ResponseCookie cookie = ResponseCookie.from("refreshToken", refreshToken)
+                .httpOnly(true)
+                .secure(true)
+                .path("/")
+                .maxAge(7 * 24 * 60 * 60)
+                .sameSite("Strict")
+                .build();
 
-        return ResponseEntity.ok(new UserResponseDto(jwt, user.getEmail(), user.getUsertype(), user.getId()));
+        response.addHeader("Set-Cookie", cookie.toString());
+
+        return ResponseEntity.ok(
+                new UserResponseDto(accessToken, user.getEmail(), user.getUsertype(), user.getId())
+            );
     }
 
     @GetMapping("/hello")

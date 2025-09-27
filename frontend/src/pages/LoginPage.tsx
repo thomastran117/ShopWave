@@ -1,5 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useDispatch, useSelector  } from "react-redux";
+import { setCredentials } from "../stores/authSlice";
+import type { AppDispatch } from "../stores";
 import axios from "axios";
 import "../styles/login.css";
 
@@ -7,6 +10,7 @@ const images = ["/carousel1.jpg", "/carousel2.jpg", "/carousel3.jpg"];
 
 const api = axios.create({
   baseURL: "http://localhost:8090/api",
+  withCredentials: true,
 });
 
 export default function LoginPage() {
@@ -15,6 +19,8 @@ export default function LoginPage() {
   const [slide, setSlide] = useState(0);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const dispatch = useDispatch<AppDispatch>();
+  const authState = useSelector((state: RootState) => state.auth);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -29,7 +35,9 @@ export default function LoginPage() {
         email: formData.username,
         password: formData.password,
       });
-      localStorage.setItem("token", res.data.token);
+      const { token, email, usertype } = res.data;
+      dispatch(setCredentials({ accessToken: token, email, role: usertype }));
+
       navigate("/dashboard");
     } catch (err) {
       console.error("Login failed", err);
@@ -82,7 +90,8 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await api.post("/auth/google", { idToken });
-      localStorage.setItem("token", res.data.accessToken);
+      const { token, email, usertype } = res.data;
+      dispatch(setCredentials({ accessToken: token, email, role: usertype }));
       navigate("/dashboard");
     } catch (err) {
       console.error("Google login failed", err);
@@ -98,6 +107,12 @@ export default function LoginPage() {
     return () => clearInterval(interval);
   }, []);
 
+    useEffect(() => {
+    if (authState.accessToken) {
+      console.log("✅ Redux updated:", authState);
+      navigate("/dashboard");
+    }
+  }, [authState, navigate]);
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#0a0f1c] via-[#111827] to-[#0d1a2f] flex items-center justify-center px-4 py-10">
       <div

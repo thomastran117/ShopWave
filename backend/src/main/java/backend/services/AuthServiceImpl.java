@@ -24,8 +24,6 @@ public class AuthServiceImpl implements Serializable {
         this.env = env;
     }
 
-    // ------------------- TOKEN EXTRACTION -------------------
-
     public int getUserIdFromToken(HttpServletRequest request) {
         String token = request.getHeader("Authorization");
         if (token == null || !token.startsWith("Bearer ")) {
@@ -47,8 +45,6 @@ public class AuthServiceImpl implements Serializable {
                 .getBody();
     }
 
-    // ------------------- ACCESS TOKEN -------------------
-
     public String generateAccessToken(int userId, String role) {
         return Jwts.builder()
                 .setSubject(String.valueOf(userId))
@@ -58,8 +54,6 @@ public class AuthServiceImpl implements Serializable {
                 .signWith(SignatureAlgorithm.HS512, env.getJwtSecret())
                 .compact();
     }
-
-    // ------------------- REFRESH TOKEN -------------------
 
     public String generateRefreshToken(int userId) {
         return Jwts.builder()
@@ -89,7 +83,6 @@ public class AuthServiceImpl implements Serializable {
                 .signWith(SignatureAlgorithm.HS512, env.getJwtSecret())
                 .compact();
     }
-    // ------------------- AUTHENTICATION -------------------
 
     public Authentication getAuthentication(String token) {
         Claims claims = getAllClaimsFromToken(token);

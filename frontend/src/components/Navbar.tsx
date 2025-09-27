@@ -1,22 +1,26 @@
 import React, { useState } from "react";
 import { FaSearch, FaUserCircle } from "react-icons/fa";
-import { useAuth } from "../stores/AuthStore";
 import { useNavigate, NavLink } from "react-router-dom";
+import { useSelector, useDispatch } from "react-redux";
+import type { RootState, AppDispatch } from "../stores";
+import { clearCredentials } from "../stores/authSlice";
 
 const NavbarComponent: React.FC = () => {
-  const { username, logout } = useAuth();
   const navigate = useNavigate();
+  const dispatch = useDispatch<AppDispatch>();
+
+  const { accessToken, email } = useSelector(
+    (state: RootState) => state.auth
+  );
+
+  const username = email ?? null;
 
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [moreDropdownOpen, setMoreDropdownOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const [moreTimeoutId, setMoreTimeoutId] = useState<NodeJS.Timeout | null>(
-    null
-  );
-  const [userTimeoutId, setUserTimeoutId] = useState<NodeJS.Timeout | null>(
-    null
-  );
+  const [moreTimeoutId, setMoreTimeoutId] = useState<NodeJS.Timeout | null>(null);
+  const [userTimeoutId, setUserTimeoutId] = useState<NodeJS.Timeout | null>(null);
 
   const handleMoreEnter = () => {
     if (moreTimeoutId) {
@@ -50,7 +54,11 @@ const NavbarComponent: React.FC = () => {
 
   const handleLogout = () => {
     setUserDropdownOpen(false);
-    logout();
+
+    dispatch(clearCredentials());
+
+    // await api.post("/auth/logout");
+
     navigate("/auth");
   };
 
@@ -101,7 +109,9 @@ const NavbarComponent: React.FC = () => {
 
           {/* Nav links */}
           <div
-            className={`lg:flex lg:items-center ${mobileMenuOpen ? "block" : "hidden"} w-full lg:w-auto`}
+            className={`lg:flex lg:items-center ${
+              mobileMenuOpen ? "block" : "hidden"
+            } w-full lg:w-auto`}
           >
             <div className="flex flex-col lg:flex-row lg:space-x-4 mt-4 lg:mt-0">
               <NavLink to="/" end className={navLinkClass}>
@@ -139,7 +149,7 @@ const NavbarComponent: React.FC = () => {
                       { label: "Guide", to: "/guide" },
                       { label: "About", to: "/about" },
                       { label: "Contact", to: "/contact", divider: true },
-                    ].map((item, index) => (
+                    ].map((item) => (
                       <React.Fragment key={item.label}>
                         {item.divider && (
                           <hr className="my-1 border-gray-200" />
@@ -176,7 +186,7 @@ const NavbarComponent: React.FC = () => {
 
             {/* User/Login */}
             <div className="relative mt-4 lg:mt-0 lg:ml-6">
-              {username ? (
+              {accessToken ? (
                 <div
                   onMouseEnter={handleUserEnter}
                   onMouseLeave={handleUserLeave}
