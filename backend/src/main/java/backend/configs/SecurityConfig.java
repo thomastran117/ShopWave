@@ -1,6 +1,9 @@
 package backend.configs;
 
+import backend.utilities.HttpLogger;
 import backend.middlewares.JwtAuthFilter;
+import jakarta.servlet.http.HttpServletResponse;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -41,6 +44,17 @@ public class SecurityConfig {
             );
 
         http.addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+
+        http
+        .exceptionHandling()
+            .authenticationEntryPoint((req, res, ex) -> {
+                HttpLogger.log(req, HttpServletResponse.SC_UNAUTHORIZED, 0);
+                res.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized");
+            })
+            .accessDeniedHandler((req, res, ex) -> {
+                HttpLogger.log(req, HttpServletResponse.SC_FORBIDDEN, 0);
+                res.sendError(HttpServletResponse.SC_FORBIDDEN, "Forbidden");
+            });
 
         return http.build();
     }
