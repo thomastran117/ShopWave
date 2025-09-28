@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDispatch, useSelector  } from "react-redux";
 import { setCredentials } from "../stores/authSlice";
-import type { AppDispatch } from "../stores";
+import type { AppDispatch, RootState } from "../stores";
 import axios from "axios";
 import "../styles/login.css";
 
@@ -63,7 +63,6 @@ export default function LoginPage() {
 
     const url = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 
-    // popup positioning
     const width = 600;
     const height = 700;
     const left = window.screenX + (window.outerWidth - width) / 2;

@@ -146,7 +146,7 @@ const NavbarComponent: React.FC = () => {
                   <div className="absolute mt-2 w-44 bg-white text-black rounded-lg shadow-xl z-20 border border-gray-200">
                     {[
                       { label: "Profiles", to: "/profiles" },
-                      { label: "Guide", to: "/guide" },
+                      { label: "Hello", to: "/hello" },
                       { label: "About", to: "/about" },
                       { label: "Contact", to: "/contact", divider: true },
                     ].map((item) => (

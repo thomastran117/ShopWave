@@ -18,11 +18,21 @@ const authSlice = createSlice({
   reducers: {
     setCredentials: (
       state,
-      action: PayloadAction<{ accessToken: string; email: string; role: string }>
+      action: PayloadAction<{
+        accessToken?: string | null;
+        email?: string | null;
+        role?: string | null;
+      }>
     ) => {
-      state.accessToken = action.payload.accessToken;
-      state.email = action.payload.email;
-      state.role = action.payload.role;
+      if (action.payload.accessToken !== undefined) {
+        state.accessToken = action.payload.accessToken;
+      }
+      if (action.payload.email !== undefined) {
+        state.email = action.payload.email;
+      }
+      if (action.payload.role !== undefined) {
+        state.role = action.payload.role;
+      }
     },
     clearCredentials: (state) => {
       state.accessToken = null;

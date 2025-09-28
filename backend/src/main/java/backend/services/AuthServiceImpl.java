@@ -4,6 +4,9 @@ import backend.configs.EnvConfig;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.io.Decoders;
+import io.jsonwebtoken.security.Keys;
+import java.security.Key;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -12,6 +15,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.stereotype.Component;
 
 import java.io.Serializable;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.function.Function;
 
@@ -38,52 +42,6 @@ public class AuthServiceImpl implements Serializable {
         return claimsResolver.apply(claims);
     }
 
-    public Claims getAllClaimsFromToken(String token) {
-        return Jwts.parser()
-                .setSigningKey(env.getJwtSecret())
-                .parseClaimsJws(token)
-                .getBody();
-    }
-
-    public String generateAccessToken(int userId, String role) {
-        return Jwts.builder()
-                .setSubject(String.valueOf(userId))
-                .claim("role", role)
-                .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + env.getJwtValidity() * 1000)) // e.g. 15min - 1hr
-                .signWith(SignatureAlgorithm.HS512, env.getJwtSecret())
-                .compact();
-    }
-
-    public String generateRefreshToken(int userId) {
-        return Jwts.builder()
-                .setSubject(String.valueOf(userId))
-                .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + env.getJwtRefreshValidity() * 1000)) // e.g. days
-                .signWith(SignatureAlgorithm.HS512, env.getJwtSecret())
-                .compact();
-    }
-
-    public boolean validateRefreshToken(String token) {
-        try {
-            getAllClaimsFromToken(token);
-            return true;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    public String rotateRefreshToken(String oldToken) {
-        Claims claims = getAllClaimsFromToken(oldToken);
-
-        return Jwts.builder()
-                .setSubject(claims.getSubject())
-                .setIssuedAt(new Date())
-                .setExpiration(claims.getExpiration())
-                .signWith(SignatureAlgorithm.HS512, env.getJwtSecret())
-                .compact();
-    }
-
     public Authentication getAuthentication(String token) {
         Claims claims = getAllClaimsFromToken(token);
         int userId = Integer.parseInt(claims.getSubject());
@@ -97,9 +55,74 @@ public class AuthServiceImpl implements Serializable {
         return new UsernamePasswordAuthenticationToken(userId, null, authorities);
     }
 
+    private Key getSigningKey() {
+        String secret = env.getJwtSecret();
+        byte[] keyBytes;
+
+        try {
+            keyBytes = Decoders.BASE64.decode(secret);
+        } catch (IllegalArgumentException e) {
+            keyBytes = secret.getBytes(StandardCharsets.UTF_8);
+        }
+
+        return Keys.hmacShaKeyFor(keyBytes);
+    }
+
+    public Claims getAllClaimsFromToken(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(getSigningKey())
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+    }
+
+    public String generateAccessToken(int userId, String role) {
+        return Jwts.builder()
+                .setSubject(String.valueOf(userId))
+                .claim("role", role)
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + 15 * 60 * 1000L))
+                .signWith(getSigningKey(), SignatureAlgorithm.HS512)
+                .compact();
+    }
+
+    public String generateRefreshToken(int userId, String role) {
+        return Jwts.builder()
+                .setSubject(String.valueOf(userId))
+                .claim("role", role)
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + 7 * 24 * 60 * 60 * 1000L))
+                .signWith(getSigningKey(), SignatureAlgorithm.HS512)
+                .compact();
+    }
+
+    public boolean validateRefreshToken(String token) {
+    try {
+        getAllClaimsFromToken(token);
+        return true;
+    } catch (io.jsonwebtoken.ExpiredJwtException e) {
+        return false;
+    } catch (Exception e) {
+        e.printStackTrace();
+        return false;
+    }
+}
+    public String rotateRefreshToken(String oldToken) {
+        Claims claims = getAllClaimsFromToken(oldToken);
+        String role = claims.get("role", String.class);
+
+        return Jwts.builder()
+                .setSubject(claims.getSubject())
+                .claim("role", role)
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + env.getJwtRefreshValidity() * 1000L))
+                .signWith(getSigningKey(), SignatureAlgorithm.HS512)
+                .compact();
+    }
+
     public Map<String, Object> generateTokenPair(int userId, String role) {
         String accessToken = generateAccessToken(userId, role);
-        String refreshToken = generateRefreshToken(userId);
+        String refreshToken = generateRefreshToken(userId, role);
 
         Map<String, Object> tokens = new HashMap<>();
         tokens.put("accessToken", accessToken);

@@ -6,6 +6,7 @@ import java.util.Collections;
 // Import java classes
 import backend.interfaces.UserService;
 import backend.services.AuthServiceImpl;
+import io.jsonwebtoken.Claims;
 import backend.models.User;
 import backend.dtos.MessageResponseDto;
 import backend.dtos.LoginRequestDto;
@@ -67,12 +68,12 @@ public class AuthController {
             String accessToken = (String) tokens.remove("accessToken");
 
             ResponseCookie cookie = ResponseCookie.from("refreshToken", refreshToken)
-                    .httpOnly(true)
-                    .secure(true)
-                    .path("/")
-                    .maxAge(7 * 24 * 60 * 60)
-                    .sameSite("Strict")
-                    .build();
+                .httpOnly(true)
+                .secure(false)
+                .sameSite("Lax")
+                .path("/")
+                .maxAge(7 * 24 * 60 * 60)
+                .build();
 
             response.addHeader("Set-Cookie", cookie.toString());
 
@@ -81,16 +82,6 @@ public class AuthController {
                 );
         } catch (AuthenticationException e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new MessageResponseDto(e.getMessage()));
-        }
-    }
-
-    @PostMapping("/signup")
-    public ResponseEntity<?> signup(@Valid @RequestBody SignupRequestDto request) {
-        try {
-            userService.signup(request.getEmail(), request.getPassword(), request.getUsertype());
-            return ResponseEntity.status(HttpStatus.CREATED).body(new MessageResponseDto("New user created"));
-        } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(new MessageResponseDto(e.getMessage()));
         }
     }
 
@@ -107,21 +98,24 @@ public class AuthController {
         }
 
         if (refreshToken == null || !authService.validateRefreshToken(refreshToken)) {
-            return ResponseEntity.status(401).body(Map.of("error", "Invalid or expired refresh token"));
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Invalid or expired refresh token"));
         }
 
-        int userId = Integer.parseInt(authService.getClaimFromToken(refreshToken, claims -> claims.getSubject()));
+        int userId = Integer.parseInt(authService.getClaimFromToken(refreshToken, Claims::getSubject));
         String role = authService.getClaimFromToken(refreshToken, claims -> claims.get("role", String.class));
 
         String newAccessToken = authService.generateAccessToken(userId, role);
         String newRefreshToken = authService.rotateRefreshToken(refreshToken);
+
         ResponseCookie cookie = ResponseCookie.from("refreshToken", newRefreshToken)
-                .httpOnly(true)
-                .secure(true)
-                .path("/")
-                .maxAge(7 * 24 * 60 * 60)
-                .sameSite("Strict")
-                .build();
+            .httpOnly(true)
+            .secure(false)
+            .sameSite("Lax")
+            .path("/")
+            .maxAge(7 * 24 * 60 * 60)
+            .build();
+
         response.addHeader("Set-Cookie", cookie.toString());
 
         return ResponseEntity.ok(Map.of(
@@ -177,16 +171,17 @@ public class AuthController {
 
         User user = userService.loginOrSignupGoogle(email);
         Map<String, Object> tokens = authService.generateTokenPair(user.getId().intValue(), user.getUsertype());
+
         String refreshToken = (String) tokens.remove("refreshToken");
         String accessToken = (String) tokens.remove("accessToken");
 
         ResponseCookie cookie = ResponseCookie.from("refreshToken", refreshToken)
-                .httpOnly(true)
-                .secure(true)
-                .path("/")
-                .maxAge(7 * 24 * 60 * 60)
-                .sameSite("Strict")
-                .build();
+            .httpOnly(true)
+            .secure(false)
+            .sameSite("Lax")
+            .path("/")
+            .maxAge(7 * 24 * 60 * 60)
+            .build();
 
         response.addHeader("Set-Cookie", cookie.toString());
 

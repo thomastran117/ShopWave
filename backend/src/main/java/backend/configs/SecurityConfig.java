@@ -1,31 +1,27 @@
 package backend.configs;
 
-import backend.services.AuthServiceImpl;
+import backend.middlewares.JwtAuthFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
-import jakarta.servlet.FilterChain;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.http.HttpStatus;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.web.filter.OncePerRequestFilter;
 
-import java.io.IOException;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 @Configuration
-public class SecurityConfig extends OncePerRequestFilter {
+@EnableWebSecurity
+public class SecurityConfig {
 
-    private final AuthServiceImpl jwtTokenService;
+    private final JwtAuthFilter jwtAuthFilter;
 
-    public SecurityConfig(AuthServiceImpl jwtTokenService) {
-        this.jwtTokenService = jwtTokenService;
+    public SecurityConfig(JwtAuthFilter jwtAuthFilter) {
+        this.jwtAuthFilter = jwtAuthFilter;
     }
 
     @Bean
@@ -33,49 +29,31 @@ public class SecurityConfig extends OncePerRequestFilter {
         return new BCryptPasswordEncoder();
     }
 
-    @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
-            throws ServletException, IOException {
-        try {
-            final String token = request.getHeader("Authorization");
-
-            if (token != null && token.startsWith("Bearer ")) {
-                String tokenWithoutBearer = token.substring(7);
-                Authentication authentication = jwtTokenService.getAuthentication(tokenWithoutBearer);
-                SecurityContextHolder.getContext().setAuthentication(authentication);
-            }
-        } catch (Exception e) {
-            response.setStatus(HttpStatus.UNAUTHORIZED.value());
-            response.getWriter().write("Invalid or expired token");
-            return;
-        }
-        filterChain.doFilter(request, response);
-    }
-
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-        http.addFilterBefore(this, UsernamePasswordAuthenticationFilter.class);
+        http.csrf().disable()
+            .cors().and()
+            .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            .and()
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/health", "/auth/login", "/auth/signup", "/auth/google", "/auth/refresh").permitAll()
+                .anyRequest().authenticated()
+            );
 
-        http.authorizeHttpRequests(auth -> auth
-                .requestMatchers("/health","/auth/login", "/auth/signup", "/auth/google").permitAll()
-                .anyRequest().authenticated());
-
-        http.cors().and()
-                .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS)
-                .and().csrf().disable();
+        http.addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
 
     @Bean
-    public org.springframework.web.cors.CorsConfigurationSource corsConfigurationSource() {
-        org.springframework.web.cors.CorsConfiguration corsConfig = new org.springframework.web.cors.CorsConfiguration();
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration corsConfig = new CorsConfiguration();
+        corsConfig.setAllowCredentials(true);
         corsConfig.addAllowedOrigin("http://localhost:3090");
         corsConfig.addAllowedMethod("*");
         corsConfig.addAllowedHeader("*");
-        corsConfig.setAllowCredentials(true);
 
-        org.springframework.web.cors.UrlBasedCorsConfigurationSource source = new org.springframework.web.cors.UrlBasedCorsConfigurationSource();
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", corsConfig);
 
         return source;
