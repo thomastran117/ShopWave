@@ -37,11 +37,9 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    // Handle both 401 and 403
     const status = error.response?.status;
     if ((status === 401 || status === 403) && !originalRequest._retry) {
       if (isRefreshing) {
-        // Queue requests while refresh is in progress
         return new Promise(function (resolve, reject) {
           failedQueue.push({ resolve, reject });
         })
@@ -60,7 +58,7 @@ api.interceptors.response.use(
       try {
         const resp = await axios.post(
           "http://localhost:8090/api/auth/refresh",
-          {}, // empty body
+          {},
           { withCredentials: true }
         );
 

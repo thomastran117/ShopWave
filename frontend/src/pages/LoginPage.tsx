@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useDispatch, useSelector  } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import { setCredentials } from "../stores/authSlice";
 import type { AppDispatch, RootState } from "../stores";
 import axios from "axios";
@@ -106,7 +106,7 @@ export default function LoginPage() {
     return () => clearInterval(interval);
   }, []);
 
-    useEffect(() => {
+  useEffect(() => {
     if (authState.accessToken) {
       console.log("✅ Redux updated:", authState);
       navigate("/dashboard");

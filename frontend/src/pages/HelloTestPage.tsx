@@ -1,5 +1,5 @@
 import { useState } from "react";
-import api from "../api"; 
+import api from "../api";
 import { useSelector } from "react-redux";
 import type { RootState } from "../stores";
 
@@ -17,28 +17,29 @@ export default function HelloTestPage() {
       const resp = await api.get("/auth/hello");
       setMessage(resp.data);
     } catch (err: any) {
-  console.error(err);
+      console.error(err);
 
-  let msg = "Request failed";
-  if (err.response) {
-    if (typeof err.response.data === "string") {
-      msg = err.response.data;
-    } else if (err.response.data?.error) {
-      msg = err.response.data.error;
-    } else {
-      msg = JSON.stringify(err.response.data); // fallback
-    }
+      let msg = "Request failed";
+      if (err.response) {
+        if (typeof err.response.data === "string") {
+          msg = err.response.data;
+        } else if (err.response.data?.error) {
+          msg = err.response.data.error;
+        } else {
+          msg = JSON.stringify(err.response.data); // fallback
+        }
 
-    if (err.response.status === 401) {
-      msg = "⚠️ Unauthorized: token missing, expired, or invalid.";
-    } else if (err.response.status === 403) {
-      msg = "🚫 Forbidden: you don’t have permission to access this resource.";
-    }
-  } else if (err.message) {
-    msg = err.message;
-  }
+        if (err.response.status === 401) {
+          msg = "⚠️ Unauthorized: token missing, expired, or invalid.";
+        } else if (err.response.status === 403) {
+          msg =
+            "🚫 Forbidden: you don’t have permission to access this resource.";
+        }
+      } else if (err.message) {
+        msg = err.message;
+      }
 
-  setError(msg);
+      setError(msg);
     }
   };
 
@@ -73,9 +74,7 @@ export default function HelloTestPage() {
       {message && (
         <p className="mt-4 p-2 bg-green-800 rounded-lg">✅ {message}</p>
       )}
-      {error && (
-        <p className="mt-4 p-2 bg-red-800 rounded-lg">❌ {error}</p>
-      )}
+      {error && <p className="mt-4 p-2 bg-red-800 rounded-lg">❌ {error}</p>}
     </div>
   );
 }

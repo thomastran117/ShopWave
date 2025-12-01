@@ -36,14 +36,20 @@ export default function AuthCallback() {
               <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-blue-500 to-blue-300 flex items-center justify-center animate-bounce shadow-lg shadow-blue-500/30">
                 <span className="text-4xl">🤖</span>
               </div>
-              <CheckCircle className="absolute -bottom-2 -right-2 text-green-400 bg-black rounded-full" size={24} />
+              <CheckCircle
+                className="absolute -bottom-2 -right-2 text-green-400 bg-black rounded-full"
+                size={24}
+              />
             </div>
           ) : (
             <div className="relative">
               <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-red-600 to-red-400 flex items-center justify-center animate-pulse shadow-lg shadow-red-600/30">
                 <span className="text-4xl">🤖</span>
               </div>
-              <XCircle className="absolute -bottom-2 -right-2 text-red-400 bg-black rounded-full" size={24} />
+              <XCircle
+                className="absolute -bottom-2 -right-2 text-red-400 bg-black rounded-full"
+                size={24}
+              />
             </div>
           )}
         </div>

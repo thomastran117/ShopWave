@@ -4,14 +4,13 @@ import { useNavigate, NavLink } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
 import type { RootState, AppDispatch } from "../stores";
 import { clearCredentials } from "../stores/authSlice";
+import "../styles/navbar.css";
 
-const NavbarComponent: React.FC = () => {
+export default function Navbar() {
   const navigate = useNavigate();
   const dispatch = useDispatch<AppDispatch>();
 
-  const { accessToken, email } = useSelector(
-    (state: RootState) => state.auth
-  );
+  const { accessToken, email } = useSelector((state: RootState) => state.auth);
 
   const username = email ?? null;
 
@@ -19,8 +18,12 @@ const NavbarComponent: React.FC = () => {
   const [moreDropdownOpen, setMoreDropdownOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const [moreTimeoutId, setMoreTimeoutId] = useState<NodeJS.Timeout | null>(null);
-  const [userTimeoutId, setUserTimeoutId] = useState<NodeJS.Timeout | null>(null);
+  const [moreTimeoutId, setMoreTimeoutId] = useState<NodeJS.Timeout | null>(
+    null
+  );
+  const [userTimeoutId, setUserTimeoutId] = useState<NodeJS.Timeout | null>(
+    null
+  );
 
   const handleMoreEnter = () => {
     if (moreTimeoutId) {
@@ -63,12 +66,10 @@ const NavbarComponent: React.FC = () => {
   };
 
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-    `px-3 py-2 rounded hover:text-blue-400 ${
-      isActive ? "text-blue-400 font-semibold" : "text-gray-300"
-    }`;
+    `nav-link px-3 py-2 rounded ${isActive ? "active font-semibold" : ""}`;
 
   return (
-    <nav className="bg-[#212529] text-white shadow-sm sticky top-0 z-50">
+    <nav className="bg-gradient-to-r from-[#0b1221]/95 via-[#16213d]/95 to-[#1d3a75]/95 backdrop-blur-sm text-white shadow-lg sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16 items-center">
           {/* Brand */}
@@ -244,6 +245,4 @@ const NavbarComponent: React.FC = () => {
       </div>
     </nav>
   );
-};
-
-export default NavbarComponent;
+}

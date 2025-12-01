@@ -5,7 +5,7 @@ const Footer: React.FC = () => {
   const currentYear = new Date().getFullYear();
 
   return (
-    <footer className="bg-[#212529] text-gray-300 pt-8 pb-6 mt-auto">
+    <footer className="bg-gradient-to-r from-[#0b1221]/95 via-[#16213d]/95 to-[#1d3a75]/95 backdrop-blur-sm text-gray-300 pt-8 pb-6 mt-auto">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex flex-wrap -mx-4 mb-8">
           {/* ClubXperience Info */}
