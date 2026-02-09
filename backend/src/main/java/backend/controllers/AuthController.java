@@ -12,7 +12,8 @@ import backend.dtos.MessageResponseDto;
 import backend.dtos.LoginRequestDto;
 import backend.dtos.SignupRequestDto;
 import backend.dtos.UserResponseDto;
-import backend.exceptions.AuthenticationException;
+import backend.exceptions.AppHttpException;
+import backend.exceptions.InternalServerErrorException;
 import backend.dtos.PasswordChangeRequestDto;
 import backend.configs.EnvConfig;
 
@@ -80,8 +81,10 @@ public class AuthController {
             return ResponseEntity.ok(
                     new UserResponseDto(accessToken, user.getEmail(), user.getUsertype(), user.getId())
                 );
-        } catch (AuthenticationException e) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new MessageResponseDto(e.getMessage()));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
         }
     }
 
@@ -130,8 +133,10 @@ public class AuthController {
         try {
             userService.delete(id);
             return ResponseEntity.ok(new MessageResponseDto("User deleted successfully."));
-        } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new MessageResponseDto(e.getMessage()));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
         }
     }
 
@@ -140,8 +145,10 @@ public class AuthController {
         try {
             userService.changePassword(id, request.getNewPassword());
             return ResponseEntity.ok(new MessageResponseDto("Password changed successfully."));
-        } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new MessageResponseDto(e.getMessage()));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
         }
     }
 

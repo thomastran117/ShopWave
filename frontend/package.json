@@ -17,15 +17,18 @@
     "axios": "^1.11.0",
     "framer-motion": "^12.23.12",
     "lucide-react": "^0.514.0",
+    "path": "^0.12.7",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-icons": "^5.5.0",
     "react-redux": "^9.2.0",
     "react-router-dom": "^7.6.2",
-    "tailwindcss": "^4.1.8"
+    "tailwindcss": "^4.1.8",
+    "url": "^0.11.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.25.0",
+    "@types/node": "^25.2.0",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",

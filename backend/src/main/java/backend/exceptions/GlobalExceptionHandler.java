@@ -1,51 +1,60 @@
 package backend.exceptions;
 
+import backend.dtos.ErrorResponseDto;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 
-import backend.dtos.MessageResponseDto;
-
-import org.springframework.web.bind.annotation.ControllerAdvice;
-
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @ControllerAdvice
 public class GlobalExceptionHandler {
 
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, String>> handleValidationExceptions(MethodArgumentNotValidException ex) {
-        Map<String, String> errors = new HashMap<>();
-        ex.getBindingResult().getAllErrors().forEach(error -> {
-            String fieldName = ((FieldError) error).getField();
-            String message = error.getDefaultMessage();
-            errors.put(fieldName, message);
+    public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException ex) {
+        Map<String, String> fields = new LinkedHashMap<>();
+        ex.getBindingResult().getAllErrors().forEach(err -> {
+            String fieldName = err instanceof FieldError fe ? fe.getField() : err.getObjectName();
+            fields.put(fieldName, err.getDefaultMessage());
         });
-        return new ResponseEntity<>(errors, HttpStatus.BAD_REQUEST);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", HttpStatus.BAD_REQUEST.value());
+        body.put("message", "Validation failed");
+        body.put("detail", "One or more fields are invalid.");
+        body.put("errors", fields);
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
-    @ExceptionHandler(ResourceNotFoundException.class)
-    public ResponseEntity<MessageResponseDto> handleNotFound(ResourceNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new MessageResponseDto(ex.getMessage()));
-    }
-
-    @ExceptionHandler(ConflictException.class)
-    public ResponseEntity<MessageResponseDto> handleConflict(ConflictException ex) {
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(new MessageResponseDto(ex.getMessage()));
-    }
-
-    @ExceptionHandler(BadRequestException.class)
-    public ResponseEntity<MessageResponseDto> handleBadRequest(BadRequestException ex) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new MessageResponseDto(ex.getMessage()));
+    @ExceptionHandler(AppHttpException.class)
+    public ResponseEntity<ErrorResponseDto> handleAppHttpError(AppHttpException ex) {
+        ErrorResponseDto body = new ErrorResponseDto(
+                ex.getStatus().value(),
+                ex.getMessage(),
+                ex.getDetail()
+        );
+        return ResponseEntity.status(ex.getStatus()).body(body);
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<MessageResponseDto> handleGeneral(Exception ex) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(new MessageResponseDto("An unexpected error occurred."));
-    }
+    public ResponseEntity<ErrorResponseDto> handleUnknown(Exception ex) {
+        log.error("Unhandled exception", ex);
 
+        ErrorResponseDto body = new ErrorResponseDto(
+                HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                "Internal server error",
+                "An unexpected error occurred."
+        );
+
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
+    }
 }

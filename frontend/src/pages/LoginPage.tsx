@@ -48,7 +48,7 @@ export default function LoginPage() {
 
   const handleGoogleLogin = () => {
     const clientId =
-      "770432614028-91g7hj1jsvdsqn60m7hv9baqued0k1lf.apps.googleusercontent.com";
+      "199609700164-qjnh0va1o1l6a87vac4lmro1j6kfqhnq.apps.googleusercontent.com";
     const redirectUri = "http://localhost:3090/auth/callback";
     const scope = "openid email profile";
 

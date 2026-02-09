@@ -4,9 +4,9 @@ import java.util.Optional;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import backend.exceptions.AuthenticationException;
 import backend.exceptions.ConflictException;
 import backend.exceptions.ResourceNotFoundException;
+import backend.exceptions.UnauthorizedException;
 import backend.interfaces.UserService;
 import backend.models.User;
 import backend.repositories.UserRepository;
@@ -27,11 +27,11 @@ public class UserServiceImpl implements UserService {
         Optional<User> user = userRepository.findByEmail(email);
 
         if (user.isEmpty()) {
-            throw new AuthenticationException("User doesn't exist");
+            throw new UnauthorizedException("User doesn't exist");
         }
 
         if (!passwordEncoder.matches(password, user.get().getPassword())) {
-            throw new AuthenticationException("Invalid username or password");
+            throw new UnauthorizedException("Invalid username or password");
         }
 
         return user.get();
