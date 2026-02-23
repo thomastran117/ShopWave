@@ -1,5 +1,8 @@
 # 🛒 ShopWave
 
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Version](https://img.shields.io/badge/version-1.0.0-green.svg)
+
 A full-stack e-commerce web application inspired by Amazon, built with a modern Java/React tech stack. ShopWave allows users to browse products, manage a cart, place orders, and more — all in a clean, responsive storefront experience.
 
 ---
