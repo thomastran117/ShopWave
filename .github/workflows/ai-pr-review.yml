@@ -72,7 +72,7 @@ jobs:
                     role: "user",
                     content: [
                       {
-                        input_text: "text",
+                        type: "input_text",
                         text:
                           `PR Title: ${context.payload.pull_request.title}\n` +
                           `PR Author: ${context.payload.pull_request.user.login}\n\n` +
