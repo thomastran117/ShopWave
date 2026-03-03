@@ -16,9 +16,14 @@ public class EnvironmentSetting {
     private final Redis redis = new Redis();
     private final Database database = new Database();
     private final Cache cache = new Cache();
+    private final Recaptcha recaptcha = new Recaptcha();
 
     public Cors getCors() {
         return cors;
+    }
+
+    public Recaptcha getRecaptcha() {
+        return recaptcha;
     }
 
     public Security getSecurity() {
@@ -59,6 +64,7 @@ public class EnvironmentSetting {
         private final Jwt jwt = new Jwt();
 
         private String googleClientId = "";
+        private String recaptchaSecretKey = "";
 
         public Jwt getJwt() {
             return jwt;
@@ -70,6 +76,14 @@ public class EnvironmentSetting {
 
         public void setGoogleClientId(String googleClientId) {
             this.googleClientId = googleClientId != null ? googleClientId : "";
+        }
+
+        public String getRecaptchaSecretKey() {
+            return recaptchaSecretKey != null ? recaptchaSecretKey : "";
+        }
+
+        public void setRecaptchaSecretKey(String recaptchaSecretKey) {
+            this.recaptchaSecretKey = recaptchaSecretKey != null ? recaptchaSecretKey : "";
         }
 
         public static class Jwt {
@@ -108,6 +122,75 @@ public class EnvironmentSetting {
 
             public void setIssuer(String issuer) {
                 this.issuer = issuer != null ? issuer : "";
+            }
+        }
+    }
+
+    /**
+     * reCAPTCHA verification: timeouts and retry/backoff for siteverify API calls.
+     * Fail closed: on 5xx or timeout after retries, verification returns false.
+     */
+    public static class Recaptcha {
+        private int connectTimeoutMs = 3_000;
+        private int readTimeoutMs = 5_000;
+        private final Retry retry = new Retry();
+
+        public int getConnectTimeoutMs() {
+            return connectTimeoutMs;
+        }
+
+        public void setConnectTimeoutMs(int connectTimeoutMs) {
+            this.connectTimeoutMs = Math.max(1_000, Math.min(30_000, connectTimeoutMs));
+        }
+
+        public int getReadTimeoutMs() {
+            return readTimeoutMs;
+        }
+
+        public void setReadTimeoutMs(int readTimeoutMs) {
+            this.readTimeoutMs = Math.max(1_000, Math.min(60_000, readTimeoutMs));
+        }
+
+        public Retry getRetry() {
+            return retry;
+        }
+
+        public static class Retry {
+            private int maxAttempts = 4;
+            private long initialIntervalMs = 200;
+            private double multiplier = 2.0;
+            private long maxIntervalMs = 10_000;
+
+            public int getMaxAttempts() {
+                return maxAttempts;
+            }
+
+            public void setMaxAttempts(int maxAttempts) {
+                this.maxAttempts = Math.max(1, Math.min(10, maxAttempts));
+            }
+
+            public long getInitialIntervalMs() {
+                return initialIntervalMs;
+            }
+
+            public void setInitialIntervalMs(long initialIntervalMs) {
+                this.initialIntervalMs = Math.max(50, Math.min(60_000, initialIntervalMs));
+            }
+
+            public double getMultiplier() {
+                return multiplier;
+            }
+
+            public void setMultiplier(double multiplier) {
+                this.multiplier = Math.max(1.0, Math.min(5.0, multiplier));
+            }
+
+            public long getMaxIntervalMs() {
+                return maxIntervalMs;
+            }
+
+            public void setMaxIntervalMs(long maxIntervalMs) {
+                this.maxIntervalMs = Math.max(1_000, Math.min(300_000, maxIntervalMs));
             }
         }
     }
