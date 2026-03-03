@@ -1,0 +1,114 @@
+name: AI PR Review
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: AI Review via OpenAI
+        uses: actions/github-script@v7
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pull_number = context.payload.pull_request.number;
+
+            const files = await github.paginate(
+              github.rest.pulls.listFiles,
+              { owner, repo, pull_number, per_page: 100 }
+            );
+
+            const MAX_FILES = 30;
+            const MAX_PATCH_CHARS = 12000;
+            const picked = files.slice(0, MAX_FILES).map(f => ({
+              filename: f.filename,
+              status: f.status,
+              additions: f.additions,
+              deletions: f.deletions,
+              patch: (f.patch || "").slice(0, MAX_PATCH_CHARS)
+            }));
+
+            const diffSummary = picked.map(f => {
+              const header = `### ${f.filename} (${f.status}) +${f.additions}/-${f.deletions}`;
+              const patch = f.patch ? `\n\`\`\`diff\n${f.patch}\n\`\`\`\n` : "\n(No patch provided by API; file may be binary or too large.)\n";
+              return `${header}${patch}`;
+            }).join("\n");
+
+            const openaiRes = await fetch("https://api.openai.com/v1/responses", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                model: "gpt-5.1-chat-latest",
+                input: [
+                  {
+                    role: "system",
+                    content: [
+                      {
+                        type: "text",
+                        text:
+                          "You are a senior code reviewer for an e-commerce project. " +
+                          "Review changes for correctness, security, performance, and maintainability. " +
+                          "Return a concise PR review with sections: Summary, Key Issues (bulleted), Suggestions, and Tests to Add. " +
+                          "If you see auth/payment/cart/PII risks, call them out explicitly." +
+                          "Use React, TypeScript, Java and Spring Boot best practices."
+                      }
+                    ]
+                  },
+                  {
+                    role: "user",
+                    content: [
+                      {
+                        type: "text",
+                        text:
+                          `PR Title: ${context.payload.pull_request.title}\n` +
+                          `PR Author: ${context.payload.pull_request.user.login}\n\n` +
+                          `Changed files (showing up to ${MAX_FILES}):\n\n` +
+                          diffSummary
+                      }
+                    ]
+                  }
+                ]
+              })
+            });
+
+            if (!openaiRes.ok) {
+              const errText = await openaiRes.text();
+              core.setFailed(`OpenAI API error: ${openaiRes.status} ${errText}`);
+              return;
+            }
+
+            const data = await openaiRes.json();
+
+            let reviewText = "";
+            for (const item of (data.output || [])) {
+              if (item.type === "message") {
+                for (const c of (item.content || [])) {
+                  if (c.type === "output_text" && c.text) reviewText += c.text;
+                }
+              }
+            }
+            reviewText = reviewText.trim() || "(No review text returned.)";
+
+            await github.rest.pulls.createReview({
+              owner,
+              repo,
+              pull_number,
+              event: "COMMENT",
+              body: reviewText
+            });
+
+            core.info("Posted AI review.");
