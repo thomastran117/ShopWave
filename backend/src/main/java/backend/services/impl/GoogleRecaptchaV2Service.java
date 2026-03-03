@@ -2,19 +2,20 @@ package backend.services.impl;
 
 import backend.configurations.environment.EnvironmentSetting;
 import backend.services.intf.CaptchaService;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.HttpServerErrorException;
-import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
 /**
@@ -25,6 +26,7 @@ import org.springframework.web.client.RestTemplate;
 @Service
 public class GoogleRecaptchaV2Service implements CaptchaService {
 
+    private static final Logger log = LoggerFactory.getLogger(GoogleRecaptchaV2Service.class);
     private static final String SITEVERIFY_URL = "https://www.google.com/recaptcha/api/siteverify";
 
     private final RestTemplate restTemplate;
@@ -33,13 +35,20 @@ public class GoogleRecaptchaV2Service implements CaptchaService {
 
     public GoogleRecaptchaV2Service(
             EnvironmentSetting env,
+            @Qualifier("recaptchaRestTemplate") RestTemplate recaptchaRestTemplate,
             @Qualifier("recaptchaRetryTemplate") RetryTemplate recaptchaRetryTemplate) {
         this.secretKey = env.getSecurity().getRecaptchaSecretKey();
+        this.restTemplate = recaptchaRestTemplate;
         this.recaptchaRetryTemplate = recaptchaRetryTemplate;
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(java.time.Duration.ofMillis(env.getRecaptcha().getConnectTimeoutMs()));
-        factory.setReadTimeout(java.time.Duration.ofMillis(env.getRecaptcha().getReadTimeoutMs()));
-        this.restTemplate = new RestTemplate(factory);
+    }
+
+    @PostConstruct
+    void validateRecaptchaSecretKey() {
+        if (secretKey == null || secretKey.isBlank()) {
+            throw new IllegalStateException(
+                    "app.security.recaptcha-secret-key must be set when using Google reCAPTCHA verification. " +
+                    "Set RECAPTCHA_SECRET_KEY in the environment or app.security.recaptcha-secret-key in configuration.");
+        }
     }
 
     @Override
@@ -77,7 +86,16 @@ public class GoogleRecaptchaV2Service implements CaptchaService {
                             SiteVerifyResponse.class
                     );
                     SiteVerifyResponse responseBody = response.getBody();
-                    return responseBody != null && Boolean.TRUE.equals(responseBody.success());
+                    if (responseBody == null) {
+                        return false;
+                    }
+                    if (Boolean.TRUE.equals(responseBody.success())) {
+                        return true;
+                    }
+                    if (log.isDebugEnabled() && responseBody.errorCodes() != null && responseBody.errorCodes().length > 0) {
+                        log.debug("reCAPTCHA verification failed: error-codes={}", String.join(", ", responseBody.errorCodes()));
+                    }
+                    return false;
                 } catch (HttpClientErrorException e) {
                     // 4xx: bad request or invalid response — fail closed, do not retry
                     return false;
@@ -93,7 +111,12 @@ public class GoogleRecaptchaV2Service implements CaptchaService {
 
     /**
      * Mirrors the JSON response from Google siteverify API.
+     * errorCodes is exposed for observability (e.g. logging when verification fails).
      */
-    @SuppressWarnings("unused")
-    private record SiteVerifyResponse(Boolean success, String challenge_ts, String hostname) {}
+    private record SiteVerifyResponse(
+            Boolean success,
+            String challenge_ts,
+            String hostname,
+            @JsonProperty("error-codes") String[] errorCodes
+    ) {}
 }

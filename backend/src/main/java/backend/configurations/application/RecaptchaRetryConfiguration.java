@@ -1,6 +1,7 @@
 package backend.configurations.application;
 
 import backend.configurations.environment.EnvironmentSetting;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.retry.support.RetryTemplate;
@@ -14,7 +15,8 @@ import org.springframework.web.client.ResourceAccessException;
 @Configuration
 public class RecaptchaRetryConfiguration {
 
-    @Bean
+    @Bean("recaptchaRetryTemplate")
+    @Qualifier("recaptchaRetryTemplate")
     public RetryTemplate recaptchaRetryTemplate(
             EnvironmentSetting env,
             RecaptchaRetryListener recaptchaRetryListener) {
