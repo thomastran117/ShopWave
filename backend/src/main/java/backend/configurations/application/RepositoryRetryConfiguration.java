@@ -9,10 +9,6 @@ import org.springframework.retry.support.RetryTemplate;
 
 import java.sql.SQLTransientException;
 
-/**
- * Retry configuration for repository layer: exponential backoff and retries
- * on transient data access errors (e.g. connection loss, deadlock, timeout).
- */
 @Configuration
 public class RepositoryRetryConfiguration {
 
