@@ -1,14 +1,17 @@
-package backend.utilities;
+package backend.utilities.impl;
 
+import backend.utilities.intf.Logger;
 import org.fusesource.jansi.Ansi;
 import org.fusesource.jansi.AnsiConsole;
+import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 
 import static org.fusesource.jansi.Ansi.ansi;
 
-public class Logger {
+@Component
+public class LoggerImpl implements Logger {
 
     static {
         AnsiConsole.systemInstall();
@@ -28,23 +31,28 @@ public class Logger {
         System.out.println(String.format("[%s] %s %s", ts, lvl, message));
     }
 
-    public static void info(String message) {
+    @Override
+    public void info(String message) {
         log("INFO", Ansi.Color.CYAN, message);
     }
 
-    public static void debug(String message) {
+    @Override
+    public void debug(String message) {
         log("DEBUG", Ansi.Color.MAGENTA, message);
     }
 
-    public static void warn(String message) {
+    @Override
+    public void warn(String message) {
         log("WARN", Ansi.Color.YELLOW, message);
     }
 
-    public static void error(String message) {
+    @Override
+    public void error(String message) {
         log("ERROR", Ansi.Color.RED, message);
     }
 
-    public static void critical(String message) {
+    @Override
+    public void critical(String message) {
         log("CRITICAL", Ansi.Color.RED, message.toUpperCase());
     }
 }

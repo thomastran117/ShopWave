@@ -1,4 +1,4 @@
-package backend.services;
+package backend.services.impl;
 
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;

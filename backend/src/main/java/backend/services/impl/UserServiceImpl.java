@@ -1,15 +1,15 @@
-package backend.services;
+package backend.services.impl;
 
 import java.util.Optional;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import backend.exceptions.ConflictException;
-import backend.exceptions.ResourceNotFoundException;
-import backend.exceptions.UnauthorizedException;
-import backend.interfaces.UserService;
+import backend.exceptions.http.ConflictException;
+import backend.exceptions.http.ResourceNotFoundException;
+import backend.exceptions.http.UnauthorizedException;
 import backend.models.User;
 import backend.repositories.UserRepository;
+import backend.services.intf.UserService;
 
 @Service
 public class UserServiceImpl implements UserService {

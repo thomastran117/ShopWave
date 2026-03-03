@@ -5,6 +5,8 @@ import backend.exceptions.ConflictException;
 import backend.exceptions.ResourceNotFoundException;
 import backend.models.User;
 import backend.repositories.UserRepository;
+import backend.services.impl.UserServiceImpl;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;

@@ -3,11 +3,10 @@ package backend.controllers.impl;
 import java.util.Map;
 import java.util.Collections;
 
-// Import java classes
-import backend.interfaces.UserService;
-import backend.services.AuthServiceImpl;
 import io.jsonwebtoken.Claims;
 import backend.models.User;
+import backend.services.impl.AuthServiceImpl;
+import backend.services.intf.UserService;
 import backend.dtos.responses.general.MessageResponse;
 import backend.dtos.requests.auth.LoginRequest;
 import backend.dtos.requests.auth.SignupRequest;

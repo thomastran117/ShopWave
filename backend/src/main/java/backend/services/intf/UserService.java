@@ -1,4 +1,4 @@
-package backend.interfaces;
+package backend.services.intf;
 
 import backend.models.User;
 
