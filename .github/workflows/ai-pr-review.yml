@@ -58,7 +58,7 @@ jobs:
                     role: "system",
                     content: [
                       {
-                        type: "text",
+                        type: "input_text",
                         text:
                           "You are a senior code reviewer for an e-commerce project. " +
                           "Review changes for correctness, security, performance, and maintainability. " +
@@ -72,7 +72,7 @@ jobs:
                     role: "user",
                     content: [
                       {
-                        type: "text",
+                        input_text: "text",
                         text:
                           `PR Title: ${context.payload.pull_request.title}\n` +
                           `PR Author: ${context.payload.pull_request.user.login}\n\n` +
