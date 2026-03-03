@@ -15,6 +15,7 @@ public class EnvironmentSetting {
     private final Security security = new Security();
     private final Redis redis = new Redis();
     private final Database database = new Database();
+    private final Cache cache = new Cache();
 
     public Cors getCors() {
         return cors;
@@ -32,8 +33,12 @@ public class EnvironmentSetting {
         return database;
     }
 
+    public Cache getCache() {
+        return cache;
+    }
+
     public static class Cors {
-        private String allowedOrigins = "http://localhost:3090,http://localhost:5173";
+        private String allowedOrigins = "";
 
         public List<String> getAllowedOrigins() {
             if (allowedOrigins == null || allowedOrigins.isBlank()) {
@@ -52,6 +57,7 @@ public class EnvironmentSetting {
 
     public static class Security {
         private final Jwt jwt = new Jwt();
+
         private String googleClientId = "";
 
         public Jwt getJwt() {
@@ -69,15 +75,15 @@ public class EnvironmentSetting {
         public static class Jwt {
             private String secret = "change-me-in-env";
             private long accessTokenTtlSeconds = 900;
-            private long refreshTokenTtlSeconds = 604800; // 7 days
-            private String issuer = "easyfood-api";
+            private long refreshTokenTtlSeconds = 604800;
+            private String issuer = "shopwave-api";
 
             public String getSecret() {
-                return secret;
+                return secret != null ? secret : "";
             }
 
             public void setSecret(String secret) {
-                this.secret = secret;
+                this.secret = secret != null ? secret : "";
             }
 
             public long getAccessTokenTtlSeconds() {
@@ -97,12 +103,24 @@ public class EnvironmentSetting {
             }
 
             public String getIssuer() {
-                return issuer;
+                return issuer != null ? issuer : "";
             }
 
             public void setIssuer(String issuer) {
-                this.issuer = issuer;
+                this.issuer = issuer != null ? issuer : "";
             }
+        }
+    }
+
+    public static class Cache {
+        private String namespace = "app";
+
+        public String getNamespace() {
+            return namespace != null ? namespace : "app";
+        }
+
+        public void setNamespace(String namespace) {
+            this.namespace = (namespace != null && !namespace.isBlank()) ? namespace : "app";
         }
     }
 
@@ -114,7 +132,7 @@ public class EnvironmentSetting {
         private int timeout = 2000;
 
         public String getHost() {
-            return host;
+            return host != null ? host : "localhost";
         }
 
         public void setHost(String host) {
@@ -130,7 +148,7 @@ public class EnvironmentSetting {
         }
 
         public String getPassword() {
-            return password;
+            return password != null ? password : "";
         }
 
         public void setPassword(String password) {
@@ -154,12 +172,10 @@ public class EnvironmentSetting {
         }
     }
 
-    // --- Database (MySQL) ---
-
     public static class Database {
-        private String url = "jdbc:mysql://localhost:3306/easyfood";
+        private String url = "jdbc:mysql://localhost:3306/shopland";
         private String username = "root";
-        private String password = "";
+        private String password = "password123";
         private String driverClassName = "com.mysql.cj.jdbc.Driver";
         private int maximumPoolSize = 10;
         private int minimumIdle = 2;
@@ -167,7 +183,7 @@ public class EnvironmentSetting {
         private long idleTimeout = 600_000;
 
         public String getUrl() {
-            return url;
+            return url != null ? url : "";
         }
 
         public void setUrl(String url) {
@@ -175,7 +191,7 @@ public class EnvironmentSetting {
         }
 
         public String getUsername() {
-            return username;
+            return username != null ? username : "";
         }
 
         public void setUsername(String username) {
@@ -183,7 +199,7 @@ public class EnvironmentSetting {
         }
 
         public String getPassword() {
-            return password;
+            return password != null ? password : "";
         }
 
         public void setPassword(String password) {
@@ -191,7 +207,7 @@ public class EnvironmentSetting {
         }
 
         public String getDriverClassName() {
-            return driverClassName;
+            return driverClassName != null ? driverClassName : "com.mysql.cj.jdbc.Driver";
         }
 
         public void setDriverClassName(String driverClassName) {

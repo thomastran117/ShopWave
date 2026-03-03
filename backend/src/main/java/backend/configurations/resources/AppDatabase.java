@@ -30,7 +30,7 @@ public class AppDatabase {
         config.setMinimumIdle(db.getMinimumIdle());
         config.setConnectionTimeout(db.getConnectionTimeout());
         config.setIdleTimeout(db.getIdleTimeout());
-        config.setPoolName("EasyFoodHikariPool");
+        config.setPoolName("ShopWaveHikariPool");
 
         return new HikariDataSource(config);
     }

@@ -11,6 +11,7 @@ import backend.dtos.responses.auth.AuthResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.exceptions.http.InternalServerErrorException;
 import backend.dtos.requests.auth.ChangePasswordRequest;
+import backend.annotations.requireAuth.RequireAuth;
 import backend.configurations.environment.EnvironmentSetting;
 
 import org.springframework.http.HttpStatus;
@@ -135,6 +136,7 @@ public class AuthController {
         return ResponseEntity.ok(new MessageResponse("Logged out."));
     }
 
+    @RequireAuth
     @DeleteMapping("/{id}")
     public ResponseEntity<?> deleteUser(@PathVariable long id) {
         try {
@@ -147,6 +149,7 @@ public class AuthController {
         }
     }
 
+    @RequireAuth
     @PutMapping("/change-password/{id}")
     public ResponseEntity<?> changePassword(@PathVariable long id, @RequestBody ChangePasswordRequest request) {
         try {
@@ -208,6 +211,7 @@ public class AuthController {
             );
     }
 
+    @RequireAuth
     @GetMapping("/hello")
     public String Hello() {
         return "hello authorized user!";
