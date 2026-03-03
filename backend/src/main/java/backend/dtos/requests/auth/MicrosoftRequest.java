@@ -1,4 +1,4 @@
-package backend.dtos;
+package backend.dtos.requests.auth;
 
 import jakarta.validation.constraints.NotEmpty;
 import lombok.AllArgsConstructor;
@@ -8,7 +8,7 @@ import lombok.Setter;
 @Getter
 @Setter
 @AllArgsConstructor
-public class PasswordChangeRequestDto {
-    @NotEmpty
-    private String newPassword;
+public class MicrosoftRequest {
+    @NotEmpty(message = "Token cannot be empty")
+    private String token;  
 }

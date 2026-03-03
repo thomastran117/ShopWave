@@ -1,7 +1,7 @@
 package backend.configurations.application;
 
 import backend.dtos.responses.general.ErrorResponse;
-import backend.errors.http.AppHttpException;
+import backend.exceptions.http.AppHttpException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

@@ -1,4 +1,4 @@
-package backend.dtos;
+package backend.dtos.requests.auth;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotEmpty;
@@ -9,12 +9,8 @@ import lombok.Setter;
 @Getter
 @Setter
 @AllArgsConstructor
-public class LoginRequestDto {
-
+public class ForgotPasswordRequest {
     @Email(message = "Invalid email format")
     @NotEmpty(message = "Email cannot be empty")
-    private String email;
-
-    @NotEmpty(message = "Password cannot be empty")
-    private String password;
+    private String email; 
 }

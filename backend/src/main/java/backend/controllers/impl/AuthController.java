@@ -1,4 +1,4 @@
-package backend.controllers;
+package backend.controllers.impl;
 
 import java.util.Map;
 import java.util.Collections;
@@ -8,16 +8,15 @@ import backend.interfaces.UserService;
 import backend.services.AuthServiceImpl;
 import io.jsonwebtoken.Claims;
 import backend.models.User;
-import backend.dtos.MessageResponseDto;
-import backend.dtos.LoginRequestDto;
-import backend.dtos.SignupRequestDto;
-import backend.dtos.UserResponseDto;
-import backend.exceptions.AppHttpException;
-import backend.exceptions.InternalServerErrorException;
-import backend.dtos.PasswordChangeRequestDto;
+import backend.dtos.responses.general.MessageResponse;
+import backend.dtos.requests.auth.LoginRequest;
+import backend.dtos.requests.auth.SignupRequest;
+import backend.dtos.responses.auth.AuthResponse;
+import backend.exceptions.http.AppHttpException;
+import backend.exceptions.http.InternalServerErrorException;
+import backend.dtos.requests.auth.ChangePasswordRequest;
 import backend.configs.EnvConfig;
 
-// Spring imports
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
@@ -29,22 +28,18 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.beans.factory.annotation.Value;
 
-//Google API
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken.Payload;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
 import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.jackson2.JacksonFactory;
 
-// Other imports
 import jakarta.validation.Valid;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
-// Controller listening for /auth routes
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
@@ -53,7 +48,6 @@ public class AuthController {
     private final AuthServiceImpl authService;
     private final EnvConfig env;
 
-    // Constructor to inject dependencies
     public AuthController(UserService userService, AuthServiceImpl authService, EnvConfig env) {
         this.userService = userService;
         this.authService = authService;
@@ -61,7 +55,7 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<?> login(@Valid @RequestBody LoginRequestDto request, HttpServletResponse response) {
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request, HttpServletResponse response) {
         try {
             User user = userService.login(request.getEmail(), request.getPassword());
             Map<String, Object> tokens = authService.generateTokenPair(user.getId().intValue(), user.getUsertype());
@@ -79,7 +73,7 @@ public class AuthController {
             response.addHeader("Set-Cookie", cookie.toString());
 
             return ResponseEntity.ok(
-                    new UserResponseDto(accessToken, user.getEmail(), user.getUsertype(), user.getId())
+                    new AuthResponse(accessToken, user.getEmail(), user.getUsertype(), user.getId())
                 );
         } catch (AppHttpException e) {
             throw e;
@@ -132,7 +126,7 @@ public class AuthController {
     public ResponseEntity<?> deleteUser(@PathVariable long id) {
         try {
             userService.delete(id);
-            return ResponseEntity.ok(new MessageResponseDto("User deleted successfully."));
+            return ResponseEntity.ok(new MessageResponse("User deleted successfully."));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -141,10 +135,10 @@ public class AuthController {
     }
 
     @PutMapping("/change-password/{id}")
-    public ResponseEntity<?> changePassword(@PathVariable long id, @RequestBody PasswordChangeRequestDto request) {
+    public ResponseEntity<?> changePassword(@PathVariable long id, @RequestBody ChangePasswordRequest request) {
         try {
-            userService.changePassword(id, request.getNewPassword());
-            return ResponseEntity.ok(new MessageResponseDto("Password changed successfully."));
+            userService.changePassword(id, request.getPassword());
+            return ResponseEntity.ok(new MessageResponse("Password changed successfully."));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -193,7 +187,7 @@ public class AuthController {
         response.addHeader("Set-Cookie", cookie.toString());
 
         return ResponseEntity.ok(
-                new UserResponseDto(accessToken, user.getEmail(), user.getUsertype(), user.getId())
+                new AuthResponse(accessToken, user.getEmail(), user.getUsertype(), user.getId())
             );
     }
 

@@ -1,14 +1,14 @@
-package backend.dtos;
+package backend.dtos.responses.general;
 
 import lombok.Getter;
 import lombok.Setter;
 
 @Getter
 @Setter
-public class MessageResponseDto {
+public class MessageResponse {
     public String message;
 
-    public MessageResponseDto(String message) {
+    public MessageResponse(String message) {
         this.message = message;
     }
 }
