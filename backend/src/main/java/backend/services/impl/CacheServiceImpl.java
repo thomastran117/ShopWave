@@ -1,25 +1,109 @@
 package backend.services.impl;
 
-import org.springframework.data.redis.core.RedisTemplate;
+import backend.services.intf.CacheService;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 @Service
-public class CacheServiceImpl {
+public class CacheServiceImpl implements CacheService {
 
-    private final RedisTemplate<String, Object> redisTemplate;
+    private static final String DEFAULT_NAMESPACE = "app";
 
-    public CacheServiceImpl(RedisTemplate<String, Object> redisTemplate) {
+    private final StringRedisTemplate redisTemplate;
+    private final String namespace;
+
+    public CacheServiceImpl(StringRedisTemplate redisTemplate,
+                             @Value("${app.cache.namespace:app}") String namespace) {
         this.redisTemplate = redisTemplate;
+        this.namespace = namespace != null && !namespace.isBlank() ? namespace : DEFAULT_NAMESPACE;
     }
 
-    public void save(String key, String value, long seconds) {
-        redisTemplate.opsForValue().set(key, value, Duration.ofSeconds(seconds));
+    private String key(String part) {
+        return namespace + ":" + part;
     }
 
+    @Override
     public String get(String key) {
-        Object value = redisTemplate.opsForValue().get(key);
-        return value != null ? value.toString() : null;
+        return redisTemplate.opsForValue().get(key(key));
+    }
+
+    @Override
+    public void set(String key, String value, long ttlSeconds) {
+        if (ttlSeconds > 0) {
+            redisTemplate.opsForValue().set(key(key), value, Duration.ofSeconds(ttlSeconds));
+        } else {
+            redisTemplate.opsForValue().set(key(key), value);
+        }
+    }
+
+    @Override
+    public void set(String key, String value) {
+        redisTemplate.opsForValue().set(key(key), value);
+    }
+
+    @Override
+    public Boolean delete(String key) {
+        return redisTemplate.delete(key(key));
+    }
+
+    @Override
+    public boolean exists(String key) {
+        Boolean b = redisTemplate.hasKey(key(key));
+        return Boolean.TRUE.equals(b);
+    }
+
+    @Override
+    public long getTtlSeconds(String key) {
+        Long ttl = redisTemplate.getExpire(key(key), TimeUnit.SECONDS);
+        if (ttl == null) return -2;
+        return ttl;
+    }
+
+    @Override
+    public void setAdd(String setKey, String member) {
+        redisTemplate.opsForSet().add(key(setKey), member);
+    }
+
+    @Override
+    public void setAdd(String setKey, String member, long ttlSeconds) {
+        redisTemplate.opsForSet().add(key(setKey), member);
+        if (ttlSeconds > 0) {
+            redisTemplate.expire(key(setKey), Duration.ofSeconds(ttlSeconds));
+        }
+    }
+
+    @Override
+    public Set<String> setMembers(String setKey) {
+        Set<String> members = redisTemplate.opsForSet().members(key(setKey));
+        return members != null ? members : Set.of();
+    }
+
+    @Override
+    public Long setRemove(String setKey, String... members) {
+        if (members == null || members.length == 0) return 0L;
+        return redisTemplate.opsForSet().remove(key(setKey), (Object[]) members);
+    }
+
+    @Override
+    public String getAndDelete(String key) {
+        String k = key(key);
+        String value = redisTemplate.opsForValue().get(k);
+        if (value != null) {
+            redisTemplate.delete(k);
+        }
+        return value;
+    }
+
+    @Override
+    public long deleteByPattern(String pattern) {
+        Set<String> keys = redisTemplate.keys(key(pattern));
+        if (keys == null || keys.isEmpty()) return 0;
+        Long deleted = redisTemplate.delete(keys);
+        return deleted != null ? deleted : 0;
     }
 }

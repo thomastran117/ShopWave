@@ -1,6 +1,6 @@
 package backend.services.intf;
 
-import backend.models.User;
+import backend.models.core.User;
 
 public interface UserService {
     User login(String email, String password);

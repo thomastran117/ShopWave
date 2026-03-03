@@ -7,7 +7,8 @@ import org.springframework.stereotype.Service;
 import backend.exceptions.http.ConflictException;
 import backend.exceptions.http.ResourceNotFoundException;
 import backend.exceptions.http.UnauthorizedException;
-import backend.models.User;
+import backend.models.core.User;
+import backend.models.enums.UserRole;
 import backend.repositories.UserRepository;
 import backend.services.intf.UserService;
 
@@ -46,8 +47,7 @@ public class UserServiceImpl implements UserService {
         User user = new User();
         user.setEmail(email);
         user.setPassword(passwordEncoder.encode(password));
-        user.setUsertype("USER");
-        user.setProvider("LOCAL");
+        user.setRole(UserRole.USER);
 
         userRepository.save(user);
         return true;
@@ -89,8 +89,7 @@ public class UserServiceImpl implements UserService {
             User user = new User();
             user.setEmail(email);
             user.setPassword(null);
-            user.setUsertype("USER");
-            user.setProvider("GOOGLE");
+            user.setRole(UserRole.USER);
             return userRepository.save(user);
         });
     }

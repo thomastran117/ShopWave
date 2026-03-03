@@ -1,4 +1,4 @@
-package backend.middlewares;
+package backend.configurations.application;
 
 import backend.utilities.HttpLogger;
 import jakarta.servlet.Filter;
@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 
 @Component
-public class HttpLoggerMiddleware implements Filter {
+public class HttpLoggerConfiguration implements Filter {
 
     static {
         AnsiConsole.systemInstall();

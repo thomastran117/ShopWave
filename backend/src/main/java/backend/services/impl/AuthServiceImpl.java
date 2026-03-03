@@ -1,135 +1,72 @@
 package backend.services.impl;
 
-import backend.configs.EnvConfig;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.SignatureAlgorithm;
-import io.jsonwebtoken.io.Decoders;
-import io.jsonwebtoken.security.Keys;
-import java.security.Key;
-import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.stereotype.Component;
+import backend.models.core.User;
+import backend.services.intf.AuthService;
+import backend.services.intf.TokenService;
+import backend.services.intf.UserService;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
-import java.io.Serializable;
-import java.nio.charset.StandardCharsets;
-import java.util.*;
-import java.util.function.Function;
+import java.util.Map;
 
-@Component
-public class AuthServiceImpl implements Serializable {
+@Service
+public class AuthServiceImpl implements AuthService {
 
-    private final EnvConfig env;
+    private final UserService userService;
+    private final TokenService tokenService;
 
-    public AuthServiceImpl(EnvConfig env) {
-        this.env = env;
+    public AuthServiceImpl(UserService userService, TokenService tokenService) {
+        this.userService = userService;
+        this.tokenService = tokenService;
     }
 
-    public int getUserIdFromToken(HttpServletRequest request) {
-        String token = request.getHeader("Authorization");
-        if (token == null || !token.startsWith("Bearer ")) {
-            throw new IllegalArgumentException("Token is missing or improperly formatted");
+    @Override
+    public LoginResult login(String email, String password) {
+        User user = userService.login(email, password);
+        Map<String, Object> tokens = tokenService.generateTokenPair(user.getId().intValue(), user.getRole().toString());
+        String accessToken = (String) tokens.get("accessToken");
+        String refreshToken = (String) tokens.get("refreshToken");
+        return new LoginResult(accessToken, refreshToken, user.getEmail(), user.getRole().toString(), user.getId());
+    }
+
+    @Override
+    public RefreshResult refresh(String refreshToken) {
+        if (refreshToken == null || !tokenService.validateRefreshToken(refreshToken)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid or expired refresh token");
         }
-        String tokenWithoutBearer = token.substring(7);
-        return Integer.parseInt(getClaimFromToken(tokenWithoutBearer, Claims::getSubject));
-    }
-
-    public <T> T getClaimFromToken(String token, Function<Claims, T> claimsResolver) {
-        final Claims claims = getAllClaimsFromToken(token);
-        return claimsResolver.apply(claims);
-    }
-
-    public Authentication getAuthentication(String token) {
-        Claims claims = getAllClaimsFromToken(token);
-        int userId = Integer.parseInt(claims.getSubject());
-        String role = claims.get("role", String.class);
-
-        Collection<GrantedAuthority> authorities = new ArrayList<>();
-        if (role != null) {
-            authorities.add(new SimpleGrantedAuthority("ROLE_" + role));
+        TokenService.RefreshTokenPayload payload = tokenService.getRefreshTokenPayload(refreshToken);
+        if (payload == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid or expired refresh token");
         }
 
-        return new UsernamePasswordAuthenticationToken(userId, null, authorities);
-    }
-
-    private Key getSigningKey() {
-        String secret = env.getJwtSecret();
-        byte[] keyBytes;
-
-        try {
-            keyBytes = Decoders.BASE64.decode(secret);
-        } catch (IllegalArgumentException e) {
-            keyBytes = secret.getBytes(StandardCharsets.UTF_8);
+        String newRefreshToken = tokenService.rotateRefreshToken(refreshToken);
+        if (newRefreshToken == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid or expired refresh token");
         }
 
-        return Keys.hmacShaKeyFor(keyBytes);
+        String newAccessToken = tokenService.generateAccessToken(payload.userId(), payload.role());
+        long expiresIn = tokenService.getAccessTokenExpiresInSeconds();
+
+        return new RefreshResult(newAccessToken, newRefreshToken, expiresIn);
     }
 
-    public Claims getAllClaimsFromToken(String token) {
-        return Jwts.parserBuilder()
-                .setSigningKey(getSigningKey())
-                .build()
-                .parseClaimsJws(token)
-                .getBody();
+    @Override
+    public LoginResult loginOrSignupGoogle(String email) {
+        User user = userService.loginOrSignupGoogle(email);
+        Map<String, Object> tokens = tokenService.generateTokenPair(user.getId().intValue(), user.getRole().toString());
+        String accessToken = (String) tokens.get("accessToken");
+        String refreshToken = (String) tokens.get("refreshToken");
+        return new LoginResult(accessToken, refreshToken, user.getEmail(), user.getRole().toString(), user.getId());
     }
 
-    public String generateAccessToken(int userId, String role) {
-        return Jwts.builder()
-                .setSubject(String.valueOf(userId))
-                .claim("role", role)
-                .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + 15 * 60 * 1000L))
-                .signWith(getSigningKey(), SignatureAlgorithm.HS512)
-                .compact();
+    @Override
+    public void revokeRefreshToken(String refreshToken) {
+        tokenService.revokeRefreshToken(refreshToken);
     }
 
-    public String generateRefreshToken(int userId, String role) {
-        return Jwts.builder()
-                .setSubject(String.valueOf(userId))
-                .claim("role", role)
-                .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + 7 * 24 * 60 * 60 * 1000L))
-                .signWith(getSigningKey(), SignatureAlgorithm.HS512)
-                .compact();
-    }
-
-    public boolean validateRefreshToken(String token) {
-    try {
-        getAllClaimsFromToken(token);
-        return true;
-    } catch (io.jsonwebtoken.ExpiredJwtException e) {
-        return false;
-    } catch (Exception e) {
-        e.printStackTrace();
-        return false;
-    }
-}
-    public String rotateRefreshToken(String oldToken) {
-        Claims claims = getAllClaimsFromToken(oldToken);
-        String role = claims.get("role", String.class);
-
-        return Jwts.builder()
-                .setSubject(claims.getSubject())
-                .claim("role", role)
-                .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + env.getJwtRefreshValidity() * 1000L))
-                .signWith(getSigningKey(), SignatureAlgorithm.HS512)
-                .compact();
-    }
-
-    public Map<String, Object> generateTokenPair(int userId, String role) {
-        String accessToken = generateAccessToken(userId, role);
-        String refreshToken = generateRefreshToken(userId, role);
-
-        Map<String, Object> tokens = new HashMap<>();
-        tokens.put("accessToken", accessToken);
-        tokens.put("refreshToken", refreshToken);
-        tokens.put("tokenType", "Bearer");
-        tokens.put("expiresIn", env.getJwtValidity());
-
-        return tokens;
+    @Override
+    public void revokeAllRefreshTokensForUser(int userId) {
+        tokenService.revokeAllRefreshTokensForUser(userId);
     }
 }
