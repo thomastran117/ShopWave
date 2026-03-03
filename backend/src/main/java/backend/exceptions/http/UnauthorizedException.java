@@ -1,4 +1,4 @@
-package backend.exceptions;
+package backend.exceptions.http;
 
 import org.springframework.http.HttpStatus;
 

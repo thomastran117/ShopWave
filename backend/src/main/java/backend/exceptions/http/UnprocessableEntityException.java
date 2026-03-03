@@ -1,9 +1,9 @@
-package backend.exceptions;
+package backend.exceptions.http;
 
 import org.springframework.http.HttpStatus;
 
 public class UnprocessableEntityException extends AppHttpException {
-    private static final HttpStatus DEFAULT_STATUS = HttpStatus.UNPROCESSABLE_ENTITY;
+    private static final HttpStatus DEFAULT_STATUS = HttpStatus.valueOf(422);
     private static final String DEFAULT_MESSAGE = "Unprocessable entity";
 
     public UnprocessableEntityException() {

@@ -1,6 +1,8 @@
-package backend.exceptions;
+package backend.configurations.application;
 
-import backend.dtos.ErrorResponseDto;
+import backend.dtos.responses.general.ErrorResponse;
+import backend.errors.http.AppHttpException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -36,8 +38,8 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(AppHttpException.class)
-    public ResponseEntity<ErrorResponseDto> handleAppHttpError(AppHttpException ex) {
-        ErrorResponseDto body = new ErrorResponseDto(
+    public ResponseEntity<ErrorResponse> handleAppHttpError(AppHttpException ex) {
+        ErrorResponse body = new ErrorResponse(
                 ex.getStatus().value(),
                 ex.getMessage(),
                 ex.getDetail()
@@ -46,10 +48,10 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ErrorResponseDto> handleUnknown(Exception ex) {
+    public ResponseEntity<ErrorResponse> handleUnknown(Exception ex) {
         log.error("Unhandled exception", ex);
 
-        ErrorResponseDto body = new ErrorResponseDto(
+        ErrorResponse body = new ErrorResponse(
                 HttpStatus.INTERNAL_SERVER_ERROR.value(),
                 "Internal server error",
                 "An unexpected error occurred."

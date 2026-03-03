@@ -1,9 +1,9 @@
-package backend.exceptions;
+package backend.exceptions.http;
 
 import org.springframework.http.HttpStatus;
 
 public class PayloadTooLargeException extends AppHttpException {
-    private static final HttpStatus DEFAULT_STATUS = HttpStatus.PAYLOAD_TOO_LARGE;
+    private static final HttpStatus DEFAULT_STATUS = HttpStatus.valueOf(413);
     private static final String DEFAULT_MESSAGE = "Payload too large";
 
     public PayloadTooLargeException() {
