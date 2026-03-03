@@ -33,6 +33,7 @@ public class RepositoryRetryConfiguration {
 
     @Bean
     public RetryTemplate repositoryRetryTemplate(
+            RepositoryRetryListener repositoryRetryListener,
             @Value("${app.repository.retry.max-attempts:" + DEFAULT_MAX_ATTEMPTS + "}") int maxAttempts,
             @Value("${app.repository.retry.initial-interval-ms:" + DEFAULT_INITIAL_INTERVAL_MS + "}") long initialIntervalMs,
             @Value("${app.repository.retry.multiplier:" + DEFAULT_MULTIPLIER + "}") double multiplier,
@@ -43,14 +44,16 @@ public class RepositoryRetryConfiguration {
         double mult = clamp(multiplier, MIN_MULTIPLIER, MAX_MULTIPLIER);
         long maxInterval = clamp(maxIntervalMs, MIN_MAX_INTERVAL_MS, MAX_MAX_INTERVAL_MS);
 
-        return RetryTemplate.builder()
+        RetryTemplate template = RetryTemplate.builder()
                 .maxAttempts(attempts)
                 .exponentialBackoff(initial, mult, maxInterval)
                 .retryOn(TransientDataAccessException.class)
                 .retryOn(DataAccessResourceFailureException.class)
                 .retryOn(SQLTransientException.class)
                 .traversingCauses()
+                .withListener(repositoryRetryListener)
                 .build();
+        return template;
     }
 
     private static int clamp(int value, int min, int max) {

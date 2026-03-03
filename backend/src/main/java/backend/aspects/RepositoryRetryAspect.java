@@ -14,9 +14,10 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.util.Set;
 
 /**
- * Applies retries with exponential backoff to Spring Data repository read operations only.
- * Skips retry when there is an active transaction (fail-fast within transactional boundaries)
- * and for write methods (save/delete/flush) to avoid duplicate writes on transient errors.
+ * Single aspect for repository retry: applies exponential backoff to read operations in
+ * backend.repositories only. Skips retry when there is an active transaction (fail-fast
+ * within transactional boundaries) and for write methods (save/delete/flush) to avoid
+ * duplicate writes. Exception being retried is logged via {@link RepositoryRetryListener}.
  */
 @Aspect
 @Component
@@ -36,7 +37,7 @@ public class RepositoryRetryAspect {
         this.repositoryRetryTemplate = repositoryRetryTemplate;
     }
 
-    @Around("execution(* org.springframework.data.repository.Repository+.*(..))")
+    @Around("execution(* backend.repositories..*(..))")
     public Object aroundRepository(ProceedingJoinPoint joinPoint) throws Throwable {
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             return joinPoint.proceed();
