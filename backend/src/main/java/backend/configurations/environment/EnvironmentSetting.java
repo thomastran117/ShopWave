@@ -74,6 +74,10 @@ public class EnvironmentSetting {
         private String googleClientId = "";
         private String microsoftClientId = "";
         private String microsoftJwksUri = DEFAULT_MICROSOFT_JWKS_URI;
+        /** Microsoft issuer authority host (e.g. https://login.microsoftonline.com/ or sovereign cloud URL). */
+        private String microsoftAuthorityHost = "https://login.microsoftonline.com/";
+        /** Comma-separated well-known tenant segments (e.g. common,organizations,consumers). */
+        private String microsoftWellKnownTenants = "common,organizations,consumers";
         private String recaptchaSecretKey = "";
 
         private final OAuthGoogle oauthGoogle = new OAuthGoogle();
@@ -112,6 +116,22 @@ public class EnvironmentSetting {
 
         public void setMicrosoftJwksUri(String microsoftJwksUri) {
             this.microsoftJwksUri = microsoftJwksUri != null ? microsoftJwksUri : DEFAULT_MICROSOFT_JWKS_URI;
+        }
+
+        public String getMicrosoftAuthorityHost() {
+            return microsoftAuthorityHost != null ? microsoftAuthorityHost : "https://login.microsoftonline.com/";
+        }
+
+        public void setMicrosoftAuthorityHost(String microsoftAuthorityHost) {
+            this.microsoftAuthorityHost = microsoftAuthorityHost != null ? microsoftAuthorityHost : "https://login.microsoftonline.com/";
+        }
+
+        public String getMicrosoftWellKnownTenants() {
+            return microsoftWellKnownTenants != null ? microsoftWellKnownTenants : "common,organizations,consumers";
+        }
+
+        public void setMicrosoftWellKnownTenants(String microsoftWellKnownTenants) {
+            this.microsoftWellKnownTenants = microsoftWellKnownTenants != null ? microsoftWellKnownTenants : "common,organizations,consumers";
         }
 
         public String getRecaptchaSecretKey() {

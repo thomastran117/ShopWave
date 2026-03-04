@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
@@ -19,8 +20,11 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * OAuth configuration layer: validates required OAuth settings (Google/Microsoft client IDs,
@@ -29,6 +33,7 @@ import java.util.Map;
  * constructor to keep startup failures in the configuration layer.
  */
 @Configuration
+@DependsOn("oauthConfigValidator")
 public class OAuthConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(OAuthConfiguration.class);
@@ -67,10 +72,12 @@ public class OAuthConfiguration {
             validateJwksReachableOrFail(jwksUri, jwksRest);
         }
 
+        String authorityHost = security.getMicrosoftAuthorityHost();
+        Set<String> wellKnownTenants = parseWellKnownTenants(security.getMicrosoftWellKnownTenants());
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(jwksUri)
                 .restOperations(jwksRest)
                 .build();
-        decoder.setJwtValidator(microsoftTokenValidator(microsoftId));
+        decoder.setJwtValidator(microsoftTokenValidator(microsoftId, authorityHost, wellKnownTenants));
         return decoder;
     }
 
@@ -84,9 +91,15 @@ public class OAuthConfiguration {
 
     /**
      * When app.security.jwks.validate-at-startup is true, validates JWKS URI is reachable.
-     * Fails fast (throws) if unreachable so behavior is explicit and runtime stalls are avoided.
+     * Safe defaults: only runs when URI is non-blank and uses HTTPS; rest uses jwks timeouts so it cannot block indefinitely.
      */
     private static void validateJwksReachableOrFail(String jwksUri, RestTemplate rest) {
+        if (jwksUri == null || jwksUri.isBlank()) {
+            throw new IllegalStateException("JWKS URI is blank; cannot validate reachability.");
+        }
+        if (!jwksUri.startsWith("https://")) {
+            throw new IllegalStateException("JWKS URI must use HTTPS: " + jwksUri);
+        }
         try {
             rest.getForObject(jwksUri, String.class);
         } catch (Exception e) {
@@ -95,7 +108,19 @@ public class OAuthConfiguration {
         }
     }
 
-    private static OAuth2TokenValidator<Jwt> microsoftTokenValidator(String audience) {
+    private static Set<String> parseWellKnownTenants(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return Set.of("common", "organizations", "consumers");
+        }
+        return Arrays.stream(csv.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toSet());
+    }
+
+    private static OAuth2TokenValidator<Jwt> microsoftTokenValidator(String audience,
+                                                                     String authorityHost,
+                                                                     Set<String> wellKnownTenants) {
         OAuth2TokenValidator<Jwt> defaultValidator = JwtValidators.createDefault();
         return jwt -> {
             OAuth2TokenValidatorResult defaultResult = defaultValidator.validate(jwt);
@@ -108,7 +133,7 @@ public class OAuthConfiguration {
                         new OAuth2Error(OAuth2ErrorCodes.INVALID_REQUEST, "Invalid audience", null));
             }
             String iss = jwt.getIssuer() != null ? jwt.getIssuer().toString() : "";
-            if (!MicrosoftIssuerValidator.isValid(iss)) {
+            if (!MicrosoftIssuerValidator.isValid(iss, authorityHost, wellKnownTenants)) {
                 return OAuth2TokenValidatorResult.failure(
                         new OAuth2Error(OAuth2ErrorCodes.INVALID_REQUEST, "Invalid issuer", null));
             }

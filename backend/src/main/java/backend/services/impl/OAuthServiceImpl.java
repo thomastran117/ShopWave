@@ -7,7 +7,6 @@ import backend.security.oauth.InvalidOAuthTokenException;
 import backend.security.oauth.OAuthClaimUtils;
 import backend.security.oauth.OAuthNotSupportedException;
 import backend.security.oauth.OAuthProviderTransientException;
-import backend.security.oauth.OAuthRetryable;
 import backend.services.intf.OAuthService;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
@@ -61,19 +60,20 @@ public class OAuthServiceImpl implements OAuthService {
                 .build();
     }
 
-    /** Builds transport with connect/read timeouts for Google cert fetch, similar to Microsoft JWKS timeouts. */
+    /** Builds transport for Google cert fetch. Timeout config (oauthGoogle) is available for future use when the client API supports it. */
     private static NetHttpTransport buildGoogleHttpTransport(EnvironmentSetting.Security.OAuthGoogle timeouts) {
-        int connectMs = timeouts != null ? timeouts.getConnectTimeoutMs() : 5_000;
-        int readMs = timeouts != null ? timeouts.getReadTimeoutMs() : 10_000;
-        return new NetHttpTransport.Builder()
-                .setConnectTimeout(connectMs)
-                .setReadTimeout(readMs)
-                .build();
+        return new NetHttpTransport();
     }
 
-    /** Shared check for blank/invalid tokens across providers; throws before any verification. */
-    private static void requireNonBlankToken(String token, String providerLabel) {
+    /** Maximum token length to avoid oversized token attacks (e.g. 16KB). */
+    private static final int MAX_TOKEN_LENGTH = 16_384;
+
+    /** Shared check for blank, invalid, or oversized tokens across providers; throws before any verification. */
+    private static void requireValidTokenLength(String token, String providerLabel) {
         if (token == null || token.isBlank()) {
+            throw new InvalidOAuthTokenException("Invalid " + providerLabel + " token");
+        }
+        if (token.length() > MAX_TOKEN_LENGTH) {
             throw new InvalidOAuthTokenException("Invalid " + providerLabel + " token");
         }
     }
@@ -86,7 +86,7 @@ public class OAuthServiceImpl implements OAuthService {
     @Override
     @OAuthResilient
     public OAuthUser verifyGoogleToken(String googleToken) {
-        requireNonBlankToken(googleToken, "Google ID");
+        requireValidTokenLength(googleToken, "Google ID");
         if (log.isDebugEnabled()) {
             log.debug("Verifying Google ID token");
         }
@@ -97,10 +97,11 @@ public class OAuthServiceImpl implements OAuthService {
             throw new InvalidOAuthTokenException("Invalid Google ID token", e);
         } catch (IOException e) {
             throw new OAuthProviderTransientException("Google token verification failed", e);
+        } catch (ResourceAccessException e) {
+            throw new OAuthProviderTransientException("Google token verification failed", e);
+        } catch (HttpServerErrorException e) {
+            throw new OAuthProviderTransientException("Google token verification failed", e);
         } catch (RuntimeException e) {
-            if (OAuthRetryable.isRetryable(e)) {
-                throw new OAuthProviderTransientException("Google token verification failed", e);
-            }
             throw new InvalidOAuthTokenException("Invalid Google ID token", e);
         }
         if (idToken == null) {
@@ -119,7 +120,7 @@ public class OAuthServiceImpl implements OAuthService {
     @Override
     @OAuthResilient
     public OAuthUser verifyMicrosoftToken(String microsoftToken) {
-        requireNonBlankToken(microsoftToken, "Microsoft");
+        requireValidTokenLength(microsoftToken, "Microsoft");
         if (log.isDebugEnabled()) {
             log.debug("Verifying Microsoft ID token");
         }

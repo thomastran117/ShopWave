@@ -112,7 +112,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(OAuthProviderTransientException.class)
     public ResponseEntity<ErrorResponse> handleOAuthProviderTransient(OAuthProviderTransientException ex) {
-        log.warn("OAuth provider transient failure", ex);
+        log.warn("OAuth provider transient failure: {}", ex.getMessage());
         ErrorResponse body = new ErrorResponse(
                 HttpStatus.SERVICE_UNAVAILABLE.value(),
                 "Service Unavailable",
@@ -123,7 +123,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(OAuthVerificationError.class)
     public ResponseEntity<ErrorResponse> handleOAuthVerificationError(OAuthVerificationError ex) {
-        log.error("OAuth verification JVM error", ex);
+        log.error("OAuth verification JVM error: {}", ex.getMessage());
         ErrorResponse body = new ErrorResponse(
                 HttpStatus.INTERNAL_SERVER_ERROR.value(),
                 "Internal server error",

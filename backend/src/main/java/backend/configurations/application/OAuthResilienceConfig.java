@@ -3,7 +3,6 @@ package backend.configurations.application;
 import backend.configurations.environment.EnvironmentSetting;
 import backend.security.oauth.InvalidOAuthTokenException;
 import backend.security.oauth.OAuthRetryable;
-import backend.security.oauth.OAuthVerificationError;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -20,8 +19,9 @@ import java.time.Duration;
 /**
  * Retry and circuit breaker for OAuth token verification. Retries only on
  * transient failures (IO, 5xx, timeouts); does not retry invalid tokens.
- * Circuit breaker records only transient failures and ignores invalid token
- * failures so client errors do not open the circuit.
+ * Circuit breaker records transient failures and invalid tokens are ignored;
+ * OAuthVerificationError (wrapped JVM/unexpected faults) is not ignored so
+ * real faults are not masked and can open the circuit.
  */
 @Configuration
 public class OAuthResilienceConfig {
@@ -74,7 +74,7 @@ public class OAuthResilienceConfig {
                 .minimumNumberOfCalls(cb.getMinimumNumberOfCalls())
                 .waitDurationInOpenState(Duration.ofSeconds(cb.getWaitDurationInOpenStateSeconds()))
                 .recordException(OAuthRetryable::isRetryable)
-                .ignoreException(ex -> ex instanceof InvalidOAuthTokenException || ex instanceof OAuthVerificationError)
+                .ignoreException(ex -> ex instanceof InvalidOAuthTokenException)
                 .build();
 
         return CircuitBreaker.of("oauthVerification", config);
