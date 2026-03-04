@@ -22,11 +22,17 @@ import java.time.Duration;
 @Configuration
 public class OAuthRetryConfiguration {
 
+    private final EnvironmentSetting env;
+    private final OAuthRetryListener oauthRetryListener;
+
+    public OAuthRetryConfiguration(EnvironmentSetting env, OAuthRetryListener oauthRetryListener) {
+        this.env = env;
+        this.oauthRetryListener = oauthRetryListener;
+    }
+
     @Bean("oauthRetryTemplate")
     @Qualifier("oauthRetryTemplate")
-    public RetryTemplate oauthRetryTemplate(
-            EnvironmentSetting env,
-            OAuthRetryListener oauthRetryListener) {
+    public RetryTemplate oauthRetryTemplate() {
         EnvironmentSetting.OAuth.Retry retry = env.getOauth().getRetry();
         return RetryTemplate.builder()
                 .maxAttempts(retry.getMaxAttempts())
@@ -44,7 +50,7 @@ public class OAuthRetryConfiguration {
 
     @Bean("oauthCircuitBreaker")
     @Qualifier("oauthCircuitBreaker")
-    public CircuitBreaker oauthCircuitBreaker(EnvironmentSetting env) {
+    public CircuitBreaker oauthCircuitBreaker() {
         EnvironmentSetting.OAuth.CircuitBreaker cb = env.getOauth().getCircuitBreaker();
         CircuitBreakerConfig config = CircuitBreakerConfig.custom()
                 .failureRateThreshold(cb.getFailureRateThreshold())

@@ -48,8 +48,6 @@ public class OAuthRetryAspect {
                     }
                     return joinPoint.proceed();
                 });
-            } catch (Exception e) {
-                throw e;
             } catch (Error e) {
                 throw new java.lang.reflect.UndeclaredThrowableException(e);
             }

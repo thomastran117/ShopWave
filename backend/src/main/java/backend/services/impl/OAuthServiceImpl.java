@@ -32,18 +32,28 @@ import java.util.List;
 @Service
 public class OAuthServiceImpl implements OAuthService {
 
-    private static final String MICROSOFT_KEYS_URI = "https://login.microsoftonline.com/common/discovery/v2.0/keys";
-
     private final String googleClientId;
     private final String microsoftClientId;
     private final GoogleIdTokenVerifier googleVerifier;
     private final JwtDecoder microsoftDecoder;
 
     public OAuthServiceImpl(EnvironmentSetting env) {
-        this.googleClientId = env.getSecurity().getGoogleClientId();
-        this.microsoftClientId = env.getSecurity().getMicrosoftClientId();
+        String googleId = env.getSecurity().getGoogleClientId();
+        String microsoftId = env.getSecurity().getMicrosoftClientId();
+        if (googleId == null || googleId.isBlank()) {
+            throw new IllegalStateException("Google OAuth client ID is not configured (set app.security.google-client-id)");
+        }
+        if (microsoftId == null || microsoftId.isBlank()) {
+            throw new IllegalStateException("Microsoft OAuth client ID is not configured (set app.security.microsoft-client-id)");
+        }
+        this.googleClientId = googleId;
+        this.microsoftClientId = microsoftId;
+        String microsoftJwksUri = env.getSecurity().getMicrosoftJwksUri();
+        if (microsoftJwksUri == null || microsoftJwksUri.isBlank()) {
+            throw new IllegalStateException("Microsoft OAuth JWKS URI is not configured (set app.security.microsoft-jwks-uri)");
+        }
         this.googleVerifier = buildGoogleVerifier(googleClientId);
-        this.microsoftDecoder = buildMicrosoftDecoder(microsoftClientId);
+        this.microsoftDecoder = buildMicrosoftDecoder(microsoftClientId, microsoftJwksUri);
     }
 
     private static GoogleIdTokenVerifier buildGoogleVerifier(String clientId) {
@@ -55,9 +65,12 @@ public class OAuthServiceImpl implements OAuthService {
                 .build();
     }
 
-    private static JwtDecoder buildMicrosoftDecoder(String clientId) {
+    private static JwtDecoder buildMicrosoftDecoder(String clientId, String jwksUri) {
         if (clientId == null || clientId.isBlank()) {
             throw new IllegalStateException("Microsoft OAuth client ID is not configured (set app.security.microsoft-client-id)");
+        }
+        if (jwksUri == null || jwksUri.isBlank()) {
+            throw new IllegalStateException("Microsoft OAuth JWKS URI is not configured (set app.security.microsoft-jwks-uri)");
         }
         String audience = clientId;
         OAuth2TokenValidator<Jwt> defaultValidator = JwtValidators.createDefault();
@@ -76,7 +89,7 @@ public class OAuthServiceImpl implements OAuthService {
             }
             return OAuth2TokenValidatorResult.success();
         };
-        NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(MICROSOFT_KEYS_URI)
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(jwksUri)
                 .build();
         decoder.setJwtValidator(customValidator);
         return decoder;
@@ -94,10 +107,8 @@ public class OAuthServiceImpl implements OAuthService {
             idToken = googleVerifier.verify(googleToken);
         } catch (GeneralSecurityException e) {
             throw new UnauthorizedException("Invalid Google ID token");
-        } catch (RuntimeException e) {
-            throw new UnauthorizedException("Invalid Google ID token");
         }
-        // IOException propagates so OAuthRetryAspect can retry
+        // IOException and unexpected RuntimeException propagate so OAuthRetryAspect can retry
         if (idToken == null) {
             throw new UnauthorizedException("Invalid Google ID token");
         }

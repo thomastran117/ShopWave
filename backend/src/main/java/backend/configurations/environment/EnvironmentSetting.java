@@ -66,10 +66,13 @@ public class EnvironmentSetting {
     }
 
     public static class Security {
+        private static final String DEFAULT_MICROSOFT_JWKS_URI = "https://login.microsoftonline.com/common/discovery/v2.0/keys";
+
         private final Jwt jwt = new Jwt();
 
         private String googleClientId = "";
         private String microsoftClientId = "";
+        private String microsoftJwksUri = DEFAULT_MICROSOFT_JWKS_URI;
         private String recaptchaSecretKey = "";
 
         public Jwt getJwt() {
@@ -90,6 +93,14 @@ public class EnvironmentSetting {
 
         public void setMicrosoftClientId(String microsoftClientId) {
             this.microsoftClientId = microsoftClientId != null ? microsoftClientId : "";
+        }
+
+        public String getMicrosoftJwksUri() {
+            return microsoftJwksUri != null ? microsoftJwksUri : DEFAULT_MICROSOFT_JWKS_URI;
+        }
+
+        public void setMicrosoftJwksUri(String microsoftJwksUri) {
+            this.microsoftJwksUri = microsoftJwksUri != null ? microsoftJwksUri : DEFAULT_MICROSOFT_JWKS_URI;
         }
 
         public String getRecaptchaSecretKey() {
