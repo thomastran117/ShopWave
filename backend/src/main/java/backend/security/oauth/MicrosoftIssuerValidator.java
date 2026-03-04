@@ -77,6 +77,7 @@ public final class MicrosoftIssuerValidator {
 
     /**
      * Normalize issuer URL: lowercase host, percent-decode path. Returns null if invalid.
+     * If path decoding fails (e.g. malformed UTF-8), uses raw path so valid issuers are not rejected.
      */
     private static String normalizeIssuer(String issuer) {
         try {
@@ -88,14 +89,21 @@ public final class MicrosoftIssuerValidator {
                 return null;
             }
             String normalizedHost = host.toLowerCase(java.util.Locale.ROOT);
-            String path = (rawPath == null || rawPath.isEmpty())
-                    ? "/"
-                    : java.net.URLDecoder.decode(rawPath, java.nio.charset.StandardCharsets.UTF_8);
+            String path;
+            if (rawPath == null || rawPath.isEmpty()) {
+                path = "/";
+            } else {
+                try {
+                    path = java.net.URLDecoder.decode(rawPath, java.nio.charset.StandardCharsets.UTF_8);
+                } catch (IllegalArgumentException e) {
+                    path = rawPath.startsWith("/") ? rawPath : "/" + rawPath;
+                }
+            }
             if (!path.startsWith("/")) {
                 path = "/" + path;
             }
             return scheme.toLowerCase(java.util.Locale.ROOT) + "://" + normalizedHost + path;
-        } catch (URISyntaxException | IllegalArgumentException e) {
+        } catch (URISyntaxException e) {
             return null;
         }
     }

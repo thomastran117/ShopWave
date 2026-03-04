@@ -1,6 +1,8 @@
 package backend.aspects;
 
 import backend.configurations.application.OAuthMetrics;
+import backend.security.oauth.InvalidOAuthTokenException;
+import backend.security.oauth.OAuthProviderTransientException;
 import backend.security.oauth.OAuthVerificationError;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -73,6 +75,12 @@ public class OAuthRetryAspect {
                             throw e;
                         }
                         if (t instanceof Exception e) {
+                            // Rethrow OAuth types as-is so retryable vs non-retryable stay distinct; no double-wrap
+                            if (e instanceof InvalidOAuthTokenException
+                                    || e instanceof OAuthProviderTransientException
+                                    || e instanceof OAuthVerificationError) {
+                                throw e;
+                            }
                             throw e;
                         }
                         throw new OAuthVerificationError("Unexpected throwable during OAuth verification", t);

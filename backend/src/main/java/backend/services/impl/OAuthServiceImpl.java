@@ -7,7 +7,6 @@ import backend.models.other.OAuthUser;
 import backend.security.oauth.GoogleDiscoveryIssuers;
 import backend.security.oauth.InvalidOAuthTokenException;
 import backend.security.oauth.OAuthClaimUtils;
-import backend.security.oauth.OAuthNotSupportedException;
 import backend.security.oauth.OAuthProviderTransientException;
 import backend.security.oauth.OAuthRetryable;
 import backend.security.oauth.OAuthVerificationError;
@@ -45,7 +44,9 @@ public class OAuthServiceImpl implements OAuthService {
     private static final int DEFAULT_MAX_TOKEN_LENGTH = 16_384;
 
     private final String googleClientId;
-    private final GoogleIdTokenVerifier googleVerifier;
+    private final int googleConnectMs;
+    private final int googleReadMs;
+    private volatile GoogleIdTokenVerifier googleVerifier;
     private final JwtDecoder microsoftDecoder;
     private final int maxTokenLength;
 
@@ -53,19 +54,33 @@ public class OAuthServiceImpl implements OAuthService {
             EnvironmentSetting env,
             @Qualifier("microsoftJwtDecoder") JwtDecoder microsoftDecoder) {
         this.googleClientId = env.getSecurity().getGoogleClientId();
-        this.googleVerifier = buildGoogleVerifier(this.googleClientId, env.getSecurity().getOauthGoogle());
+        EnvironmentSetting.Security.OAuthGoogle timeouts = env.getSecurity().getOauthGoogle();
+        this.googleConnectMs = timeouts != null ? timeouts.getConnectTimeoutMs() : 5_000;
+        this.googleReadMs = timeouts != null ? timeouts.getReadTimeoutMs() : 10_000;
         this.microsoftDecoder = microsoftDecoder;
         int configured = env.getSecurity().getOauthMaxTokenLength();
         this.maxTokenLength = configured > 0 ? configured : DEFAULT_MAX_TOKEN_LENGTH;
     }
 
-    private static GoogleIdTokenVerifier buildGoogleVerifier(String clientId, EnvironmentSetting.Security.OAuthGoogle timeouts) {
+    /** Lazy-init verifier so discovery fetch does not block startup. */
+    private GoogleIdTokenVerifier getGoogleVerifier() {
+        GoogleIdTokenVerifier v = googleVerifier;
+        if (v == null) {
+            synchronized (this) {
+                v = googleVerifier;
+                if (v == null) {
+                    googleVerifier = v = buildGoogleVerifier(googleClientId, googleConnectMs, googleReadMs);
+                }
+            }
+        }
+        return v;
+    }
+
+    private static GoogleIdTokenVerifier buildGoogleVerifier(String clientId, int connectMs, int readMs) {
         if (clientId == null || clientId.isBlank()) {
             throw new IllegalStateException(
                     "Google OAuth client ID is not configured (set app.security.google-client-id)");
         }
-        int connectMs = timeouts != null ? timeouts.getConnectTimeoutMs() : 5_000;
-        int readMs = timeouts != null ? timeouts.getReadTimeoutMs() : 10_000;
         HttpTransport transport = OAuthGoogleHttpTransportFactory.build(connectMs, readMs);
         List<String> issuers = GoogleDiscoveryIssuers.getIssuers(transport);
         return new GoogleIdTokenVerifier.Builder(transport, GsonFactory.getDefaultInstance())
@@ -97,6 +112,22 @@ public class OAuthServiceImpl implements OAuthService {
         return false;
     }
 
+    /** Safely extracts a string claim from Google payload; avoids ClassCastException when provider returns non-string. */
+    private static String getStringClaimFromPayload(GoogleIdToken.Payload payload, String claimName) {
+        Object value = payload.get(claimName);
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof String s) {
+            return s.isBlank() ? null : s;
+        }
+        if (value instanceof Number || value instanceof Boolean) {
+            String s = value.toString();
+            return (s == null || s.isBlank()) ? null : s;
+        }
+        return null;
+    }
+
     /** Shared check for blank, invalid, or oversized tokens; throws before any verification. */
     private void requireValidTokenLength(String token, String providerLabel) {
         if (token == null || token.isBlank()) {
@@ -109,11 +140,6 @@ public class OAuthServiceImpl implements OAuthService {
     }
 
     @Override
-    public OAuthUser verifyAppleToken(String appleToken) {
-        throw new OAuthNotSupportedException("Apple OAuth is not implemented");
-    }
-
-    @Override
     @OAuthResilient
     public OAuthUser verifyGoogleToken(String googleToken) {
         requireValidTokenLength(googleToken, "Google ID");
@@ -122,7 +148,7 @@ public class OAuthServiceImpl implements OAuthService {
         }
         GoogleIdToken idToken;
         try {
-            idToken = googleVerifier.verify(googleToken);
+            idToken = getGoogleVerifier().verify(googleToken);
         } catch (GeneralSecurityException e) {
             throw new InvalidOAuthTokenException("Invalid Google ID token", e);
         } catch (Exception e) {
@@ -141,11 +167,14 @@ public class OAuthServiceImpl implements OAuthService {
         GoogleIdToken.Payload payload = idToken.getPayload();
         String sub = payload.getSubject();
         String email = payload.getEmail();
-        String name = payload.get("name") != null ? (String) payload.get("name") : (email != null ? email : "");
+        String name = getStringClaimFromPayload(payload, "name");
+        if (name == null || name.isBlank()) {
+            name = email != null ? email : "";
+        }
         if (email == null || email.isBlank()) {
             throw new InvalidOAuthTokenException("Missing Google email claim");
         }
-        return new OAuthUser(sub != null ? sub : "", email, name != null ? name : email, "google");
+        return new OAuthUser(sub != null ? sub : "", email, (name != null && !name.isBlank()) ? name : email, "google");
     }
 
     @Override

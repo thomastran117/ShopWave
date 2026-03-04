@@ -3,7 +3,6 @@ package backend.configurations.application;
 import backend.dtos.responses.general.ErrorResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.security.oauth.InvalidOAuthTokenException;
-import backend.security.oauth.OAuthNotSupportedException;
 import backend.security.oauth.OAuthProviderTransientException;
 import backend.security.oauth.OAuthVerificationError;
 
@@ -130,16 +129,6 @@ public class GlobalExceptionHandler {
                 "An unexpected error occurred."
         );
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
-    }
-
-    @ExceptionHandler(OAuthNotSupportedException.class)
-    public ResponseEntity<ErrorResponse> handleOAuthNotSupported(OAuthNotSupportedException ex) {
-        ErrorResponse body = new ErrorResponse(
-                HttpStatus.NOT_IMPLEMENTED.value(),
-                "Not Implemented",
-                ex.getMessage() != null ? ex.getMessage() : "This OAuth provider is not supported."
-        );
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body(body);
     }
 
     @ExceptionHandler(AppHttpException.class)

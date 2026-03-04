@@ -13,11 +13,6 @@ import backend.models.other.OAuthUser;
 public interface OAuthService {
 
     /**
-     * Verify an Apple ID token. Not implemented.
-     */
-    OAuthUser verifyAppleToken(String appleToken);
-
-    /**
      * Verify a Google ID token and return the user claims.
      *
      * @param googleToken the ID token from the Google sign-in client
