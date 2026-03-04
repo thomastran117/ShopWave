@@ -83,12 +83,17 @@ public class OAuthRetryAspect {
                 oauthMetrics.recordDuration(System.currentTimeMillis() - startMs);
             }
             return result;
-        } catch (CallNotPermittedException e) {
-            log.warn("OAuth verify blocked (circuit open) for {}: {}", methodName, e.toString());
-            throw e;
         } catch (Throwable e) {
             if (oauthMetrics != null) {
                 oauthMetrics.recordDuration(System.currentTimeMillis() - startMs);
+            }
+            // Ensure wrapped Errors always propagate without being reclassified or swallowed
+            if (e instanceof Error err) {
+                throw err;
+            }
+            if (e instanceof CallNotPermittedException cbe) {
+                log.warn("OAuth verify blocked (circuit open) for {}: {}", methodName, cbe.toString());
+                throw cbe;
             }
             if (e instanceof OAuthVerificationError) {
                 log.error("OAuth verify failed for {} (details omitted to avoid leakage)", methodName);

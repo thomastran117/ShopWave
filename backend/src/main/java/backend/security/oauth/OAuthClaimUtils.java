@@ -38,9 +38,10 @@ public final class OAuthClaimUtils {
     }
 
     /**
-     * Extracts a string value from a claim. Returns non-null only when the claim is
-     * a String, Number, or Boolean (explicit type check to avoid ClassCastException).
-     * Map, List, and other complex types are not stringified and return null.
+     * Extracts a string value from a claim. Handles known claim shapes: String, Number, Boolean,
+     * and collection-based claims (e.g. single-element list of string) common for some Microsoft tenants.
+     * Map and other complex types are not stringified. Ensures coverage of required claims when
+     * provider sends them as collections.
      */
     private static String getClaimValue(Jwt jwt, String name) {
         Object claim = jwt.getClaim(name);
@@ -54,11 +55,25 @@ public final class OAuthClaimUtils {
             String s = claim.toString();
             return s == null || s.isBlank() ? null : s;
         }
-        // Map, List, or other complex type: do not coerce to avoid wrong or unsafe string representation
-        if (claim instanceof Map || claim instanceof Collection) {
+        // Collection-based claim (e.g. ["user@example.com"]): take first non-blank string element
+        if (claim instanceof Collection<?> c) {
+            for (Object o : c) {
+                if (o instanceof String s && !s.isBlank()) {
+                    return s;
+                }
+                if (o != null) {
+                    String s = o.toString();
+                    if (s != null && !s.isBlank()) {
+                        return s;
+                    }
+                }
+            }
             return null;
         }
-        // Unknown type (e.g. custom object): avoid ClassCast in callers by not exposing
+        // Map or other: do not coerce to avoid wrong or unsafe string representation
+        if (claim instanceof Map) {
+            return null;
+        }
         return null;
     }
 }

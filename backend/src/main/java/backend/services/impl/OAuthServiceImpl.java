@@ -4,6 +4,7 @@ import backend.aspects.OAuthResilient;
 import backend.configurations.environment.EnvironmentSetting;
 import backend.http.OAuthGoogleHttpTransportFactory;
 import backend.models.other.OAuthUser;
+import backend.security.oauth.GoogleDiscoveryIssuers;
 import backend.security.oauth.InvalidOAuthTokenException;
 import backend.security.oauth.OAuthClaimUtils;
 import backend.security.oauth.OAuthNotSupportedException;
@@ -66,10 +67,34 @@ public class OAuthServiceImpl implements OAuthService {
         int connectMs = timeouts != null ? timeouts.getConnectTimeoutMs() : 5_000;
         int readMs = timeouts != null ? timeouts.getReadTimeoutMs() : 10_000;
         HttpTransport transport = OAuthGoogleHttpTransportFactory.build(connectMs, readMs);
+        List<String> issuers = GoogleDiscoveryIssuers.getIssuers(transport);
         return new GoogleIdTokenVerifier.Builder(transport, GsonFactory.getDefaultInstance())
                 .setAudience(Collections.singletonList(clientId))
-                .setIssuers(List.of("https://accounts.google.com", "accounts.google.com"))
+                .setIssuers(issuers)
                 .build();
+    }
+
+    /**
+     * True if the throwable (or its cause chain) indicates invalid token / validation failure
+     * (e.g. malformed JWT, bad format). Such failures should be InvalidOAuthTokenException so
+     * they do not open the circuit breaker.
+     */
+    private static boolean isValidationFailure(Throwable t) {
+        Throwable current = t;
+        while (current != null) {
+            if (current instanceof IllegalArgumentException
+                    || current instanceof NumberFormatException
+                    || current instanceof IllegalStateException) {
+                return true;
+            }
+            String name = current.getClass().getName();
+            if (name.contains("JsonParse") || name.contains("JsonProcessing")
+                    || name.contains("JwtException") || name.contains("SignatureException")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     /** Shared check for blank, invalid, or oversized tokens; throws before any verification. */
@@ -101,11 +126,13 @@ public class OAuthServiceImpl implements OAuthService {
         } catch (GeneralSecurityException e) {
             throw new InvalidOAuthTokenException("Invalid Google ID token", e);
         } catch (Exception e) {
-            // Only treat as transient when failure is clearly upstream (IO, 5xx, timeouts); cert fetch etc. must not be mis-categorized as invalid token
             if (OAuthRetryable.isRetryable(e)) {
                 throw new OAuthProviderTransientException("Google token verification failed", e);
             }
-            // Unknown/non-transient: wrap as verification error so CB can record it; do not treat as invalid token
+            // Validation failures (malformed JWT, bad format) should not open the circuit
+            if (isValidationFailure(e)) {
+                throw new InvalidOAuthTokenException("Invalid Google ID token", e);
+            }
             throw new OAuthVerificationError("Google token verification failed", e);
         }
         if (idToken == null) {
@@ -138,6 +165,9 @@ public class OAuthServiceImpl implements OAuthService {
                 throw new OAuthProviderTransientException("Microsoft token verification failed", e);
             }
             throw new OAuthVerificationError("Microsoft token verification failed", e);
+        }
+        if (jwt == null) {
+            throw new InvalidOAuthTokenException("Invalid Microsoft token (no claims)");
         }
         String email = OAuthClaimUtils.getClaim(jwt, "preferred_username", "email");
         if (email == null || email.isBlank()) {
