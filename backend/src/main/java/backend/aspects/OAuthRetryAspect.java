@@ -52,11 +52,11 @@ public class OAuthRetryAspect {
                     try {
                         return joinPoint.proceed();
                     } catch (Throwable t) {
-                        if (t instanceof Exception e) {
+                        if (t instanceof Error e) {
                             throw e;
                         }
-                        if (t instanceof Error e) {
-                            throw new OAuthVerificationError(e);
+                        if (t instanceof Exception e) {
+                            throw e;
                         }
                         String msg = t.getMessage();
                         throw new OAuthVerificationError(

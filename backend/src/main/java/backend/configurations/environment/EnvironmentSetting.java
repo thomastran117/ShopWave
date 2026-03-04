@@ -69,11 +69,16 @@ public class EnvironmentSetting {
         private static final String DEFAULT_MICROSOFT_JWKS_URI = "https://login.microsoftonline.com/common/discovery/v2.0/keys";
 
         private final Jwt jwt = new Jwt();
+        private final Jwks jwks = new Jwks();
 
         private String googleClientId = "";
         private String microsoftClientId = "";
         private String microsoftJwksUri = DEFAULT_MICROSOFT_JWKS_URI;
         private String recaptchaSecretKey = "";
+
+        public Jwks getJwks() {
+            return jwks;
+        }
 
         public Jwt getJwt() {
             return jwt;
@@ -109,6 +114,31 @@ public class EnvironmentSetting {
 
         public void setRecaptchaSecretKey(String recaptchaSecretKey) {
             this.recaptchaSecretKey = recaptchaSecretKey != null ? recaptchaSecretKey : "";
+        }
+
+        /**
+         * JWKS endpoint settings (timeouts, connection) for OAuth JWT verification.
+         * Used when fetching Microsoft JWKS to avoid blocking threads and to fail fast.
+         */
+        public static class Jwks {
+            private int connectTimeoutMs = 5_000;
+            private int readTimeoutMs = 10_000;
+
+            public int getConnectTimeoutMs() {
+                return connectTimeoutMs;
+            }
+
+            public void setConnectTimeoutMs(int connectTimeoutMs) {
+                this.connectTimeoutMs = Math.max(1_000, Math.min(30_000, connectTimeoutMs));
+            }
+
+            public int getReadTimeoutMs() {
+                return readTimeoutMs;
+            }
+
+            public void setReadTimeoutMs(int readTimeoutMs) {
+                this.readTimeoutMs = Math.max(1_000, Math.min(60_000, readTimeoutMs));
+            }
         }
 
         public static class Jwt {

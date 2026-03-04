@@ -9,8 +9,9 @@ import org.springframework.stereotype.Component;
 
 /**
  * Logs when an OAuth token verification call is retried after a transient
- * error (e.g. network timeout, 5xx from provider). Exception messages are
- * not logged to avoid leaking provider or internal details.
+ * error (e.g. network timeout, 5xx from provider). Only exception type is
+ * logged; messages and stack traces are avoided in logs to prevent sensitive
+ * or internal detail leakage.
  */
 @Component
 public class OAuthRetryListener implements RetryListener {
@@ -23,8 +24,8 @@ public class OAuthRetryListener implements RetryListener {
         log.warn("OAuth verification retry scheduled (attempt {}) after error: {}",
                 nextAttempt,
                 throwable.getClass().getSimpleName());
-        if (log.isDebugEnabled()) {
-            log.debug("OAuth retry exception type: {}", throwable.getClass().getName());
+        if (log.isTraceEnabled()) {
+            log.trace("OAuth retry exception type: {}", throwable.getClass().getName());
         }
     }
 }

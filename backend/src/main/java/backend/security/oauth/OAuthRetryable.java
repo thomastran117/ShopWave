@@ -13,14 +13,24 @@ import java.util.Set;
  */
 public final class OAuthRetryable {
 
-    private static final Set<Class<?>> TRANSIENT_TYPES = Set.of(
-            OAuthProviderTransientException.class,
-            IOException.class,
-            HttpServerErrorException.class,
-            ResourceAccessException.class
+    @SuppressWarnings("unchecked")
+    private static final Set<Class<? extends Throwable>> TRANSIENT_TYPES = Set.of(
+            (Class<? extends Throwable>) (Class<?>) OAuthProviderTransientException.class,
+            (Class<? extends Throwable>) (Class<?>) IOException.class,
+            (Class<? extends Throwable>) (Class<?>) HttpServerErrorException.class,
+            (Class<? extends Throwable>) (Class<?>) ResourceAccessException.class
     );
 
     private OAuthRetryable() {}
+
+    /**
+     * Returns the set of exception types considered transient (retryable).
+     * Use this in retry/circuit-breaker configuration to stay in sync with
+     * {@link #isRetryable(Throwable)} and avoid divergence.
+     */
+    public static Set<Class<? extends Throwable>> getTransientTypes() {
+        return Set.copyOf(TRANSIENT_TYPES);
+    }
 
     /**
      * Returns true if the throwable (or its cause chain) represents a

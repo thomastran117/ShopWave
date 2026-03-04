@@ -2,7 +2,7 @@ package backend.configurations.application;
 
 import backend.configurations.environment.EnvironmentSetting;
 import backend.security.oauth.InvalidOAuthTokenException;
-import backend.security.oauth.OAuthProviderTransientException;
+import backend.security.oauth.OAuthRetryable;
 import backend.security.oauth.OAuthVerificationError;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
@@ -11,15 +11,11 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.retry.RetryListener;
 import org.springframework.retry.backoff.ExponentialBackOffPolicy;
+import org.springframework.classify.BinaryExceptionClassifier;
 import org.springframework.retry.policy.SimpleRetryPolicy;
 import org.springframework.retry.support.RetryTemplate;
-import org.springframework.web.client.HttpServerErrorException;
-import org.springframework.web.client.ResourceAccessException;
 
-import java.io.IOException;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Retry and circuit breaker for OAuth token verification. Retries only on
@@ -51,18 +47,14 @@ public class OAuthResilienceConfig {
         backOff.setMaxInterval(retry.getMaxIntervalMs());
         template.setBackOffPolicy(backOff);
 
-        Map<Class<? extends Throwable>, Boolean> retryable = new HashMap<>();
-        retryable.put(OAuthProviderTransientException.class, true);
-        retryable.put(IOException.class, true);
-        retryable.put(HttpServerErrorException.class, true);
-        retryable.put(ResourceAccessException.class, true);
-        retryable.put(InvalidOAuthTokenException.class, false);
-        retryable.put(OAuthVerificationError.class, false);
-
+        BinaryExceptionClassifier classifier = new BinaryExceptionClassifier(
+                OAuthRetryable.getTransientTypes(),
+                false
+        );
+        classifier.setTraverseCauses(true);
         SimpleRetryPolicy retryPolicy = new SimpleRetryPolicy(
                 retry.getMaxAttempts(),
-                retryable,
-                true
+                classifier
         );
         template.setRetryPolicy(retryPolicy);
         template.setListeners(new RetryListener[]{ oauthRetryListener });
@@ -81,10 +73,7 @@ public class OAuthResilienceConfig {
                 .slidingWindowSize(cb.getSlidingWindowSize())
                 .minimumNumberOfCalls(cb.getMinimumNumberOfCalls())
                 .waitDurationInOpenState(Duration.ofSeconds(cb.getWaitDurationInOpenStateSeconds()))
-                .recordException(ex -> ex instanceof OAuthProviderTransientException
-                        || ex instanceof IOException
-                        || ex instanceof HttpServerErrorException
-                        || ex instanceof ResourceAccessException)
+                .recordException(OAuthRetryable::isRetryable)
                 .ignoreException(ex -> ex instanceof InvalidOAuthTokenException || ex instanceof OAuthVerificationError)
                 .build();
 
