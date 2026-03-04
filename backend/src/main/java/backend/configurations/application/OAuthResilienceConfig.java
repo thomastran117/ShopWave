@@ -3,6 +3,7 @@ package backend.configurations.application;
 import backend.configurations.environment.EnvironmentSetting;
 import backend.security.oauth.InvalidOAuthTokenException;
 import backend.security.oauth.OAuthRetryable;
+import backend.security.oauth.OAuthVerificationError;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -73,8 +74,9 @@ public class OAuthResilienceConfig {
                 .slidingWindowSize(cb.getSlidingWindowSize())
                 .minimumNumberOfCalls(cb.getMinimumNumberOfCalls())
                 .waitDurationInOpenState(Duration.ofSeconds(cb.getWaitDurationInOpenStateSeconds()))
-                .recordException(OAuthRetryable::isRetryable)
-                .ignoreException(ex -> ex instanceof InvalidOAuthTokenException)
+                .recordException(ex -> OAuthRetryable.isRetryable(OAuthRetryable.throwableForClassification(ex)))
+                .ignoreException(ex -> ex instanceof InvalidOAuthTokenException
+                        || (ex instanceof OAuthVerificationError o && !OAuthRetryable.isRetryable(o.getCause())))
                 .build();
 
         return CircuitBreaker.of("oauthVerification", config);

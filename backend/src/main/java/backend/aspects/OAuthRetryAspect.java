@@ -14,6 +14,8 @@ import org.springframework.retry.RetryCallback;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.atomic.AtomicLong;
+
 /**
  * Applies retry and circuit breaker to methods annotated with {@link OAuthResilient}.
  * Retry wraps circuit breaker so each attempt is observed by the CB (recommended).
@@ -24,6 +26,8 @@ import org.springframework.stereotype.Component;
 public class OAuthRetryAspect {
 
     private static final Logger log = LoggerFactory.getLogger(OAuthRetryAspect.class);
+    private static final long RETRY_LOG_RATE_LIMIT_MS = 10_000;
+    private static final AtomicLong lastRetryLogTime = new AtomicLong(0);
 
     private final RetryTemplate oauthRetryTemplate;
     private final CircuitBreaker oauthCircuitBreaker;
@@ -45,7 +49,11 @@ public class OAuthRetryAspect {
                 int attempt = context.getRetryCount() + 1;
 
                 if (attempt > 1) {
-                    log.warn("OAuth verify retry attempt {} for {}", attempt, methodName);
+                    long now = System.currentTimeMillis();
+                    long prev = lastRetryLogTime.get();
+                    if (now - prev >= RETRY_LOG_RATE_LIMIT_MS && lastRetryLogTime.compareAndSet(prev, now)) {
+                        log.warn("OAuth verify retry attempt {} for {}", attempt, methodName);
+                    }
                 }
 
                 return oauthCircuitBreaker.executeCallable(() -> {

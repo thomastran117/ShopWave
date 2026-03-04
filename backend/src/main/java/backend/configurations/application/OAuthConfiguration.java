@@ -2,8 +2,6 @@ package backend.configurations.application;
 
 import backend.configurations.environment.EnvironmentSetting;
 import backend.security.oauth.MicrosoftIssuerValidator;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -27,50 +25,28 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * OAuth configuration layer: validates required OAuth settings (Google/Microsoft client IDs,
- * Microsoft JWKS URI) at startup and provides a cached Microsoft JwtDecoder with timeouts
- * and optional JWKS reachability check. Validation happens here instead of in the service
- * constructor to keep startup failures in the configuration layer.
+ * OAuth configuration layer: provides a cached Microsoft JwtDecoder with timeouts.
+ * Required-field validation is centralized in {@link OAuthConfigValidator}; no duplicate checks here.
  */
 @Configuration
 @DependsOn("oauthConfigValidator")
 public class OAuthConfiguration {
 
-    private static final Logger log = LoggerFactory.getLogger(OAuthConfiguration.class);
-
     private static final String HEADER_TYP_ACCESS_TOKEN = "at+jwt";
     private static final String HEADER_ALG_NONE = "none";
 
     /**
-     * Single cached JwtDecoder for Microsoft ID tokens. Uses a dedicated RestTemplate
-     * with connect/read timeouts for JWKS fetching to avoid blocking threads.
-     * JWKS URI is validated for reachability at startup when possible.
+     * Single cached JwtDecoder for Microsoft ID tokens. Required-field validation is done
+     * by {@link OAuthConfigValidator}; this bean assumes config is already valid.
      */
     @Bean("microsoftJwtDecoder")
     @Qualifier("microsoftJwtDecoder")
     public JwtDecoder microsoftJwtDecoder(EnvironmentSetting env) {
         EnvironmentSetting.Security security = env.getSecurity();
-        String googleId = security.getGoogleClientId();
         String microsoftId = security.getMicrosoftClientId();
         String jwksUri = security.getMicrosoftJwksUri();
 
-        if (googleId == null || googleId.isBlank()) {
-            throw new IllegalStateException(
-                    "Google OAuth client ID is not configured (set app.security.google-client-id)");
-        }
-        if (microsoftId == null || microsoftId.isBlank()) {
-            throw new IllegalStateException(
-                    "Microsoft OAuth client ID is not configured (set app.security.microsoft-client-id)");
-        }
-        if (jwksUri == null || jwksUri.isBlank()) {
-            throw new IllegalStateException(
-                    "Microsoft OAuth JWKS URI is not configured (set app.security.microsoft-jwks-uri)");
-        }
-
         RestTemplate jwksRest = jwksRestTemplate(env);
-        if (security.getJwks().isValidateAtStartup()) {
-            validateJwksReachable(jwksUri, jwksRest, security.getJwks());
-        }
 
         String authorityHost = security.getMicrosoftAuthorityHost();
         Set<String> wellKnownTenants = parseWellKnownTenants(security.getMicrosoftWellKnownTenants());
@@ -87,37 +63,6 @@ public class OAuthConfiguration {
         factory.setConnectTimeout(Duration.ofMillis(jwks.getConnectTimeoutMs()));
         factory.setReadTimeout(Duration.ofMillis(jwks.getReadTimeoutMs()));
         return new RestTemplate(factory);
-    }
-
-    /**
-     * When app.security.jwks.validate-at-startup is true, validates JWKS URI is reachable.
-     * If app.security.jwks.fail-startup-on-unreachable is false (default), logs warning and continues so non-prod does not block.
-     */
-    private static void validateJwksReachable(String jwksUri, RestTemplate rest,
-                                               EnvironmentSetting.Security.Jwks jwksConfig) {
-        if (jwksUri == null || jwksUri.isBlank()) {
-            if (jwksConfig.isFailStartupOnUnreachable()) {
-                throw new IllegalStateException("JWKS URI is blank; cannot validate reachability.");
-            }
-            return;
-        }
-        if (!jwksUri.startsWith("https://")) {
-            if (jwksConfig.isFailStartupOnUnreachable()) {
-                throw new IllegalStateException("JWKS URI must use HTTPS: " + jwksUri);
-            }
-            log.warn("JWKS URI does not use HTTPS; skipping reachability check.");
-            return;
-        }
-        try {
-            rest.getForObject(jwksUri, String.class);
-        } catch (Exception e) {
-            if (jwksConfig.isFailStartupOnUnreachable()) {
-                throw new IllegalStateException(
-                        "JWKS URI not reachable at startup: " + jwksUri + ". " + e.getMessage(), e);
-            }
-            log.warn("JWKS URI not reachable at startup ({}). Continuing; failures may occur at runtime. {}",
-                    jwksUri, e.getMessage());
-        }
     }
 
     private static Set<String> parseWellKnownTenants(String csv) {

@@ -1,5 +1,7 @@
 package backend.security.oauth;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -39,23 +41,27 @@ public final class MicrosoftIssuerValidator {
 
     /**
      * Validates issuer against the given authority host and allowed well-known tenant segments.
+     * Normalizes issuer (lowercase host, percent-decode) to prevent bypass via mixed-case or encoded characters.
      * Authority host must end with / (e.g. https://login.microsoftonline.com/ or
-     * https://login.microsoftonline.de/ for sovereign clouds). Well-known tenants are
-     * segment values between host and /v2.0 (e.g. common, organizations, consumers);
-     * any tenant GUID is always allowed.
+     * https://login.microsoftonline.de/ for sovereign clouds).
      */
     public static boolean isValid(String issuer, String authorityHost, Set<String> wellKnownTenants) {
         if (issuer == null || issuer.isBlank()) {
+            return false;
+        }
+        String normalizedIssuer = normalizeIssuer(issuer);
+        if (normalizedIssuer == null) {
             return false;
         }
         String host = (authorityHost != null && !authorityHost.isBlank()) ? authorityHost : DEFAULT_AUTHORITY_HOST;
         if (!host.endsWith("/")) {
             host = host + "/";
         }
-        if (!issuer.startsWith(host)) {
+        String normalizedHost = normalizeIssuer(host);
+        if (normalizedHost == null || !normalizedIssuer.startsWith(normalizedHost)) {
             return false;
         }
-        String afterHost = issuer.substring(host.length());
+        String afterHost = normalizedIssuer.substring(normalizedHost.length());
         Set<String> tenants = (wellKnownTenants != null && !wellKnownTenants.isEmpty())
                 ? wellKnownTenants : DEFAULT_WELL_KNOWN_TENANTS;
         if (afterHost.endsWith(V2_PATH_SUFFIX)) {
@@ -69,11 +75,37 @@ public final class MicrosoftIssuerValidator {
         return false;
     }
 
+    /**
+     * Normalize issuer URL: lowercase host, percent-decode path. Returns null if invalid.
+     */
+    private static String normalizeIssuer(String issuer) {
+        try {
+            URI uri = new URI(issuer.trim());
+            String scheme = uri.getScheme();
+            String host = uri.getHost();
+            String rawPath = uri.getRawPath();
+            if (scheme == null || host == null) {
+                return null;
+            }
+            String normalizedHost = host.toLowerCase(java.util.Locale.ROOT);
+            String path = (rawPath == null || rawPath.isEmpty())
+                    ? "/"
+                    : java.net.URLDecoder.decode(rawPath, java.nio.charset.StandardCharsets.UTF_8);
+            if (!path.startsWith("/")) {
+                path = "/" + path;
+            }
+            return scheme.toLowerCase(java.util.Locale.ROOT) + "://" + normalizedHost + path;
+        } catch (URISyntaxException | IllegalArgumentException e) {
+            return null;
+        }
+    }
+
     private static boolean isValidTenantSegment(String segment, Set<String> wellKnownTenants) {
         if (segment == null || segment.isBlank()) {
             return false;
         }
-        if (wellKnownTenants.contains(segment)) {
+        String normalized = segment.trim().toLowerCase(java.util.Locale.ROOT);
+        if (wellKnownTenants.stream().anyMatch(t -> t != null && t.toLowerCase(java.util.Locale.ROOT).equals(normalized))) {
             return true;
         }
         return TENANT_GUID.matcher(segment).matches();

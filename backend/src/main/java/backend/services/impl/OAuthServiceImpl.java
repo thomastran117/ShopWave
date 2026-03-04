@@ -35,6 +35,12 @@ public class OAuthServiceImpl implements OAuthService {
 
     private static final Logger log = LoggerFactory.getLogger(OAuthServiceImpl.class);
 
+    /**
+     * Maximum token length to avoid oversized token attacks. Typical Google/Microsoft ID tokens
+     * are under 4KB; 16KB allows headroom. Configurable via app.security.oauth-max-token-length.
+     */
+    private static final int DEFAULT_MAX_TOKEN_LENGTH = 16_384;
+
     private final String googleClientId;
     private final GoogleIdTokenVerifier googleVerifier;
     private final JwtDecoder microsoftDecoder;
@@ -46,8 +52,8 @@ public class OAuthServiceImpl implements OAuthService {
         this.googleClientId = env.getSecurity().getGoogleClientId();
         this.googleVerifier = buildGoogleVerifier(this.googleClientId, env.getSecurity().getOauthGoogle());
         this.microsoftDecoder = microsoftDecoder;
-        this.maxTokenLength = env.getSecurity().getOauthMaxTokenLength() > 0
-                ? env.getSecurity().getOauthMaxTokenLength() : DEFAULT_MAX_TOKEN_LENGTH;
+        int configured = env.getSecurity().getOauthMaxTokenLength();
+        this.maxTokenLength = configured > 0 ? configured : DEFAULT_MAX_TOKEN_LENGTH;
     }
 
     private static GoogleIdTokenVerifier buildGoogleVerifier(String clientId, EnvironmentSetting.Security.OAuthGoogle timeouts) {
@@ -68,12 +74,6 @@ public class OAuthServiceImpl implements OAuthService {
         TimeoutConnectionFactory factory = new TimeoutConnectionFactory(connectMs, readMs);
         return new NetHttpTransport.Builder().setConnectionFactory(factory).build();
     }
-
-    /**
-     * Maximum token length to avoid oversized token attacks. Typical Google/Microsoft ID tokens
-     * are under 4KB; 16KB allows headroom. Configurable via app.security.oauth-max-token-length.
-     */
-    private static final int DEFAULT_MAX_TOKEN_LENGTH = 16_384;
 
     /** Shared check for blank, invalid, or oversized tokens; throws before any verification. */
     private void requireValidTokenLength(String token, String providerLabel) {
