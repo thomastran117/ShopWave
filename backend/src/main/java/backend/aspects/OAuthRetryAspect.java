@@ -12,6 +12,8 @@ import org.springframework.retry.RetryCallback;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.Callable;
+
 /**
  * Applies retry with exponential backoff and circuit breaker to OAuth token
  * verification (Google and Microsoft). Does not apply to verifyAppleToken.
@@ -37,7 +39,7 @@ public class OAuthRetryAspect {
             "|| execution(* backend.services.intf.OAuthService.verifyMicrosoftToken(..))")
     public Object aroundOAuthVerification(ProceedingJoinPoint joinPoint) throws Throwable {
         String methodName = ((MethodSignature) joinPoint.getSignature()).getMethod().getName();
-        return oauthCircuitBreaker.executeCallable(() -> {
+        Callable<Object> callable = () -> {
             try {
                 return oauthRetryTemplate.execute((RetryCallback<Object, Throwable>) context -> {
                     int attempt = context.getRetryCount() + 1;
@@ -46,12 +48,12 @@ public class OAuthRetryAspect {
                     }
                     return joinPoint.proceed();
                 });
-            } catch (Throwable t) {
-                if (t instanceof Exception e) {
-                    throw e;
-                }
-                throw new java.lang.reflect.UndeclaredThrowableException(t);
+            } catch (Exception e) {
+                throw e;
+            } catch (Error e) {
+                throw new java.lang.reflect.UndeclaredThrowableException(e);
             }
-        });
+        };
+        return oauthCircuitBreaker.executeCallable(callable);
     }
 }

@@ -2,7 +2,6 @@ package backend.services.impl;
 
 import backend.configurations.environment.EnvironmentSetting;
 import backend.exceptions.http.NotImplementedException;
-import backend.exceptions.http.ServiceUnavaliableException;
 import backend.exceptions.http.UnauthorizedException;
 import backend.models.other.OAuthUser;
 import backend.services.intf.OAuthService;
@@ -49,7 +48,7 @@ public class OAuthServiceImpl implements OAuthService {
 
     private static GoogleIdTokenVerifier buildGoogleVerifier(String clientId) {
         if (clientId == null || clientId.isBlank()) {
-            return null;
+            throw new IllegalStateException("Google OAuth client ID is not configured (set app.security.google-client-id)");
         }
         return new GoogleIdTokenVerifier.Builder(new NetHttpTransport(), JacksonFactory.getDefaultInstance())
                 .setAudience(Collections.singletonList(clientId))
@@ -58,7 +57,7 @@ public class OAuthServiceImpl implements OAuthService {
 
     private static JwtDecoder buildMicrosoftDecoder(String clientId) {
         if (clientId == null || clientId.isBlank()) {
-            return null;
+            throw new IllegalStateException("Microsoft OAuth client ID is not configured (set app.security.microsoft-client-id)");
         }
         String audience = clientId;
         OAuth2TokenValidator<Jwt> defaultValidator = JwtValidators.createDefault();
@@ -90,13 +89,12 @@ public class OAuthServiceImpl implements OAuthService {
 
     @Override
     public OAuthUser verifyGoogleToken(String googleToken) throws IOException {
-        if (googleVerifier == null) {
-            throw new ServiceUnavaliableException("Google OAuth is not available");
-        }
         GoogleIdToken idToken;
         try {
             idToken = googleVerifier.verify(googleToken);
         } catch (GeneralSecurityException e) {
+            throw new UnauthorizedException("Invalid Google ID token");
+        } catch (RuntimeException e) {
             throw new UnauthorizedException("Invalid Google ID token");
         }
         // IOException propagates so OAuthRetryAspect can retry
@@ -115,9 +113,6 @@ public class OAuthServiceImpl implements OAuthService {
 
     @Override
     public OAuthUser verifyMicrosoftToken(String microsoftToken) {
-        if (microsoftDecoder == null) {
-            throw new ServiceUnavaliableException("Microsoft OAuth is not available");
-        }
         Jwt jwt;
         try {
             jwt = microsoftDecoder.decode(microsoftToken);
