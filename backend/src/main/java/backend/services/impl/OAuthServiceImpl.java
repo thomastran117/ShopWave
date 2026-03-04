@@ -18,6 +18,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.security.GeneralSecurityException;
@@ -29,6 +30,7 @@ import java.util.List;
  * obtained from the provider; this service verifies it (signature, audience, issuer)
  * and returns user claims. Retry and circuit breaker are applied by {@link backend.aspects.OAuthRetryAspect}.
  */
+@Service
 public class OAuthServiceImpl implements OAuthService {
 
     private static final String MICROSOFT_KEYS_URI = "https://login.microsoftonline.com/common/discovery/v2.0/keys";
@@ -120,7 +122,7 @@ public class OAuthServiceImpl implements OAuthService {
         try {
             jwt = microsoftDecoder.decode(microsoftToken);
         } catch (Exception e) {
-            throw new UnauthorizedException("Invalid Microsoft token: " + (e.getMessage() != null ? e.getMessage() : "validation failed"));
+            throw new UnauthorizedException("Invalid Microsoft token");
         }
         String email = getClaim(jwt, "preferred_username", "email");
         if (email == null || email.isBlank()) {
