@@ -2,6 +2,7 @@ package backend.configurations.application;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.retry.RetryCallback;
 import org.springframework.retry.RetryContext;
 import org.springframework.retry.RetryListener;
@@ -18,9 +19,18 @@ public class OAuthRetryListener implements RetryListener {
 
     private static final Logger log = LoggerFactory.getLogger(OAuthRetryListener.class);
 
+    private final OAuthMetrics oauthMetrics;
+
+    public OAuthRetryListener(@Autowired(required = false) OAuthMetrics oauthMetrics) {
+        this.oauthMetrics = oauthMetrics;
+    }
+
     @Override
     public <T, E extends Throwable> void onError(RetryContext context, RetryCallback<T, E> callback, Throwable throwable) {
         int nextAttempt = context.getRetryCount() + 1;
+        if (oauthMetrics != null) {
+            oauthMetrics.recordRetry();
+        }
         log.warn("OAuth verification retry scheduled (attempt {}) after error: {}",
                 nextAttempt,
                 throwable.getClass().getSimpleName());

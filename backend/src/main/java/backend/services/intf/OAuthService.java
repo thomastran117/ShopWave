@@ -1,11 +1,14 @@
 package backend.services.intf;
 
+import backend.aspects.OAuthResilient;
 import backend.models.other.OAuthUser;
 
 /**
  * Verifies OAuth ID tokens from providers (Google, Microsoft). The client (web or mobile)
  * obtains the token from the provider and sends it to the backend; this service verifies
  * it with the provider (e.g. via signature validation and audience/issuer checks).
+ * Methods that call providers are annotated with {@link OAuthResilient} so retry and
+ * circuit breaker apply; new provider methods should be annotated on the interface.
  */
 public interface OAuthService {
 
@@ -22,6 +25,7 @@ public interface OAuthService {
      * @throws backend.security.oauth.InvalidOAuthTokenException   if the token is invalid
      * @throws backend.security.oauth.OAuthProviderTransientException if provider call failed transiently (retried by aspect)
      */
+    @OAuthResilient
     OAuthUser verifyGoogleToken(String googleToken);
 
     /**
@@ -32,5 +36,6 @@ public interface OAuthService {
      * @throws backend.security.oauth.InvalidOAuthTokenException   if the token is invalid or required claims are missing
      * @throws backend.security.oauth.OAuthProviderTransientException if provider call failed transiently (retried by aspect)
      */
+    @OAuthResilient
     OAuthUser verifyMicrosoftToken(String microsoftToken);
 }

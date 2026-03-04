@@ -2,11 +2,13 @@ package backend.services.impl;
 
 import backend.aspects.OAuthResilient;
 import backend.configurations.environment.EnvironmentSetting;
+import backend.http.TimeoutConnectionFactory;
 import backend.models.other.OAuthUser;
 import backend.security.oauth.InvalidOAuthTokenException;
 import backend.security.oauth.OAuthClaimUtils;
 import backend.security.oauth.OAuthNotSupportedException;
 import backend.security.oauth.OAuthProviderTransientException;
+import backend.security.oauth.OAuthRetryable;
 import backend.services.intf.OAuthService;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
@@ -19,10 +21,6 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.HttpServerErrorException;
-import org.springframework.web.client.ResourceAccessException;
-
-import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.util.Collections;
 
@@ -40,6 +38,7 @@ public class OAuthServiceImpl implements OAuthService {
     private final String googleClientId;
     private final GoogleIdTokenVerifier googleVerifier;
     private final JwtDecoder microsoftDecoder;
+    private final int maxTokenLength;
 
     public OAuthServiceImpl(
             EnvironmentSetting env,
@@ -47,6 +46,8 @@ public class OAuthServiceImpl implements OAuthService {
         this.googleClientId = env.getSecurity().getGoogleClientId();
         this.googleVerifier = buildGoogleVerifier(this.googleClientId, env.getSecurity().getOauthGoogle());
         this.microsoftDecoder = microsoftDecoder;
+        this.maxTokenLength = env.getSecurity().getOauthMaxTokenLength() > 0
+                ? env.getSecurity().getOauthMaxTokenLength() : DEFAULT_MAX_TOKEN_LENGTH;
     }
 
     private static GoogleIdTokenVerifier buildGoogleVerifier(String clientId, EnvironmentSetting.Security.OAuthGoogle timeouts) {
@@ -60,20 +61,27 @@ public class OAuthServiceImpl implements OAuthService {
                 .build();
     }
 
-    /** Builds transport for Google cert fetch. Timeout config (oauthGoogle) is available for future use when the client API supports it. */
+    /** Builds transport with connect/read timeouts for Google cert fetch to avoid blocking threads. */
     private static NetHttpTransport buildGoogleHttpTransport(EnvironmentSetting.Security.OAuthGoogle timeouts) {
-        return new NetHttpTransport();
+        int connectMs = timeouts != null ? timeouts.getConnectTimeoutMs() : 5_000;
+        int readMs = timeouts != null ? timeouts.getReadTimeoutMs() : 10_000;
+        TimeoutConnectionFactory factory = new TimeoutConnectionFactory(connectMs, readMs);
+        return new NetHttpTransport.Builder().setConnectionFactory(factory).build();
     }
 
-    /** Maximum token length to avoid oversized token attacks (e.g. 16KB). */
-    private static final int MAX_TOKEN_LENGTH = 16_384;
+    /**
+     * Maximum token length to avoid oversized token attacks. Typical Google/Microsoft ID tokens
+     * are under 4KB; 16KB allows headroom. Configurable via app.security.oauth-max-token-length.
+     */
+    private static final int DEFAULT_MAX_TOKEN_LENGTH = 16_384;
 
-    /** Shared check for blank, invalid, or oversized tokens across providers; throws before any verification. */
-    private static void requireValidTokenLength(String token, String providerLabel) {
+    /** Shared check for blank, invalid, or oversized tokens; throws before any verification. */
+    private void requireValidTokenLength(String token, String providerLabel) {
         if (token == null || token.isBlank()) {
             throw new InvalidOAuthTokenException("Invalid " + providerLabel + " token");
         }
-        if (token.length() > MAX_TOKEN_LENGTH) {
+        int maxLen = maxTokenLength;
+        if (token.length() > maxLen) {
             throw new InvalidOAuthTokenException("Invalid " + providerLabel + " token");
         }
     }
@@ -95,13 +103,10 @@ public class OAuthServiceImpl implements OAuthService {
             idToken = googleVerifier.verify(googleToken);
         } catch (GeneralSecurityException e) {
             throw new InvalidOAuthTokenException("Invalid Google ID token", e);
-        } catch (IOException e) {
-            throw new OAuthProviderTransientException("Google token verification failed", e);
-        } catch (ResourceAccessException e) {
-            throw new OAuthProviderTransientException("Google token verification failed", e);
-        } catch (HttpServerErrorException e) {
-            throw new OAuthProviderTransientException("Google token verification failed", e);
-        } catch (RuntimeException e) {
+        } catch (Exception e) {
+            if (OAuthRetryable.isRetryable(e)) {
+                throw new OAuthProviderTransientException("Google token verification failed", e);
+            }
             throw new InvalidOAuthTokenException("Invalid Google ID token", e);
         }
         if (idToken == null) {
@@ -129,10 +134,11 @@ public class OAuthServiceImpl implements OAuthService {
             jwt = microsoftDecoder.decode(microsoftToken);
         } catch (JwtException e) {
             throw new InvalidOAuthTokenException("Invalid Microsoft token", e);
-        } catch (ResourceAccessException e) {
-            throw new OAuthProviderTransientException("Microsoft token verification failed", e);
-        } catch (HttpServerErrorException e) {
-            throw new OAuthProviderTransientException("Microsoft token verification failed", e);
+        } catch (Exception e) {
+            if (OAuthRetryable.isRetryable(e)) {
+                throw new OAuthProviderTransientException("Microsoft token verification failed", e);
+            }
+            throw new InvalidOAuthTokenException("Invalid Microsoft token", e);
         }
         String email = OAuthClaimUtils.getClaim(jwt, "preferred_username", "email");
         if (email == null || email.isBlank()) {

@@ -78,6 +78,8 @@ public class EnvironmentSetting {
         private String microsoftAuthorityHost = "https://login.microsoftonline.com/";
         /** Comma-separated well-known tenant segments (e.g. common,organizations,consumers). */
         private String microsoftWellKnownTenants = "common,organizations,consumers";
+        /** Max OAuth token length (bytes) to avoid oversized token attacks. Typical ID tokens < 4KB; default 16384. */
+        private int oauthMaxTokenLength = 16_384;
         private String recaptchaSecretKey = "";
 
         private final OAuthGoogle oauthGoogle = new OAuthGoogle();
@@ -134,6 +136,14 @@ public class EnvironmentSetting {
             this.microsoftWellKnownTenants = microsoftWellKnownTenants != null ? microsoftWellKnownTenants : "common,organizations,consumers";
         }
 
+        public int getOauthMaxTokenLength() {
+            return oauthMaxTokenLength > 0 ? oauthMaxTokenLength : 16_384;
+        }
+
+        public void setOauthMaxTokenLength(int oauthMaxTokenLength) {
+            this.oauthMaxTokenLength = Math.max(256, Math.min(64 * 1024, oauthMaxTokenLength));
+        }
+
         public String getRecaptchaSecretKey() {
             return recaptchaSecretKey != null ? recaptchaSecretKey : "";
         }
@@ -149,8 +159,10 @@ public class EnvironmentSetting {
         public static class Jwks {
             private int connectTimeoutMs = 5_000;
             private int readTimeoutMs = 10_000;
-            /** When true, startup validates JWKS reachability and fails fast if unreachable. Default false so startup is not dependent on external services. */
+            /** When true, startup validates JWKS reachability. Default false so startup is not dependent on external services. */
             private boolean validateAtStartup = false;
+            /** When true and validateAtStartup is true, startup fails if JWKS unreachable. When false, log warning and continue (safe for non-prod). Default false. */
+            private boolean failStartupOnUnreachable = false;
 
             public boolean isValidateAtStartup() {
                 return validateAtStartup;
@@ -158,6 +170,14 @@ public class EnvironmentSetting {
 
             public void setValidateAtStartup(boolean validateAtStartup) {
                 this.validateAtStartup = validateAtStartup;
+            }
+
+            public boolean isFailStartupOnUnreachable() {
+                return failStartupOnUnreachable;
+            }
+
+            public void setFailStartupOnUnreachable(boolean failStartupOnUnreachable) {
+                this.failStartupOnUnreachable = failStartupOnUnreachable;
             }
 
             public int getConnectTimeoutMs() {

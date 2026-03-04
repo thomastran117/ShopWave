@@ -13,6 +13,8 @@ import jakarta.annotation.PostConstruct;
  * Validates required OAuth environment configuration keys early at startup,
  * so failures are explicit and not deferred to bean creation. Run before
  * OAuth beans so a single place owns validation.
+ * Uses IllegalStateException for fail-fast; could be replaced with
+ * {@code @Validated} on a dedicated OAuthConfigProperties bean if preferred.
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)

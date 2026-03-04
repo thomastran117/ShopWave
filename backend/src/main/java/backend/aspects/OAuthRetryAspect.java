@@ -52,17 +52,15 @@ public class OAuthRetryAspect {
                     try {
                         return joinPoint.proceed();
                     } catch (Throwable t) {
-                        // Rethrow all Error types (OutOfMemoryError, etc.) so fatal JVM errors are never wrapped
+                        // Rethrow all Error types so fatal JVM errors are never wrapped; rethrow Exception to preserve original cause for circuit breaker
                         if (t instanceof Error e) {
                             throw e;
                         }
                         if (t instanceof Exception e) {
                             throw e;
                         }
-                        String msg = t.getMessage();
-                        throw new OAuthVerificationError(
-                                msg != null && !msg.isBlank() ? msg : "Unexpected throwable during OAuth verification",
-                                t);
+                        // Only wrap non-Exception, non-Error; use generic message to avoid leaking internal details; original is preserved as cause
+                        throw new OAuthVerificationError("Unexpected throwable during OAuth verification", t);
                     }
                 });
             });
@@ -70,7 +68,11 @@ public class OAuthRetryAspect {
             log.warn("OAuth verify blocked (circuit open) for {}: {}", methodName, e.toString());
             throw e;
         } catch (Throwable e) {
-            log.error("OAuth verify failed for {}", methodName, e);
+            if (e instanceof OAuthVerificationError) {
+                log.error("OAuth verify failed for {} (details omitted to avoid leakage)", methodName);
+            } else {
+                log.error("OAuth verify failed for {}", methodName, e);
+            }
             throw e;
         }
     }

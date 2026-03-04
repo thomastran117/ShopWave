@@ -69,7 +69,7 @@ public class OAuthConfiguration {
 
         RestTemplate jwksRest = jwksRestTemplate(env);
         if (security.getJwks().isValidateAtStartup()) {
-            validateJwksReachableOrFail(jwksUri, jwksRest);
+            validateJwksReachable(jwksUri, jwksRest, security.getJwks());
         }
 
         String authorityHost = security.getMicrosoftAuthorityHost();
@@ -91,20 +91,32 @@ public class OAuthConfiguration {
 
     /**
      * When app.security.jwks.validate-at-startup is true, validates JWKS URI is reachable.
-     * Safe defaults: only runs when URI is non-blank and uses HTTPS; rest uses jwks timeouts so it cannot block indefinitely.
+     * If app.security.jwks.fail-startup-on-unreachable is false (default), logs warning and continues so non-prod does not block.
      */
-    private static void validateJwksReachableOrFail(String jwksUri, RestTemplate rest) {
+    private static void validateJwksReachable(String jwksUri, RestTemplate rest,
+                                               EnvironmentSetting.Security.Jwks jwksConfig) {
         if (jwksUri == null || jwksUri.isBlank()) {
-            throw new IllegalStateException("JWKS URI is blank; cannot validate reachability.");
+            if (jwksConfig.isFailStartupOnUnreachable()) {
+                throw new IllegalStateException("JWKS URI is blank; cannot validate reachability.");
+            }
+            return;
         }
         if (!jwksUri.startsWith("https://")) {
-            throw new IllegalStateException("JWKS URI must use HTTPS: " + jwksUri);
+            if (jwksConfig.isFailStartupOnUnreachable()) {
+                throw new IllegalStateException("JWKS URI must use HTTPS: " + jwksUri);
+            }
+            log.warn("JWKS URI does not use HTTPS; skipping reachability check.");
+            return;
         }
         try {
             rest.getForObject(jwksUri, String.class);
         } catch (Exception e) {
-            throw new IllegalStateException(
-                    "JWKS URI not reachable at startup: " + jwksUri + ". " + e.getMessage(), e);
+            if (jwksConfig.isFailStartupOnUnreachable()) {
+                throw new IllegalStateException(
+                        "JWKS URI not reachable at startup: " + jwksUri + ". " + e.getMessage(), e);
+            }
+            log.warn("JWKS URI not reachable at startup ({}). Continuing; failures may occur at runtime. {}",
+                    jwksUri, e.getMessage());
         }
     }
 
