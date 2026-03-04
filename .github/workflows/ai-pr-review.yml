@@ -41,8 +41,8 @@ jobs:
             );
 
             const MAX_FILES = 30;
-            const MAX_PATCH_CHARS = 12000;
-            const MAX_TOTAL_CHARS = 60000;
+            const MAX_PATCH_CHARS = 20000;
+            const MAX_TOTAL_CHARS = 90000;
 
             const picked = files.slice(0, MAX_FILES).map(f => ({
               filename: f.filename,
