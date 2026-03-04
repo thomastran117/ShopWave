@@ -76,8 +76,14 @@ public class EnvironmentSetting {
         private String microsoftJwksUri = DEFAULT_MICROSOFT_JWKS_URI;
         private String recaptchaSecretKey = "";
 
+        private final OAuthGoogle oauthGoogle = new OAuthGoogle();
+
         public Jwks getJwks() {
             return jwks;
+        }
+
+        public OAuthGoogle getOauthGoogle() {
+            return oauthGoogle;
         }
 
         public Jwt getJwt() {
@@ -121,6 +127,38 @@ public class EnvironmentSetting {
          * Used when fetching Microsoft JWKS to avoid blocking threads and to fail fast.
          */
         public static class Jwks {
+            private int connectTimeoutMs = 5_000;
+            private int readTimeoutMs = 10_000;
+            /** When true, startup validates JWKS reachability and fails fast if unreachable. Default false so startup is not dependent on external services. */
+            private boolean validateAtStartup = false;
+
+            public boolean isValidateAtStartup() {
+                return validateAtStartup;
+            }
+
+            public void setValidateAtStartup(boolean validateAtStartup) {
+                this.validateAtStartup = validateAtStartup;
+            }
+
+            public int getConnectTimeoutMs() {
+                return connectTimeoutMs;
+            }
+
+            public void setConnectTimeoutMs(int connectTimeoutMs) {
+                this.connectTimeoutMs = Math.max(1_000, Math.min(30_000, connectTimeoutMs));
+            }
+
+            public int getReadTimeoutMs() {
+                return readTimeoutMs;
+            }
+
+            public void setReadTimeoutMs(int readTimeoutMs) {
+                this.readTimeoutMs = Math.max(1_000, Math.min(60_000, readTimeoutMs));
+            }
+        }
+
+        /** Timeouts for Google OAuth token verification (cert fetch), similar to JWKS for Microsoft. */
+        public static class OAuthGoogle {
             private int connectTimeoutMs = 5_000;
             private int readTimeoutMs = 10_000;
 

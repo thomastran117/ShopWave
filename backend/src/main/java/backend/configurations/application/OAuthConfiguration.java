@@ -63,7 +63,9 @@ public class OAuthConfiguration {
         }
 
         RestTemplate jwksRest = jwksRestTemplate(env);
-        validateJwksReachable(jwksUri, jwksRest);
+        if (security.getJwks().isValidateAtStartup()) {
+            validateJwksReachableOrFail(jwksUri, jwksRest);
+        }
 
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(jwksUri)
                 .restOperations(jwksRest)
@@ -80,12 +82,16 @@ public class OAuthConfiguration {
         return new RestTemplate(factory);
     }
 
-    private static void validateJwksReachable(String jwksUri, RestTemplate rest) {
+    /**
+     * When app.security.jwks.validate-at-startup is true, validates JWKS URI is reachable.
+     * Fails fast (throws) if unreachable so behavior is explicit and runtime stalls are avoided.
+     */
+    private static void validateJwksReachableOrFail(String jwksUri, RestTemplate rest) {
         try {
             rest.getForObject(jwksUri, String.class);
         } catch (Exception e) {
-            log.warn("JWKS URI not reachable at startup ({}): {}. Failures may occur at runtime under load.",
-                    jwksUri, e.getMessage());
+            throw new IllegalStateException(
+                    "JWKS URI not reachable at startup: " + jwksUri + ". " + e.getMessage(), e);
         }
     }
 

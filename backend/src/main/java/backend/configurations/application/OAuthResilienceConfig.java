@@ -77,6 +77,6 @@ public class OAuthResilienceConfig {
                 .ignoreException(ex -> ex instanceof InvalidOAuthTokenException || ex instanceof OAuthVerificationError)
                 .build();
 
-        return CircuitBreaker.of("oauth", config);
+        return CircuitBreaker.of("oauthVerification", config);
     }
 }

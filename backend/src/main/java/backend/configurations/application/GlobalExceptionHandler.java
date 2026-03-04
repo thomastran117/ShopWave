@@ -25,66 +25,78 @@ import org.springframework.web.servlet.NoHandlerFoundException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * Returns a consistent API contract: all error responses use {@link ErrorResponse}
+ * (status, message, detail, optional details) as JSON.
+ */
 @ControllerAdvice
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, Object>> handleValidation(MethodArgumentNotValidException ex) {
+    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
         Map<String, String> fields = new LinkedHashMap<>();
         ex.getBindingResult().getAllErrors().forEach(err -> {
             String fieldName = err instanceof FieldError fe ? fe.getField() : err.getObjectName();
             fields.put(fieldName, err.getDefaultMessage());
         });
-
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("status", HttpStatus.BAD_REQUEST.value());
-        body.put("message", "Validation failed");
-        body.put("detail", "One or more fields are invalid.");
-        body.put("errors", fields);
-
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("errors", fields);
+        ErrorResponse body = new ErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                "Validation failed",
+                "One or more fields are invalid.",
+                details
+        );
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
     @ExceptionHandler(NoHandlerFoundException.class)
-    public ResponseEntity<Map<String, Object>> handleNotFound(NoHandlerFoundException ex) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("status", HttpStatus.NOT_FOUND.value());
-        body.put("message", "Not found");
-        body.put("detail", "No handler for " + ex.getHttpMethod() + " " + ex.getRequestURL());
+    public ResponseEntity<ErrorResponse> handleNotFound(NoHandlerFoundException ex) {
+        ErrorResponse body = new ErrorResponse(
+                HttpStatus.NOT_FOUND.value(),
+                "Not found",
+                "No handler for " + ex.getHttpMethod() + " " + ex.getRequestURL()
+        );
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body);
     }
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
-    public ResponseEntity<Map<String, Object>> handleMethodNotAllowed(HttpRequestMethodNotSupportedException ex) {
+    public ResponseEntity<ErrorResponse> handleMethodNotAllowed(HttpRequestMethodNotSupportedException ex) {
         var methods = ex.getSupportedHttpMethods();
         var supported = methods == null
                 ? java.util.List.<String>of()
                 : methods.stream().map(HttpMethod::name).toList();
         String allowed = String.join(", ", supported);
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("status", HttpStatus.METHOD_NOT_ALLOWED.value());
-        body.put("message", "Method not allowed");
-        body.put("detail", "HTTP " + ex.getMethod() + " is not allowed. Supported method(s): " + allowed);
-        body.put("allowedMethods", supported);
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("allowedMethods", supported);
+        ErrorResponse body = new ErrorResponse(
+                HttpStatus.METHOD_NOT_ALLOWED.value(),
+                "Method not allowed",
+                "HTTP " + ex.getMethod() + " is not allowed. Supported method(s): " + allowed,
+                details
+        );
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body(body);
     }
 
     @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<Map<String, Object>> handleAccessDenied(AccessDeniedException ex) {
+    public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         boolean unauthenticated = auth == null || !auth.isAuthenticated();
-        Map<String, Object> body = new LinkedHashMap<>();
         if (unauthenticated) {
-            body.put("status", HttpStatus.UNAUTHORIZED.value());
-            body.put("message", "Unauthorized");
-            body.put("detail", "Authentication required. Provide a valid Bearer token.");
+            ErrorResponse body = new ErrorResponse(
+                    HttpStatus.UNAUTHORIZED.value(),
+                    "Unauthorized",
+                    "Authentication required. Provide a valid Bearer token."
+            );
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(body);
         }
-        body.put("status", HttpStatus.FORBIDDEN.value());
-        body.put("message", "Forbidden");
-        body.put("detail", ex.getMessage() != null ? ex.getMessage() : "You do not have permission to access this resource.");
+        ErrorResponse body = new ErrorResponse(
+                HttpStatus.FORBIDDEN.value(),
+                "Forbidden",
+                ex.getMessage() != null ? ex.getMessage() : "You do not have permission to access this resource."
+        );
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
     }
 

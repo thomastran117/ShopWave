@@ -46,14 +46,36 @@ public class OAuthServiceImpl implements OAuthService {
             EnvironmentSetting env,
             @Qualifier("microsoftJwtDecoder") JwtDecoder microsoftDecoder) {
         this.googleClientId = env.getSecurity().getGoogleClientId();
-        this.googleVerifier = buildGoogleVerifier(this.googleClientId);
+        this.googleVerifier = buildGoogleVerifier(this.googleClientId, env.getSecurity().getOauthGoogle());
         this.microsoftDecoder = microsoftDecoder;
     }
 
-    private static GoogleIdTokenVerifier buildGoogleVerifier(String clientId) {
-        return new GoogleIdTokenVerifier.Builder(new NetHttpTransport(), GsonFactory.getDefaultInstance())
+    private static GoogleIdTokenVerifier buildGoogleVerifier(String clientId, EnvironmentSetting.Security.OAuthGoogle timeouts) {
+        if (clientId == null || clientId.isBlank()) {
+            throw new IllegalStateException(
+                    "Google OAuth client ID is not configured (set app.security.google-client-id)");
+        }
+        NetHttpTransport transport = buildGoogleHttpTransport(timeouts);
+        return new GoogleIdTokenVerifier.Builder(transport, GsonFactory.getDefaultInstance())
                 .setAudience(Collections.singletonList(clientId))
                 .build();
+    }
+
+    /** Builds transport with connect/read timeouts for Google cert fetch, similar to Microsoft JWKS timeouts. */
+    private static NetHttpTransport buildGoogleHttpTransport(EnvironmentSetting.Security.OAuthGoogle timeouts) {
+        int connectMs = timeouts != null ? timeouts.getConnectTimeoutMs() : 5_000;
+        int readMs = timeouts != null ? timeouts.getReadTimeoutMs() : 10_000;
+        return new NetHttpTransport.Builder()
+                .setConnectTimeout(connectMs)
+                .setReadTimeout(readMs)
+                .build();
+    }
+
+    /** Shared check for blank/invalid tokens across providers; throws before any verification. */
+    private static void requireNonBlankToken(String token, String providerLabel) {
+        if (token == null || token.isBlank()) {
+            throw new InvalidOAuthTokenException("Invalid " + providerLabel + " token");
+        }
     }
 
     @Override
@@ -64,9 +86,7 @@ public class OAuthServiceImpl implements OAuthService {
     @Override
     @OAuthResilient
     public OAuthUser verifyGoogleToken(String googleToken) {
-        if (googleToken == null || googleToken.isBlank()) {
-            throw new InvalidOAuthTokenException("Invalid Google ID token");
-        }
+        requireNonBlankToken(googleToken, "Google ID");
         if (log.isDebugEnabled()) {
             log.debug("Verifying Google ID token");
         }
@@ -99,9 +119,7 @@ public class OAuthServiceImpl implements OAuthService {
     @Override
     @OAuthResilient
     public OAuthUser verifyMicrosoftToken(String microsoftToken) {
-        if (microsoftToken == null || microsoftToken.isBlank()) {
-            throw new InvalidOAuthTokenException("Invalid Microsoft token");
-        }
+        requireNonBlankToken(microsoftToken, "Microsoft");
         if (log.isDebugEnabled()) {
             log.debug("Verifying Microsoft ID token");
         }

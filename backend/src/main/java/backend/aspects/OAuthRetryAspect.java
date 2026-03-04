@@ -52,6 +52,7 @@ public class OAuthRetryAspect {
                     try {
                         return joinPoint.proceed();
                     } catch (Throwable t) {
+                        // Rethrow all Error types (OutOfMemoryError, etc.) so fatal JVM errors are never wrapped
                         if (t instanceof Error e) {
                             throw e;
                         }
