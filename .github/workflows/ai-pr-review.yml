@@ -75,10 +75,7 @@ jobs:
             
               "Output MUST be valid GitHub-Flavored Markdown.\n\n" +
             
-              "At the VERY TOP output exactly:\n" +
-              "RATING: 0 | 1 | 2 | 3 | 4 | 5\n\n" +
-            
-              "Then output EXACTLY these sections:\n" +
+              "Output EXACTLY these sections:\n" +
               "## Summary\n" +
               "## Mandatory\n" +
               "## Suggestions\n" +
@@ -86,7 +83,7 @@ jobs:
               "## Tests to Add\n\n" +
             
               "Strict output rules:\n" +
-              "- Maximum 4 sentences in Summary.\n" +
+              "- Maximum 4 sentences in Summary. Include a rating of 1 to 5 whether the pull request is ready to be merged. \n" +
               "- Maximum 5 bullets in Mandatory.\n" +
               "- Maximum 4 bullets in Suggestions.\n" +
               "- Maximum 2 bullets in Nitpicks.\n" +
