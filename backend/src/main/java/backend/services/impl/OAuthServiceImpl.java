@@ -114,6 +114,10 @@ public class OAuthServiceImpl implements OAuthService {
             if (alg != null && HEADER_ALG_NONE.equalsIgnoreCase(alg.toString())) {
                 return OAuth2TokenValidatorResult.failure(new OAuth2Error(OAuth2ErrorCodes.INVALID_REQUEST, "Invalid algorithm", null));
             }
+            Object kid = headers != null ? headers.get("kid") : null;
+            if (kid == null || kid.toString().isBlank()) {
+                return OAuth2TokenValidatorResult.failure(new OAuth2Error(OAuth2ErrorCodes.INVALID_REQUEST, "Missing kid header", null));
+            }
             return OAuth2TokenValidatorResult.success();
         };
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(jwksUri)
@@ -129,7 +133,7 @@ public class OAuthServiceImpl implements OAuthService {
 
     @Override
     @OAuthResilient
-    public OAuthUser verifyGoogleToken(String googleToken) throws IOException {
+    public OAuthUser verifyGoogleToken(String googleToken) {
         if (googleToken == null || googleToken.isBlank()) {
             throw new InvalidOAuthTokenException("Invalid Google ID token");
         }
@@ -141,6 +145,8 @@ public class OAuthServiceImpl implements OAuthService {
             idToken = googleVerifier.verify(googleToken);
         } catch (GeneralSecurityException e) {
             throw new InvalidOAuthTokenException("Invalid Google ID token", e);
+        } catch (IOException e) {
+            throw new OAuthProviderTransientException("Google token verification failed", e);
         } catch (RuntimeException e) {
             if (OAuthRetryable.isRetryable(e)) {
                 throw new OAuthProviderTransientException("Google token verification failed", e);

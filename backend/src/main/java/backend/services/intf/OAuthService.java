@@ -2,8 +2,6 @@ package backend.services.intf;
 
 import backend.models.other.OAuthUser;
 
-import java.io.IOException;
-
 /**
  * Verifies OAuth ID tokens from providers (Google, Microsoft). The client (web or mobile)
  * obtains the token from the provider and sends it to the backend; this service verifies
@@ -22,9 +20,9 @@ public interface OAuthService {
      * @param googleToken the ID token from the Google sign-in client
      * @return verified user info (sub, email, name, provider)
      * @throws backend.security.oauth.InvalidOAuthTokenException   if the token is invalid
-     * @throws IOException                                        on transient network errors (retried by aspect)
+     * @throws backend.security.oauth.OAuthProviderTransientException if provider call failed transiently (retried by aspect)
      */
-    OAuthUser verifyGoogleToken(String googleToken) throws IOException;
+    OAuthUser verifyGoogleToken(String googleToken);
 
     /**
      * Verify a Microsoft ID token and return the user claims.

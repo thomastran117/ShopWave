@@ -58,7 +58,10 @@ public class OAuthRetryAspect {
                         if (t instanceof Error e) {
                             throw new OAuthVerificationError(e);
                         }
-                        throw new OAuthVerificationError(null);
+                        String msg = t.getMessage();
+                        throw new OAuthVerificationError(
+                                msg != null && !msg.isBlank() ? msg : "Unexpected throwable during OAuth verification",
+                                t);
                     }
                 });
             });
