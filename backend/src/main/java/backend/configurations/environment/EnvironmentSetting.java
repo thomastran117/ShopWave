@@ -17,9 +17,14 @@ public class EnvironmentSetting {
     private final Database database = new Database();
     private final Cache cache = new Cache();
     private final Recaptcha recaptcha = new Recaptcha();
+    private final OAuth oauth = new OAuth();
 
     public Cors getCors() {
         return cors;
+    }
+
+    public OAuth getOauth() {
+        return oauth;
     }
 
     public Recaptcha getRecaptcha() {
@@ -64,6 +69,7 @@ public class EnvironmentSetting {
         private final Jwt jwt = new Jwt();
 
         private String googleClientId = "";
+        private String microsoftClientId = "";
         private String recaptchaSecretKey = "";
 
         public Jwt getJwt() {
@@ -76,6 +82,14 @@ public class EnvironmentSetting {
 
         public void setGoogleClientId(String googleClientId) {
             this.googleClientId = googleClientId != null ? googleClientId : "";
+        }
+
+        public String getMicrosoftClientId() {
+            return microsoftClientId != null ? microsoftClientId : "";
+        }
+
+        public void setMicrosoftClientId(String microsoftClientId) {
+            this.microsoftClientId = microsoftClientId != null ? microsoftClientId : "";
         }
 
         public String getRecaptchaSecretKey() {
@@ -191,6 +205,101 @@ public class EnvironmentSetting {
 
             public void setMaxIntervalMs(long maxIntervalMs) {
                 this.maxIntervalMs = Math.max(1_000, Math.min(300_000, maxIntervalMs));
+            }
+        }
+    }
+
+    /**
+     * OAuth token verification: retry with exponential backoff and circuit breaker
+     * for calls to Google/Microsoft (e.g. JWKS fetch). Configurable via app.oauth.*.
+     */
+    public static class OAuth {
+        private final Retry retry = new Retry();
+        private final CircuitBreaker circuitBreaker = new CircuitBreaker();
+
+        public Retry getRetry() {
+            return retry;
+        }
+
+        public CircuitBreaker getCircuitBreaker() {
+            return circuitBreaker;
+        }
+
+        public static class Retry {
+            private int maxAttempts = 4;
+            private long initialIntervalMs = 200;
+            private double multiplier = 2.0;
+            private long maxIntervalMs = 10_000;
+
+            public int getMaxAttempts() {
+                return maxAttempts;
+            }
+
+            public void setMaxAttempts(int maxAttempts) {
+                this.maxAttempts = Math.max(1, Math.min(10, maxAttempts));
+            }
+
+            public long getInitialIntervalMs() {
+                return initialIntervalMs;
+            }
+
+            public void setInitialIntervalMs(long initialIntervalMs) {
+                this.initialIntervalMs = Math.max(50, Math.min(60_000, initialIntervalMs));
+            }
+
+            public double getMultiplier() {
+                return multiplier;
+            }
+
+            public void setMultiplier(double multiplier) {
+                this.multiplier = Math.max(1.0, Math.min(5.0, multiplier));
+            }
+
+            public long getMaxIntervalMs() {
+                return maxIntervalMs;
+            }
+
+            public void setMaxIntervalMs(long maxIntervalMs) {
+                this.maxIntervalMs = Math.max(1_000, Math.min(300_000, maxIntervalMs));
+            }
+        }
+
+        public static class CircuitBreaker {
+            private float failureRateThreshold = 50f;
+            private int waitDurationInOpenStateSeconds = 60;
+            private int slidingWindowSize = 10;
+            private int minimumNumberOfCalls = 5;
+
+            public float getFailureRateThreshold() {
+                return failureRateThreshold;
+            }
+
+            public void setFailureRateThreshold(float failureRateThreshold) {
+                this.failureRateThreshold = Math.max(1f, Math.min(100f, failureRateThreshold));
+            }
+
+            public int getWaitDurationInOpenStateSeconds() {
+                return waitDurationInOpenStateSeconds;
+            }
+
+            public void setWaitDurationInOpenStateSeconds(int waitDurationInOpenStateSeconds) {
+                this.waitDurationInOpenStateSeconds = Math.max(1, Math.min(3600, waitDurationInOpenStateSeconds));
+            }
+
+            public int getSlidingWindowSize() {
+                return slidingWindowSize;
+            }
+
+            public void setSlidingWindowSize(int slidingWindowSize) {
+                this.slidingWindowSize = Math.max(2, Math.min(1000, slidingWindowSize));
+            }
+
+            public int getMinimumNumberOfCalls() {
+                return minimumNumberOfCalls;
+            }
+
+            public void setMinimumNumberOfCalls(int minimumNumberOfCalls) {
+                this.minimumNumberOfCalls = Math.max(1, Math.min(100, minimumNumberOfCalls));
             }
         }
     }
