@@ -39,19 +39,13 @@ public class OAuthRetryAspect {
             "|| execution(* backend.services.intf.OAuthService.verifyMicrosoftToken(..))")
     public Object aroundOAuthVerification(ProceedingJoinPoint joinPoint) throws Throwable {
         String methodName = ((MethodSignature) joinPoint.getSignature()).getMethod().getName();
-        Callable<Object> callable = () -> {
-            try {
-                return oauthRetryTemplate.execute((RetryCallback<Object, Throwable>) context -> {
-                    int attempt = context.getRetryCount() + 1;
-                    if (attempt > 1) {
-                        log.debug("OAuth verification retry attempt {} for {}", attempt, methodName);
-                    }
-                    return joinPoint.proceed();
-                });
-            } catch (Error e) {
-                throw new java.lang.reflect.UndeclaredThrowableException(e);
+        Callable<Object> callable = () -> oauthRetryTemplate.execute((RetryCallback<Object, Throwable>) context -> {
+            int attempt = context.getRetryCount() + 1;
+            if (attempt > 1) {
+                log.debug("OAuth verification retry attempt {} for {}", attempt, methodName);
             }
-        };
+            return joinPoint.proceed();
+        });
         return oauthCircuitBreaker.executeCallable(callable);
     }
 }

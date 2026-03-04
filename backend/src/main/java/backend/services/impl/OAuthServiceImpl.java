@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Verifies OAuth ID tokens from Google and Microsoft. The client sends the token
@@ -102,6 +103,9 @@ public class OAuthServiceImpl implements OAuthService {
 
     @Override
     public OAuthUser verifyGoogleToken(String googleToken) throws IOException {
+        if (googleToken == null || googleToken.isBlank()) {
+            throw new UnauthorizedException("Invalid Google ID token");
+        }
         GoogleIdToken idToken;
         try {
             idToken = googleVerifier.verify(googleToken);
@@ -124,6 +128,9 @@ public class OAuthServiceImpl implements OAuthService {
 
     @Override
     public OAuthUser verifyMicrosoftToken(String microsoftToken) {
+        if (microsoftToken == null || microsoftToken.isBlank()) {
+            throw new UnauthorizedException("Invalid Microsoft token");
+        }
         Jwt jwt;
         try {
             jwt = microsoftDecoder.decode(microsoftToken);
@@ -146,16 +153,8 @@ public class OAuthServiceImpl implements OAuthService {
     }
 
     private static String getClaim(Jwt jwt, String preferred, String fallback) {
-        Object val = jwt.getClaim(preferred);
-        if (val != null && !val.toString().isBlank()) {
-            return val.toString();
-        }
-        if (fallback != null) {
-            Object fall = jwt.getClaim(fallback);
-            if (fall != null && !fall.toString().isBlank()) {
-                return fall.toString();
-            }
-        }
-        return null;
+        return Optional.ofNullable(jwt.getClaim(preferred)).map(Object::toString).filter(s -> !s.isBlank())
+                .or(() -> Optional.ofNullable(fallback).map(f -> jwt.getClaim(f)).map(Object::toString).filter(s -> !s.isBlank()))
+                .orElse(null);
     }
 }
