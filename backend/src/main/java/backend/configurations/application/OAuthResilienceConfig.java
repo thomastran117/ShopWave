@@ -3,6 +3,7 @@ package backend.configurations.application;
 import backend.configurations.environment.EnvironmentSetting;
 import backend.security.oauth.InvalidOAuthTokenException;
 import backend.security.oauth.OAuthProviderTransientException;
+import backend.security.oauth.OAuthVerificationError;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -56,6 +57,7 @@ public class OAuthResilienceConfig {
         retryable.put(HttpServerErrorException.class, true);
         retryable.put(ResourceAccessException.class, true);
         retryable.put(InvalidOAuthTokenException.class, false);
+        retryable.put(OAuthVerificationError.class, false);
 
         SimpleRetryPolicy retryPolicy = new SimpleRetryPolicy(
                 retry.getMaxAttempts(),
@@ -83,7 +85,7 @@ public class OAuthResilienceConfig {
                         || ex instanceof IOException
                         || ex instanceof HttpServerErrorException
                         || ex instanceof ResourceAccessException)
-                .ignoreException(ex -> ex instanceof InvalidOAuthTokenException)
+                .ignoreException(ex -> ex instanceof InvalidOAuthTokenException || ex instanceof OAuthVerificationError)
                 .build();
 
         return CircuitBreaker.of("oauth", config);

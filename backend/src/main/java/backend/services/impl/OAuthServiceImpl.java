@@ -2,11 +2,12 @@ package backend.services.impl;
 
 import backend.aspects.OAuthResilient;
 import backend.configurations.environment.EnvironmentSetting;
-import backend.exceptions.http.NotImplementedException;
 import backend.models.other.OAuthUser;
 import backend.security.oauth.InvalidOAuthTokenException;
 import backend.security.oauth.OAuthClaimUtils;
+import backend.security.oauth.OAuthNotSupportedException;
 import backend.security.oauth.OAuthProviderTransientException;
+import backend.security.oauth.OAuthRetryable;
 import backend.security.oauth.MicrosoftIssuerValidator;
 import backend.services.intf.OAuthService;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
@@ -24,10 +25,16 @@ import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.stereotype.Service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
+
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Verifies OAuth ID tokens from Google and Microsoft. The client sends the token
@@ -36,6 +43,12 @@ import java.util.List;
  */
 @Service
 public class OAuthServiceImpl implements OAuthService {
+
+    private static final Logger log = LoggerFactory.getLogger(OAuthServiceImpl.class);
+
+    /** Access token type; ID tokens use "JWT". Reject access tokens. */
+    private static final String HEADER_TYP_ACCESS_TOKEN = "at+jwt";
+    private static final String HEADER_ALG_NONE = "none";
 
     private final String googleClientId;
     private final String microsoftClientId;
@@ -92,6 +105,15 @@ public class OAuthServiceImpl implements OAuthService {
             if (!MicrosoftIssuerValidator.isValid(iss)) {
                 return OAuth2TokenValidatorResult.failure(new OAuth2Error(OAuth2ErrorCodes.INVALID_REQUEST, "Invalid issuer", null));
             }
+            Map<String, Object> headers = jwt.getHeaders();
+            Object typ = headers != null ? headers.get("typ") : null;
+            if (typ != null && HEADER_TYP_ACCESS_TOKEN.equalsIgnoreCase(typ.toString())) {
+                return OAuth2TokenValidatorResult.failure(new OAuth2Error(OAuth2ErrorCodes.INVALID_REQUEST, "Invalid token type", null));
+            }
+            Object alg = headers != null ? headers.get("alg") : null;
+            if (alg != null && HEADER_ALG_NONE.equalsIgnoreCase(alg.toString())) {
+                return OAuth2TokenValidatorResult.failure(new OAuth2Error(OAuth2ErrorCodes.INVALID_REQUEST, "Invalid algorithm", null));
+            }
             return OAuth2TokenValidatorResult.success();
         };
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(jwksUri)
@@ -102,7 +124,7 @@ public class OAuthServiceImpl implements OAuthService {
 
     @Override
     public OAuthUser verifyAppleToken(String appleToken) {
-        throw new NotImplementedException("Apple OAuth is not implemented");
+        throw new OAuthNotSupportedException("Apple OAuth is not implemented");
     }
 
     @Override
@@ -111,15 +133,20 @@ public class OAuthServiceImpl implements OAuthService {
         if (googleToken == null || googleToken.isBlank()) {
             throw new InvalidOAuthTokenException("Invalid Google ID token");
         }
+        if (log.isDebugEnabled()) {
+            log.debug("Verifying Google ID token");
+        }
         GoogleIdToken idToken;
         try {
             idToken = googleVerifier.verify(googleToken);
         } catch (GeneralSecurityException e) {
             throw new InvalidOAuthTokenException("Invalid Google ID token", e);
         } catch (RuntimeException e) {
-            throw new OAuthProviderTransientException("Google token verification failed", e);
+            if (OAuthRetryable.isRetryable(e)) {
+                throw new OAuthProviderTransientException("Google token verification failed", e);
+            }
+            throw new InvalidOAuthTokenException("Invalid Google ID token", e);
         }
-        // IOException propagates so retry/CB can retry and record
         if (idToken == null) {
             throw new InvalidOAuthTokenException("Invalid Google ID token");
         }
@@ -139,12 +166,19 @@ public class OAuthServiceImpl implements OAuthService {
         if (microsoftToken == null || microsoftToken.isBlank()) {
             throw new InvalidOAuthTokenException("Invalid Microsoft token");
         }
+        if (log.isDebugEnabled()) {
+            log.debug("Verifying Microsoft ID token");
+        }
         Jwt jwt;
         try {
             jwt = microsoftDecoder.decode(microsoftToken);
         } catch (JwtException e) {
             throw new InvalidOAuthTokenException("Invalid Microsoft token", e);
-        } catch (Exception e) {
+        } catch (IOException e) {
+            throw new OAuthProviderTransientException("Microsoft token verification failed", e);
+        } catch (ResourceAccessException e) {
+            throw new OAuthProviderTransientException("Microsoft token verification failed", e);
+        } catch (HttpServerErrorException e) {
             throw new OAuthProviderTransientException("Microsoft token verification failed", e);
         }
         String email = OAuthClaimUtils.getClaim(jwt, "preferred_username", "email");

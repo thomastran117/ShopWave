@@ -3,6 +3,9 @@ package backend.configurations.application;
 import backend.dtos.responses.general.ErrorResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.security.oauth.InvalidOAuthTokenException;
+import backend.security.oauth.OAuthNotSupportedException;
+import backend.security.oauth.OAuthProviderTransientException;
+import backend.security.oauth.OAuthVerificationError;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -93,6 +96,38 @@ public class GlobalExceptionHandler {
                 "Invalid or expired token."
         );
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(body);
+    }
+
+    @ExceptionHandler(OAuthProviderTransientException.class)
+    public ResponseEntity<ErrorResponse> handleOAuthProviderTransient(OAuthProviderTransientException ex) {
+        log.warn("OAuth provider transient failure", ex);
+        ErrorResponse body = new ErrorResponse(
+                HttpStatus.SERVICE_UNAVAILABLE.value(),
+                "Service Unavailable",
+                "OAuth provider temporarily unavailable. Please try again."
+        );
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
+    }
+
+    @ExceptionHandler(OAuthVerificationError.class)
+    public ResponseEntity<ErrorResponse> handleOAuthVerificationError(OAuthVerificationError ex) {
+        log.error("OAuth verification JVM error", ex);
+        ErrorResponse body = new ErrorResponse(
+                HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                "Internal server error",
+                "An unexpected error occurred."
+        );
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
+    }
+
+    @ExceptionHandler(OAuthNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleOAuthNotSupported(OAuthNotSupportedException ex) {
+        ErrorResponse body = new ErrorResponse(
+                HttpStatus.NOT_IMPLEMENTED.value(),
+                "Not Implemented",
+                ex.getMessage() != null ? ex.getMessage() : "This OAuth provider is not supported."
+        );
+        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body(body);
     }
 
     @ExceptionHandler(AppHttpException.class)

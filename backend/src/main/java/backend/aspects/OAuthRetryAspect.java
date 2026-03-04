@@ -1,5 +1,6 @@
 package backend.aspects;
 
+import backend.security.oauth.OAuthVerificationError;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -50,10 +51,14 @@ public class OAuthRetryAspect {
                 return oauthCircuitBreaker.executeCallable(() -> {
                     try {
                         return joinPoint.proceed();
-                    } catch (Exception e) {
-                        throw e;
                     } catch (Throwable t) {
-                        throw new java.lang.reflect.UndeclaredThrowableException(t);
+                        if (t instanceof Exception e) {
+                            throw e;
+                        }
+                        if (t instanceof Error e) {
+                            throw new OAuthVerificationError(e);
+                        }
+                        throw new OAuthVerificationError(null);
                     }
                 });
             });
