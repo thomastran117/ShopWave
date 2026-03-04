@@ -1,5 +1,6 @@
 package backend.aspects;
 
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -12,12 +13,10 @@ import org.springframework.retry.RetryCallback;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.concurrent.Callable;
-
 /**
- * Applies retry with exponential backoff and circuit breaker to OAuth token
- * verification (Google and Microsoft). Does not apply to verifyAppleToken.
- * Order: circuit breaker wraps retry; when circuit is open, calls fail fast.
+ * Applies retry and circuit breaker to methods annotated with {@link OAuthResilient}.
+ * Retry wraps circuit breaker so each attempt is observed by the CB (recommended).
+ * Does not swallow exceptions; preserves failure for callers and global handlers.
  */
 @Aspect
 @Component
@@ -35,17 +34,35 @@ public class OAuthRetryAspect {
         this.oauthCircuitBreaker = oauthCircuitBreaker;
     }
 
-    @Around("execution(* backend.services.intf.OAuthService.verifyGoogleToken(..)) " +
-            "|| execution(* backend.services.intf.OAuthService.verifyMicrosoftToken(..))")
+    @Around("@annotation(backend.aspects.OAuthResilient)")
     public Object aroundOAuthVerification(ProceedingJoinPoint joinPoint) throws Throwable {
-        String methodName = ((MethodSignature) joinPoint.getSignature()).getMethod().getName();
-        Callable<Object> callable = () -> oauthRetryTemplate.execute((RetryCallback<Object, Throwable>) context -> {
-            int attempt = context.getRetryCount() + 1;
-            if (attempt > 1) {
-                log.debug("OAuth verification retry attempt {} for {}", attempt, methodName);
-            }
-            return joinPoint.proceed();
-        });
-        return oauthCircuitBreaker.executeCallable(callable);
+        MethodSignature sig = (MethodSignature) joinPoint.getSignature();
+        String methodName = sig.getDeclaringType().getSimpleName() + "." + sig.getMethod().getName();
+
+        try {
+            return oauthRetryTemplate.execute((RetryCallback<Object, Throwable>) context -> {
+                int attempt = context.getRetryCount() + 1;
+
+                if (attempt > 1) {
+                    log.warn("OAuth verify retry attempt {} for {}", attempt, methodName);
+                }
+
+                return oauthCircuitBreaker.executeCallable(() -> {
+                    try {
+                        return joinPoint.proceed();
+                    } catch (Exception e) {
+                        throw e;
+                    } catch (Throwable t) {
+                        throw new java.lang.reflect.UndeclaredThrowableException(t);
+                    }
+                });
+            });
+        } catch (CallNotPermittedException e) {
+            log.warn("OAuth verify blocked (circuit open) for {}: {}", methodName, e.toString());
+            throw e;
+        } catch (Throwable e) {
+            log.error("OAuth verify failed for {}", methodName, e);
+            throw e;
+        }
     }
 }

@@ -21,9 +21,8 @@ public interface OAuthService {
      *
      * @param googleToken the ID token from the Google sign-in client
      * @return verified user info (sub, email, name, provider)
-     * @throws backend.exceptions.http.ServiceUnavaliableException if Google OAuth is not configured
-     * @throws backend.exceptions.http.UnauthorizedException       if the token is invalid
-     * @throws IOException                                        on transient network errors (caller may retry or rely on aspect retry)
+     * @throws backend.security.oauth.InvalidOAuthTokenException   if the token is invalid
+     * @throws IOException                                        on transient network errors (retried by aspect)
      */
     OAuthUser verifyGoogleToken(String googleToken) throws IOException;
 
@@ -32,8 +31,8 @@ public interface OAuthService {
      *
      * @param microsoftToken the ID token from the Microsoft sign-in client
      * @return verified user info (sub, email, name, provider)
-     * @throws backend.exceptions.http.ServiceUnavaliableException if Microsoft OAuth is not configured
-     * @throws backend.exceptions.http.UnauthorizedException       if the token is invalid or required claims are missing
+     * @throws backend.security.oauth.InvalidOAuthTokenException   if the token is invalid or required claims are missing
+     * @throws backend.security.oauth.OAuthProviderTransientException if provider call failed transiently (retried by aspect)
      */
     OAuthUser verifyMicrosoftToken(String microsoftToken);
 }

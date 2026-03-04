@@ -2,6 +2,7 @@ package backend.configurations.application;
 
 import backend.dtos.responses.general.ErrorResponse;
 import backend.exceptions.http.AppHttpException;
+import backend.security.oauth.InvalidOAuthTokenException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -82,6 +83,16 @@ public class GlobalExceptionHandler {
         body.put("message", "Forbidden");
         body.put("detail", ex.getMessage() != null ? ex.getMessage() : "You do not have permission to access this resource.");
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+    }
+
+    @ExceptionHandler(InvalidOAuthTokenException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidOAuthToken(InvalidOAuthTokenException ex) {
+        ErrorResponse body = new ErrorResponse(
+                HttpStatus.UNAUTHORIZED.value(),
+                "Unauthorized",
+                "Invalid or expired token."
+        );
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(body);
     }
 
     @ExceptionHandler(AppHttpException.class)

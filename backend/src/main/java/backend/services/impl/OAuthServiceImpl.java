@@ -1,9 +1,11 @@
 package backend.services.impl;
 
+import backend.aspects.OAuthResilient;
 import backend.configurations.environment.EnvironmentSetting;
 import backend.exceptions.http.NotImplementedException;
-import backend.exceptions.http.UnauthorizedException;
 import backend.models.other.OAuthUser;
+import backend.security.oauth.InvalidOAuthTokenException;
+import backend.security.oauth.OAuthProviderTransientException;
 import backend.services.intf.OAuthService;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
@@ -15,6 +17,7 @@ import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.stereotype.Service;
@@ -24,6 +27,7 @@ import java.security.GeneralSecurityException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * Verifies OAuth ID tokens from Google and Microsoft. The client sends the token
@@ -32,6 +36,10 @@ import java.util.Optional;
  */
 @Service
 public class OAuthServiceImpl implements OAuthService {
+
+    /** Accepts tenant-specific, common, organizations, and consumers issuers; optional trailing slash. */
+    private static final Pattern MICROSOFT_ISSUER_PATTERN = Pattern.compile(
+            "^https://login\\.microsoftonline\\.com/[^/]+/v2\\.0/?$");
 
     private final String googleClientId;
     private final String microsoftClientId;
@@ -85,8 +93,8 @@ public class OAuthServiceImpl implements OAuthService {
                 return OAuth2TokenValidatorResult.failure(new OAuth2Error(OAuth2ErrorCodes.INVALID_REQUEST, "Invalid audience", null));
             }
             String iss = jwt.getIssuer() != null ? jwt.getIssuer().toString() : "";
-            if (!iss.startsWith("https://login.microsoftonline.com/") || !iss.endsWith("/v2.0")) {
-                return OAuth2TokenValidatorResult.failure(new OAuth2Error(OAuth2ErrorCodes.INVALID_REQUEST, "Invalid issuer: " + iss, null));
+            if (!MICROSOFT_ISSUER_PATTERN.matcher(iss).matches()) {
+                return OAuth2TokenValidatorResult.failure(new OAuth2Error(OAuth2ErrorCodes.INVALID_REQUEST, "Invalid issuer", null));
             }
             return OAuth2TokenValidatorResult.success();
         };
@@ -102,44 +110,50 @@ public class OAuthServiceImpl implements OAuthService {
     }
 
     @Override
+    @OAuthResilient
     public OAuthUser verifyGoogleToken(String googleToken) throws IOException {
         if (googleToken == null || googleToken.isBlank()) {
-            throw new UnauthorizedException("Invalid Google ID token");
+            throw new InvalidOAuthTokenException("Invalid Google ID token");
         }
         GoogleIdToken idToken;
         try {
             idToken = googleVerifier.verify(googleToken);
         } catch (GeneralSecurityException e) {
-            throw new UnauthorizedException("Invalid Google ID token");
+            throw new InvalidOAuthTokenException("Invalid Google ID token", e);
+        } catch (RuntimeException e) {
+            throw new OAuthProviderTransientException("Google token verification failed", e);
         }
-        // IOException and unexpected RuntimeException propagate so OAuthRetryAspect can retry
+        // IOException propagates so retry/CB can retry and record
         if (idToken == null) {
-            throw new UnauthorizedException("Invalid Google ID token");
+            throw new InvalidOAuthTokenException("Invalid Google ID token");
         }
         GoogleIdToken.Payload payload = idToken.getPayload();
         String sub = payload.getSubject();
         String email = payload.getEmail();
         String name = payload.get("name") != null ? (String) payload.get("name") : (email != null ? email : "");
         if (email == null || email.isBlank()) {
-            throw new UnauthorizedException("Missing Google email claim");
+            throw new InvalidOAuthTokenException("Missing Google email claim");
         }
         return new OAuthUser(sub != null ? sub : "", email, name != null ? name : email, "google");
     }
 
     @Override
+    @OAuthResilient
     public OAuthUser verifyMicrosoftToken(String microsoftToken) {
         if (microsoftToken == null || microsoftToken.isBlank()) {
-            throw new UnauthorizedException("Invalid Microsoft token");
+            throw new InvalidOAuthTokenException("Invalid Microsoft token");
         }
         Jwt jwt;
         try {
             jwt = microsoftDecoder.decode(microsoftToken);
+        } catch (JwtException e) {
+            throw new InvalidOAuthTokenException("Invalid Microsoft token", e);
         } catch (Exception e) {
-            throw new UnauthorizedException("Invalid Microsoft token");
+            throw new OAuthProviderTransientException("Microsoft token verification failed", e);
         }
         String email = getClaim(jwt, "preferred_username", "email");
         if (email == null || email.isBlank()) {
-            throw new UnauthorizedException("Missing Microsoft email claim");
+            throw new InvalidOAuthTokenException("Missing Microsoft email claim");
         }
         String name = getClaim(jwt, "name", null);
         if (name == null || name.isBlank()) {
@@ -147,7 +161,7 @@ public class OAuthServiceImpl implements OAuthService {
         }
         String sub = getClaim(jwt, "sub", null);
         if (sub == null || sub.isBlank()) {
-            throw new UnauthorizedException("Missing Microsoft sub claim");
+            throw new InvalidOAuthTokenException("Missing Microsoft sub claim");
         }
         return new OAuthUser(sub, email, name, "microsoft");
     }
