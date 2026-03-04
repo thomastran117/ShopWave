@@ -15,7 +15,6 @@ concurrency:
 
 jobs:
   review:
-    # Only run when the specific label is added, and PR is not draft
     if: github.event.pull_request.draft == false && github.event.label.name == 'ai-review'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -42,7 +41,6 @@ jobs:
               { owner, repo, pull_number, per_page: 100 }
             );
 
-            // Prefer "smallest useful" payload to reduce cost and injection surface
             const MAX_FILES = 30;
             const MAX_PATCH_CHARS = 12000;
             const MAX_TOTAL_CHARS = 60000;
@@ -90,18 +88,19 @@ jobs:
             
               "Strict output rules:\n" +
               "- Maximum 2 sentences in Summary.\n" +
-              "- Maximum 3 bullets in Mandatory.\n" +
-              "- Maximum 3 bullets in Suggestions.\n" +
+              "- Maximum 5 bullets in Mandatory.\n" +
+              "- Maximum 4 bullets in Suggestions.\n" +
               "- Maximum 2 bullets in Nitpicks.\n" +
               "- Maximum 3 bullets in Tests to Add.\n" +
-              "- Each bullet should be at most 2 short sentence.\n" +
+              "- Each bullet should be at most 3 short sentences.\n" +
               "- Only include the most important issues.\n" +
               "- If a section has nothing important, write 'None.'\n\n" +
+              "- The rating means 0/1 should not be merged, 2/3 can be merged but improvements are recommended. 4/5 is ready to be merged.'\n\n" +
             
               "Meaning of sections:\n" +
-              "- Mandatory 🔴 = must-fix correctness/security issues.\n" +
-              "- Suggestions 🟡 = meaningful improvements.\n" +
-              "- Nitpicks 🟢= minor code/style issues.\n\n" +
+              "- Mandatory 🔴 = must-fix correctness/security issues. program will not work. \n" +
+              "- Suggestions 🟡 = meaningful improvements. potential security issue. \n" +
+              "- Nitpicks 🟢= minor code/style issues. \n\n" +
             
               "When referencing files use `path/to/file`.\n\n" +
             
