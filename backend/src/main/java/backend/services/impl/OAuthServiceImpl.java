@@ -5,12 +5,14 @@ import backend.configurations.environment.EnvironmentSetting;
 import backend.exceptions.http.NotImplementedException;
 import backend.models.other.OAuthUser;
 import backend.security.oauth.InvalidOAuthTokenException;
+import backend.security.oauth.OAuthClaimUtils;
 import backend.security.oauth.OAuthProviderTransientException;
+import backend.security.oauth.MicrosoftIssuerValidator;
 import backend.services.intf.OAuthService;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
 import com.google.api.client.http.javanet.NetHttpTransport;
-import com.google.api.client.json.jackson2.JacksonFactory;
+import com.google.api.client.json.gson.GsonFactory;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
@@ -26,8 +28,6 @@ import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
-import java.util.regex.Pattern;
 
 /**
  * Verifies OAuth ID tokens from Google and Microsoft. The client sends the token
@@ -36,10 +36,6 @@ import java.util.regex.Pattern;
  */
 @Service
 public class OAuthServiceImpl implements OAuthService {
-
-    /** Accepts tenant-specific, common, organizations, and consumers issuers; optional trailing slash. */
-    private static final Pattern MICROSOFT_ISSUER_PATTERN = Pattern.compile(
-            "^https://login\\.microsoftonline\\.com/[^/]+/v2\\.0/?$");
 
     private final String googleClientId;
     private final String microsoftClientId;
@@ -69,7 +65,7 @@ public class OAuthServiceImpl implements OAuthService {
         if (clientId == null || clientId.isBlank()) {
             throw new IllegalStateException("Google OAuth client ID is not configured (set app.security.google-client-id)");
         }
-        return new GoogleIdTokenVerifier.Builder(new NetHttpTransport(), JacksonFactory.getDefaultInstance())
+        return new GoogleIdTokenVerifier.Builder(new NetHttpTransport(), GsonFactory.getDefaultInstance())
                 .setAudience(Collections.singletonList(clientId))
                 .build();
     }
@@ -93,7 +89,7 @@ public class OAuthServiceImpl implements OAuthService {
                 return OAuth2TokenValidatorResult.failure(new OAuth2Error(OAuth2ErrorCodes.INVALID_REQUEST, "Invalid audience", null));
             }
             String iss = jwt.getIssuer() != null ? jwt.getIssuer().toString() : "";
-            if (!MICROSOFT_ISSUER_PATTERN.matcher(iss).matches()) {
+            if (!MicrosoftIssuerValidator.isValid(iss)) {
                 return OAuth2TokenValidatorResult.failure(new OAuth2Error(OAuth2ErrorCodes.INVALID_REQUEST, "Invalid issuer", null));
             }
             return OAuth2TokenValidatorResult.success();
@@ -151,24 +147,18 @@ public class OAuthServiceImpl implements OAuthService {
         } catch (Exception e) {
             throw new OAuthProviderTransientException("Microsoft token verification failed", e);
         }
-        String email = getClaim(jwt, "preferred_username", "email");
+        String email = OAuthClaimUtils.getClaim(jwt, "preferred_username", "email");
         if (email == null || email.isBlank()) {
             throw new InvalidOAuthTokenException("Missing Microsoft email claim");
         }
-        String name = getClaim(jwt, "name", null);
+        String name = OAuthClaimUtils.getClaim(jwt, "name", null);
         if (name == null || name.isBlank()) {
             name = email;
         }
-        String sub = getClaim(jwt, "sub", null);
+        String sub = OAuthClaimUtils.getClaim(jwt, "sub", null);
         if (sub == null || sub.isBlank()) {
             throw new InvalidOAuthTokenException("Missing Microsoft sub claim");
         }
         return new OAuthUser(sub, email, name, "microsoft");
-    }
-
-    private static String getClaim(Jwt jwt, String preferred, String fallback) {
-        return Optional.ofNullable(jwt.getClaim(preferred)).map(Object::toString).filter(s -> !s.isBlank())
-                .or(() -> Optional.ofNullable(fallback).map(f -> jwt.getClaim(f)).map(Object::toString).filter(s -> !s.isBlank()))
-                .orElse(null);
     }
 }

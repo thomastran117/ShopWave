@@ -30,7 +30,7 @@ import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken.Payload;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
 import com.google.api.client.http.javanet.NetHttpTransport;
-import com.google.api.client.json.jackson2.JacksonFactory;
+import com.google.api.client.json.gson.GsonFactory;
 
 import jakarta.validation.Valid;
 import jakarta.servlet.http.Cookie;
@@ -178,7 +178,7 @@ public class AuthController {
         }
 
         GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(
-                new NetHttpTransport(), JacksonFactory.getDefaultInstance())
+                new NetHttpTransport(), GsonFactory.getDefaultInstance())
                 .setAudience(Collections.singletonList(googleClientId))
                 .build();
 
