@@ -2,19 +2,15 @@ package backend.services.impl;
 
 import backend.aspects.OAuthResilient;
 import backend.configurations.environment.EnvironmentSetting;
-import backend.http.OAuthGoogleHttpTransportFactory;
 import backend.models.other.OAuthUser;
-import backend.security.oauth.GoogleDiscoveryIssuers;
 import backend.security.oauth.InvalidOAuthTokenException;
 import backend.security.oauth.OAuthClaimUtils;
+import backend.security.oauth.OAuthExceptionClassifier;
 import backend.security.oauth.OAuthProviderTransientException;
-import backend.security.oauth.OAuthRetryable;
 import backend.security.oauth.OAuthVerificationError;
 import backend.services.intf.OAuthService;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
-import com.google.api.client.http.HttpTransport;
-import com.google.api.client.json.gson.GsonFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -22,9 +18,8 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.stereotype.Service;
+
 import java.security.GeneralSecurityException;
-import java.util.Collections;
-import java.util.List;
 
 /**
  * Verifies OAuth ID tokens from Google and Microsoft. The client sends the token
@@ -43,72 +38,18 @@ public class OAuthServiceImpl implements OAuthService {
      */
     private static final int DEFAULT_MAX_TOKEN_LENGTH = 16_384;
 
-    private final String googleClientId;
-    private final int googleConnectMs;
-    private final int googleReadMs;
-    private volatile GoogleIdTokenVerifier googleVerifier;
+    private final GoogleIdTokenVerifier googleVerifier;
     private final JwtDecoder microsoftDecoder;
     private final int maxTokenLength;
 
     public OAuthServiceImpl(
-            EnvironmentSetting env,
-            @Qualifier("microsoftJwtDecoder") JwtDecoder microsoftDecoder) {
-        this.googleClientId = env.getSecurity().getGoogleClientId();
-        EnvironmentSetting.Security.OAuthGoogle timeouts = env.getSecurity().getOauthGoogle();
-        this.googleConnectMs = timeouts != null ? timeouts.getConnectTimeoutMs() : 5_000;
-        this.googleReadMs = timeouts != null ? timeouts.getReadTimeoutMs() : 10_000;
+            @Qualifier("googleIdTokenVerifier") GoogleIdTokenVerifier googleVerifier,
+            @Qualifier("microsoftJwtDecoder") JwtDecoder microsoftDecoder,
+            EnvironmentSetting env) {
+        this.googleVerifier = googleVerifier;
         this.microsoftDecoder = microsoftDecoder;
-        int configured = env.getSecurity().getOauthMaxTokenLength();
+        int configured = env != null && env.getSecurity() != null ? env.getSecurity().getOauthMaxTokenLength() : DEFAULT_MAX_TOKEN_LENGTH;
         this.maxTokenLength = configured > 0 ? configured : DEFAULT_MAX_TOKEN_LENGTH;
-    }
-
-    /** Lazy-init verifier so discovery fetch does not block startup. Full construction inside lock to avoid racy partial visibility. */
-    private GoogleIdTokenVerifier getGoogleVerifier() {
-        if (googleVerifier == null) {
-            synchronized (this) {
-                if (googleVerifier == null) {
-                    GoogleIdTokenVerifier built = buildGoogleVerifier(googleClientId, googleConnectMs, googleReadMs);
-                    googleVerifier = built;
-                }
-            }
-        }
-        return googleVerifier;
-    }
-
-    private static GoogleIdTokenVerifier buildGoogleVerifier(String clientId, int connectMs, int readMs) {
-        if (clientId == null || clientId.isBlank()) {
-            throw new IllegalStateException(
-                    "Google OAuth client ID is not configured (set app.security.google-client-id)");
-        }
-        HttpTransport transport = OAuthGoogleHttpTransportFactory.build(connectMs, readMs);
-        List<String> issuers = GoogleDiscoveryIssuers.getIssuers(transport);
-        return new GoogleIdTokenVerifier.Builder(transport, GsonFactory.getDefaultInstance())
-                .setAudience(Collections.singletonList(clientId))
-                .setIssuers(issuers)
-                .build();
-    }
-
-    /**
-     * True if the throwable (or its cause chain) indicates invalid token / validation failure
-     * (e.g. malformed JWT, bad format). Such failures should be InvalidOAuthTokenException so
-     * they do not open the circuit breaker.
-     */
-    private static boolean isValidationFailure(Throwable t) {
-        Throwable current = t;
-        while (current != null) {
-            if (current instanceof IllegalArgumentException
-                    || current instanceof NumberFormatException
-                    || current instanceof IllegalStateException) {
-                return true;
-            }
-            String name = current.getClass().getName();
-            if (name.contains("JsonParse") || name.contains("JsonProcessing")
-                    || name.contains("JwtException") || name.contains("SignatureException")) {
-                return true;
-            }
-            current = current.getCause();
-        }
-        return false;
     }
 
     /** Safely extracts a string claim from Google payload; avoids ClassCastException when provider returns non-string. */
@@ -147,15 +88,14 @@ public class OAuthServiceImpl implements OAuthService {
         }
         GoogleIdToken idToken;
         try {
-            idToken = getGoogleVerifier().verify(googleToken);
+            idToken = googleVerifier.verify(googleToken);
         } catch (GeneralSecurityException e) {
             throw new InvalidOAuthTokenException("Invalid Google ID token", e);
         } catch (Exception e) {
-            if (OAuthRetryable.isRetryable(e)) {
+            if (OAuthExceptionClassifier.isRetryable(e)) {
                 throw new OAuthProviderTransientException("Google token verification failed", e);
             }
-            // Validation failures (malformed JWT, bad format) should not open the circuit
-            if (isValidationFailure(e)) {
+            if (OAuthExceptionClassifier.isValidationFailure(e)) {
                 throw new InvalidOAuthTokenException("Invalid Google ID token", e);
             }
             throw new OAuthVerificationError("Google token verification failed", e);
@@ -189,7 +129,7 @@ public class OAuthServiceImpl implements OAuthService {
         } catch (JwtException e) {
             throw new InvalidOAuthTokenException("Invalid Microsoft token", e);
         } catch (Exception e) {
-            if (OAuthRetryable.isRetryable(e)) {
+            if (OAuthExceptionClassifier.isRetryable(e)) {
                 throw new OAuthProviderTransientException("Microsoft token verification failed", e);
             }
             throw new OAuthVerificationError("Microsoft token verification failed", e);

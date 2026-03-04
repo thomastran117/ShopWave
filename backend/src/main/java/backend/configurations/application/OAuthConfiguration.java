@@ -1,7 +1,12 @@
 package backend.configurations.application;
 
 import backend.configurations.environment.EnvironmentSetting;
+import backend.http.OAuthGoogleHttpTransportFactory;
+import backend.security.oauth.GoogleDiscoveryIssuers;
 import backend.security.oauth.MicrosoftIssuerValidator;
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
+import com.google.api.client.http.HttpTransport;
+import com.google.api.client.json.gson.GsonFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -17,6 +22,7 @@ import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -32,6 +38,30 @@ public class OAuthConfiguration {
 
     private static final String HEADER_TYP_ACCESS_TOKEN = "at+jwt";
     private static final String HEADER_ALG_NONE = "none";
+
+    /**
+     * Google ID token verifier (singleton bean). Built at startup so no DCL; discovery fetch runs once.
+     */
+    @Bean("googleIdTokenVerifier")
+    @Qualifier("googleIdTokenVerifier")
+    public GoogleIdTokenVerifier googleIdTokenVerifier(EnvironmentSetting env) {
+        if (env == null || env.getSecurity() == null) {
+            throw new IllegalStateException("EnvironmentSetting and app.security are required for googleIdTokenVerifier.");
+        }
+        String clientId = env.getSecurity().getGoogleClientId();
+        if (clientId == null || clientId.isBlank()) {
+            throw new IllegalStateException("Google OAuth client ID is not configured (set app.security.google-client-id).");
+        }
+        var timeouts = env.getSecurity().getOauthGoogle();
+        int connectMs = timeouts != null ? timeouts.getConnectTimeoutMs() : 5_000;
+        int readMs = timeouts != null ? timeouts.getReadTimeoutMs() : 10_000;
+        HttpTransport transport = OAuthGoogleHttpTransportFactory.build(connectMs, readMs);
+        List<String> issuers = GoogleDiscoveryIssuers.getIssuers(transport);
+        return new GoogleIdTokenVerifier.Builder(transport, GsonFactory.getDefaultInstance())
+                .setAudience(Collections.singletonList(clientId))
+                .setIssuers(issuers)
+                .build();
+    }
 
     /**
      * Single cached JwtDecoder for Microsoft ID tokens. Required-field validation is done

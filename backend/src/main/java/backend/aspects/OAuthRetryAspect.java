@@ -1,8 +1,7 @@
 package backend.aspects;
 
 import backend.configurations.application.OAuthMetrics;
-import backend.security.oauth.InvalidOAuthTokenException;
-import backend.security.oauth.OAuthProviderTransientException;
+import backend.security.oauth.OAuthExceptionClassifier;
 import backend.security.oauth.OAuthVerificationError;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -71,20 +70,11 @@ public class OAuthRetryAspect {
                     try {
                         return joinPoint.proceed();
                     } catch (Throwable t) {
-                        // Fatal JVM errors must always be rethrown without wrapping so they propagate correctly
-                        if (t instanceof Error e) {
+                        Throwable toThrow = OAuthExceptionClassifier.toRethrowOrWrap(t);
+                        if (toThrow instanceof Error e) {
                             throw e;
                         }
-                        if (t instanceof Exception e) {
-                            if (e instanceof InvalidOAuthTokenException
-                                    || e instanceof OAuthProviderTransientException
-                                    || e instanceof OAuthVerificationError) {
-                                throw e;
-                            }
-                            throw e;
-                        }
-                        // Theoretical: non-Exception, non-Error Throwable; do not wrap Error here (handled above)
-                        throw new OAuthVerificationError("Unexpected throwable during OAuth verification", t);
+                        throw (Exception) toThrow;
                     }
                 });
             });
@@ -96,7 +86,6 @@ public class OAuthRetryAspect {
             if (oauthMetrics != null) {
                 oauthMetrics.recordDuration(System.currentTimeMillis() - startMs);
             }
-            // Fatal JVM errors: rethrow immediately, never wrap or log with details
             if (e instanceof Error err) {
                 throw err;
             }

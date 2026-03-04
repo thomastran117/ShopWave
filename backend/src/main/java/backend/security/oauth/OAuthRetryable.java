@@ -9,9 +9,10 @@ import java.util.Set;
 
 /**
  * Single source of truth for which exceptions are considered transient
- * (retryable) in OAuth verification. Used by the service layer and by
- * retry/circuit-breaker configuration. Uses HttpStatusCodeException
- * plus 5xx status check so all Spring 6+ HTTP error cases are covered.
+ * (retryable) in OAuth verification. Uses explicit type checks only (no
+ * class-name substring); HttpStatusCodeException is retryable only when
+ * status is 5xx. Used by {@link OAuthExceptionClassifier}, retry and
+ * circuit-breaker configuration.
  */
 public final class OAuthRetryable {
 
