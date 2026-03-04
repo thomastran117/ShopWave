@@ -1,18 +1,15 @@
 package backend.configurations.application;
 
 import backend.configurations.environment.EnvironmentSetting;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
-import java.time.Duration;
-
 /**
  * Health indicator for Microsoft OAuth JWKS endpoint reachability.
- * Replaces startup reachability checks so app startup is not blocked by external services;
- * health endpoint reports JWKS status instead.
+ * Uses shared {@code oauthJwksRestTemplate} so timeout and client config stay in sync with JWKS decoder.
  */
 @Component
 public class JwksHealthIndicator implements HealthIndicator {
@@ -20,9 +17,12 @@ public class JwksHealthIndicator implements HealthIndicator {
     private static final String JWKS_KEY = "jwks";
 
     private final EnvironmentSetting env;
+    private final RestTemplate oauthJwksRestTemplate;
 
-    public JwksHealthIndicator(EnvironmentSetting env) {
+    public JwksHealthIndicator(EnvironmentSetting env,
+                                @Qualifier("oauthJwksRestTemplate") RestTemplate oauthJwksRestTemplate) {
         this.env = env;
+        this.oauthJwksRestTemplate = oauthJwksRestTemplate;
     }
 
     @Override
@@ -34,9 +34,8 @@ public class JwksHealthIndicator implements HealthIndicator {
         if (!jwksUri.startsWith("https://")) {
             return Health.down().withDetail(JWKS_KEY, "JWKS URI must use HTTPS").build();
         }
-        RestTemplate rest = jwksRestTemplate();
         try {
-            rest.getForObject(jwksUri, String.class);
+            oauthJwksRestTemplate.getForObject(jwksUri, String.class);
             return Health.up().withDetail(JWKS_KEY, "reachable").build();
         } catch (Exception e) {
             return Health.down()
@@ -44,13 +43,5 @@ public class JwksHealthIndicator implements HealthIndicator {
                     .withDetail("message", e.getMessage())
                     .build();
         }
-    }
-
-    private RestTemplate jwksRestTemplate() {
-        var jwks = env.getSecurity().getJwks();
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(Duration.ofMillis(jwks.getConnectTimeoutMs()));
-        factory.setReadTimeout(Duration.ofMillis(jwks.getReadTimeoutMs()));
-        return new RestTemplate(factory);
     }
 }

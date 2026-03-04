@@ -1,6 +1,7 @@
 package backend.security.oauth;
 
-import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
 
 import java.io.IOException;
@@ -9,7 +10,8 @@ import java.util.Set;
 /**
  * Single source of truth for which exceptions are considered transient
  * (retryable) in OAuth verification. Used by the service layer and by
- * retry/circuit-breaker configuration.
+ * retry/circuit-breaker configuration. Uses HttpStatusCodeException
+ * plus 5xx status check so all Spring 6+ HTTP error cases are covered.
  */
 public final class OAuthRetryable {
 
@@ -17,7 +19,7 @@ public final class OAuthRetryable {
     private static final Set<Class<? extends Throwable>> TRANSIENT_TYPES = Set.of(
             (Class<? extends Throwable>) (Class<?>) OAuthProviderTransientException.class,
             (Class<? extends Throwable>) (Class<?>) IOException.class,
-            (Class<? extends Throwable>) (Class<?>) HttpServerErrorException.class,
+            (Class<? extends Throwable>) (Class<?>) HttpStatusCodeException.class,
             (Class<? extends Throwable>) (Class<?>) ResourceAccessException.class
     );
 
@@ -48,6 +50,13 @@ public final class OAuthRetryable {
         while (current != null) {
             for (Class<?> type : TRANSIENT_TYPES) {
                 if (type.isInstance(current)) {
+                    // HttpStatusCodeException: only 5xx are retryable; 4xx are not
+                    if (current instanceof HttpStatusCodeException h) {
+                        HttpStatusCode status = h.getStatusCode();
+                        if (status == null || status.value() < 500 || status.value() >= 600) {
+                            continue;
+                        }
+                    }
                     return true;
                 }
             }

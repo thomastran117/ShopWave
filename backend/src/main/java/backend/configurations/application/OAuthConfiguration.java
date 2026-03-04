@@ -6,7 +6,6 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.DependsOn;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2ErrorCodes;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
@@ -17,7 +16,6 @@ import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.web.client.RestTemplate;
 
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -41,12 +39,11 @@ public class OAuthConfiguration {
      */
     @Bean("microsoftJwtDecoder")
     @Qualifier("microsoftJwtDecoder")
-    public JwtDecoder microsoftJwtDecoder(EnvironmentSetting env) {
+    public JwtDecoder microsoftJwtDecoder(EnvironmentSetting env,
+                                          @Qualifier("oauthJwksRestTemplate") RestTemplate jwksRest) {
         EnvironmentSetting.Security security = env.getSecurity();
         String microsoftId = security.getMicrosoftClientId();
         String jwksUri = security.getMicrosoftJwksUri();
-
-        RestTemplate jwksRest = jwksRestTemplate(env);
 
         String authorityHost = security.getMicrosoftAuthorityHost();
         Set<String> wellKnownTenants = parseWellKnownTenants(security.getMicrosoftWellKnownTenants());
@@ -55,14 +52,6 @@ public class OAuthConfiguration {
                 .build();
         decoder.setJwtValidator(microsoftTokenValidator(microsoftId, authorityHost, wellKnownTenants));
         return decoder;
-    }
-
-    private static RestTemplate jwksRestTemplate(EnvironmentSetting env) {
-        EnvironmentSetting.Security.Jwks jwks = env.getSecurity().getJwks();
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(Duration.ofMillis(jwks.getConnectTimeoutMs()));
-        factory.setReadTimeout(Duration.ofMillis(jwks.getReadTimeoutMs()));
-        return new RestTemplate(factory);
     }
 
     private static Set<String> parseWellKnownTenants(String csv) {

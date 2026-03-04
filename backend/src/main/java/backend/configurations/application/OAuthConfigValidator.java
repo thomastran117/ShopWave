@@ -47,6 +47,11 @@ public class OAuthConfigValidator {
             throw new IllegalStateException(
                     "Microsoft OAuth JWKS URI is not configured. Set app.security.microsoft-jwks-uri.");
         }
-        log.debug("OAuth configuration validated (Google and Microsoft client IDs, JWKS URI present).");
+        String trimmed = jwksUri.trim().toLowerCase();
+        if (!trimmed.startsWith("https://")) {
+            throw new IllegalStateException(
+                    "Microsoft OAuth JWKS URI must use HTTPS. Got: " + jwksUri);
+        }
+        log.debug("OAuth configuration validated (Google and Microsoft client IDs, JWKS URI present and HTTPS).");
     }
 }

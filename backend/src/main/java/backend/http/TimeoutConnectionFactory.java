@@ -8,9 +8,13 @@ import java.net.URL;
 
 /**
  * Opens HTTP connections with connect and read timeouts applied so that
- * long network stalls do not block threads. Used by Google OAuth verification
- * to honor app.security.oauth-google timeouts.
+ * long network stalls do not block threads.
+ *
+ * @deprecated Prefer {@link OAuthGoogleHttpTransportFactory} (Apache HttpClient) for
+ * production-grade timeout and connection pooling. This implementation uses
+ * {@link java.net.HttpURLConnection} and remains available for non-OAuth use if needed.
  */
+@Deprecated
 public final class TimeoutConnectionFactory implements ConnectionFactory {
 
     private final int connectTimeoutMs;

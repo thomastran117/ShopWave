@@ -9,9 +9,11 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.classify.Classifier;
 import org.springframework.retry.RetryListener;
 import org.springframework.retry.backoff.ExponentialBackOffPolicy;
-import org.springframework.classify.BinaryExceptionClassifier;
+import org.springframework.retry.policy.ExceptionClassifierRetryPolicy;
+import org.springframework.retry.policy.NeverRetryPolicy;
 import org.springframework.retry.policy.SimpleRetryPolicy;
 import org.springframework.retry.support.RetryTemplate;
 
@@ -48,15 +50,10 @@ public class OAuthResilienceConfig {
         backOff.setMaxInterval(retry.getMaxIntervalMs());
         template.setBackOffPolicy(backOff);
 
-        BinaryExceptionClassifier classifier = new BinaryExceptionClassifier(
-                OAuthRetryable.getTransientTypes(),
-                false
-        );
-        classifier.setTraverseCauses(true);
-        SimpleRetryPolicy retryPolicy = new SimpleRetryPolicy(
-                retry.getMaxAttempts(),
-                classifier
-        );
+        // Use isRetryable() so HttpStatusCodeException is only retried when 5xx (same logic as circuit breaker)
+        ExceptionClassifierRetryPolicy retryPolicy = new ExceptionClassifierRetryPolicy();
+        retryPolicy.setExceptionClassifier((Classifier<Throwable, org.springframework.retry.RetryPolicy>) t ->
+                OAuthRetryable.isRetryable(t) ? new SimpleRetryPolicy(retry.getMaxAttempts()) : new NeverRetryPolicy());
         template.setRetryPolicy(retryPolicy);
         template.setListeners(new RetryListener[]{ oauthRetryListener });
 
@@ -75,8 +72,9 @@ public class OAuthResilienceConfig {
                 .minimumNumberOfCalls(cb.getMinimumNumberOfCalls())
                 .waitDurationInOpenState(Duration.ofSeconds(cb.getWaitDurationInOpenStateSeconds()))
                 .recordException(ex -> OAuthRetryable.isRetryable(OAuthRetryable.throwableForClassification(ex)))
+                // Only ignore OAuthVerificationError when cause is explicitly non-retryable; null or retryable cause must count toward CB
                 .ignoreException(ex -> ex instanceof InvalidOAuthTokenException
-                        || (ex instanceof OAuthVerificationError o && !OAuthRetryable.isRetryable(o.getCause())))
+                        || (ex instanceof OAuthVerificationError o && o.getCause() != null && !OAuthRetryable.isRetryable(o.getCause())))
                 .build();
 
         return CircuitBreaker.of("oauthVerification", config);

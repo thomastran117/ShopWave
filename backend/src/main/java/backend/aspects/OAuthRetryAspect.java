@@ -1,5 +1,6 @@
 package backend.aspects;
 
+import backend.configurations.application.OAuthMetrics;
 import backend.security.oauth.OAuthVerificationError;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -9,6 +10,7 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.retry.RetryCallback;
 import org.springframework.retry.support.RetryTemplate;
@@ -19,7 +21,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Applies retry and circuit breaker to methods annotated with {@link OAuthResilient}.
  * Retry wraps circuit breaker so each attempt is observed by the CB (recommended).
- * Does not swallow exceptions; preserves failure for callers and global handlers.
+ * Integrates {@link OAuthMetrics} for duration and retry visibility when available.
  */
 @Aspect
 @Component
@@ -31,24 +33,31 @@ public class OAuthRetryAspect {
 
     private final RetryTemplate oauthRetryTemplate;
     private final CircuitBreaker oauthCircuitBreaker;
+    private final OAuthMetrics oauthMetrics;
 
     public OAuthRetryAspect(
             @Qualifier("oauthRetryTemplate") RetryTemplate oauthRetryTemplate,
-            @Qualifier("oauthCircuitBreaker") CircuitBreaker oauthCircuitBreaker) {
+            @Qualifier("oauthCircuitBreaker") CircuitBreaker oauthCircuitBreaker,
+            @Autowired(required = false) OAuthMetrics oauthMetrics) {
         this.oauthRetryTemplate = oauthRetryTemplate;
         this.oauthCircuitBreaker = oauthCircuitBreaker;
+        this.oauthMetrics = oauthMetrics;
     }
 
     @Around("@annotation(backend.aspects.OAuthResilient)")
     public Object aroundOAuthVerification(ProceedingJoinPoint joinPoint) throws Throwable {
         MethodSignature sig = (MethodSignature) joinPoint.getSignature();
         String methodName = sig.getDeclaringType().getSimpleName() + "." + sig.getMethod().getName();
+        long startMs = System.currentTimeMillis();
 
         try {
-            return oauthRetryTemplate.execute((RetryCallback<Object, Throwable>) context -> {
+            Object result = oauthRetryTemplate.execute((RetryCallback<Object, Throwable>) context -> {
                 int attempt = context.getRetryCount() + 1;
 
                 if (attempt > 1) {
+                    if (oauthMetrics != null) {
+                        oauthMetrics.recordRetry();
+                    }
                     long now = System.currentTimeMillis();
                     long prev = lastRetryLogTime.get();
                     if (now - prev >= RETRY_LOG_RATE_LIMIT_MS && lastRetryLogTime.compareAndSet(prev, now)) {
@@ -60,22 +69,27 @@ public class OAuthRetryAspect {
                     try {
                         return joinPoint.proceed();
                     } catch (Throwable t) {
-                        // Rethrow all Error types so fatal JVM errors are never wrapped; rethrow Exception to preserve original cause for circuit breaker
                         if (t instanceof Error e) {
                             throw e;
                         }
                         if (t instanceof Exception e) {
                             throw e;
                         }
-                        // Only wrap non-Exception, non-Error; use generic message to avoid leaking internal details; original is preserved as cause
                         throw new OAuthVerificationError("Unexpected throwable during OAuth verification", t);
                     }
                 });
             });
+            if (oauthMetrics != null) {
+                oauthMetrics.recordDuration(System.currentTimeMillis() - startMs);
+            }
+            return result;
         } catch (CallNotPermittedException e) {
             log.warn("OAuth verify blocked (circuit open) for {}: {}", methodName, e.toString());
             throw e;
         } catch (Throwable e) {
+            if (oauthMetrics != null) {
+                oauthMetrics.recordDuration(System.currentTimeMillis() - startMs);
+            }
             if (e instanceof OAuthVerificationError) {
                 log.error("OAuth verify failed for {} (details omitted to avoid leakage)", methodName);
             } else {

@@ -2,17 +2,18 @@ package backend.services.impl;
 
 import backend.aspects.OAuthResilient;
 import backend.configurations.environment.EnvironmentSetting;
-import backend.http.TimeoutConnectionFactory;
+import backend.http.OAuthGoogleHttpTransportFactory;
 import backend.models.other.OAuthUser;
 import backend.security.oauth.InvalidOAuthTokenException;
 import backend.security.oauth.OAuthClaimUtils;
 import backend.security.oauth.OAuthNotSupportedException;
 import backend.security.oauth.OAuthProviderTransientException;
 import backend.security.oauth.OAuthRetryable;
+import backend.security.oauth.OAuthVerificationError;
 import backend.services.intf.OAuthService;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
-import com.google.api.client.http.javanet.NetHttpTransport;
+import com.google.api.client.http.HttpTransport;
 import com.google.api.client.json.gson.GsonFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,6 +24,7 @@ import org.springframework.security.oauth2.jwt.JwtException;
 import org.springframework.stereotype.Service;
 import java.security.GeneralSecurityException;
 import java.util.Collections;
+import java.util.List;
 
 /**
  * Verifies OAuth ID tokens from Google and Microsoft. The client sends the token
@@ -61,18 +63,13 @@ public class OAuthServiceImpl implements OAuthService {
             throw new IllegalStateException(
                     "Google OAuth client ID is not configured (set app.security.google-client-id)");
         }
-        NetHttpTransport transport = buildGoogleHttpTransport(timeouts);
-        return new GoogleIdTokenVerifier.Builder(transport, GsonFactory.getDefaultInstance())
-                .setAudience(Collections.singletonList(clientId))
-                .build();
-    }
-
-    /** Builds transport with connect/read timeouts for Google cert fetch to avoid blocking threads. */
-    private static NetHttpTransport buildGoogleHttpTransport(EnvironmentSetting.Security.OAuthGoogle timeouts) {
         int connectMs = timeouts != null ? timeouts.getConnectTimeoutMs() : 5_000;
         int readMs = timeouts != null ? timeouts.getReadTimeoutMs() : 10_000;
-        TimeoutConnectionFactory factory = new TimeoutConnectionFactory(connectMs, readMs);
-        return new NetHttpTransport.Builder().setConnectionFactory(factory).build();
+        HttpTransport transport = OAuthGoogleHttpTransportFactory.build(connectMs, readMs);
+        return new GoogleIdTokenVerifier.Builder(transport, GsonFactory.getDefaultInstance())
+                .setAudience(Collections.singletonList(clientId))
+                .setIssuers(List.of("https://accounts.google.com", "accounts.google.com"))
+                .build();
     }
 
     /** Shared check for blank, invalid, or oversized tokens; throws before any verification. */
@@ -104,10 +101,12 @@ public class OAuthServiceImpl implements OAuthService {
         } catch (GeneralSecurityException e) {
             throw new InvalidOAuthTokenException("Invalid Google ID token", e);
         } catch (Exception e) {
+            // Only treat as transient when failure is clearly upstream (IO, 5xx, timeouts); cert fetch etc. must not be mis-categorized as invalid token
             if (OAuthRetryable.isRetryable(e)) {
                 throw new OAuthProviderTransientException("Google token verification failed", e);
             }
-            throw new InvalidOAuthTokenException("Invalid Google ID token", e);
+            // Unknown/non-transient: wrap as verification error so CB can record it; do not treat as invalid token
+            throw new OAuthVerificationError("Google token verification failed", e);
         }
         if (idToken == null) {
             throw new InvalidOAuthTokenException("Invalid Google ID token");
@@ -138,7 +137,7 @@ public class OAuthServiceImpl implements OAuthService {
             if (OAuthRetryable.isRetryable(e)) {
                 throw new OAuthProviderTransientException("Microsoft token verification failed", e);
             }
-            throw new InvalidOAuthTokenException("Invalid Microsoft token", e);
+            throw new OAuthVerificationError("Microsoft token verification failed", e);
         }
         String email = OAuthClaimUtils.getClaim(jwt, "preferred_username", "email");
         if (email == null || email.isBlank()) {
