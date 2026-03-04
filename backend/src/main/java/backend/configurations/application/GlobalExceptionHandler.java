@@ -122,7 +122,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(OAuthVerificationError.class)
     public ResponseEntity<ErrorResponse> handleOAuthVerificationError(OAuthVerificationError ex) {
-        log.error("OAuth verification JVM or unexpected error (message not logged to avoid leakage)");
+        // Do not log ex, ex.getMessage(), or ex.getCause() — they may contain tokens or provider details
+        log.error("OAuth verification failed (details redacted to avoid leakage)");
         ErrorResponse body = new ErrorResponse(
                 HttpStatus.INTERNAL_SERVER_ERROR.value(),
                 "Internal server error",

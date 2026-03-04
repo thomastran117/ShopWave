@@ -335,6 +335,16 @@ public class EnvironmentSetting {
     public static class OAuth {
         private final Retry retry = new Retry();
         private final CircuitBreaker circuitBreaker = new CircuitBreaker();
+        /** When true (default), OAuthConfigValidator fails startup on missing/invalid config. Set false (e.g. local) to log and continue. */
+        private boolean validateConfigAtStartup = true;
+
+        public boolean isValidateConfigAtStartup() {
+            return validateConfigAtStartup;
+        }
+
+        public void setValidateConfigAtStartup(boolean validateConfigAtStartup) {
+            this.validateConfigAtStartup = validateConfigAtStartup;
+        }
 
         public Retry getRetry() {
             return retry;

@@ -17,15 +17,28 @@ import java.time.Duration;
 @Configuration
 public class OAuthHttpClientConfig {
 
+    private static final int DEFAULT_JWKS_CONNECT_MS = 5_000;
+    private static final int DEFAULT_JWKS_READ_MS = 10_000;
+
     /**
      * RestTemplate for JWKS and any OAuth HTTP calls that share the same timeout policy.
      * Connect/read timeouts come from app.security.jwks (same as Microsoft JWKS fetch).
+     * Uses defaults when env or jwks config is null to avoid startup NPEs.
      */
     @Bean("oauthJwksRestTemplate")
     @Qualifier("oauthJwksRestTemplate")
     public RestTemplate oauthJwksRestTemplate(EnvironmentSetting env) {
-        EnvironmentSetting.Security.Jwks jwks = env.getSecurity().getJwks();
-        return buildRestTemplateWithTimeouts(jwks.getConnectTimeoutMs(), jwks.getReadTimeoutMs());
+        if (env == null) {
+            return buildRestTemplateWithTimeouts(DEFAULT_JWKS_CONNECT_MS, DEFAULT_JWKS_READ_MS);
+        }
+        var security = env.getSecurity();
+        if (security == null) {
+            return buildRestTemplateWithTimeouts(DEFAULT_JWKS_CONNECT_MS, DEFAULT_JWKS_READ_MS);
+        }
+        var jwks = security.getJwks();
+        int connectMs = jwks != null ? jwks.getConnectTimeoutMs() : DEFAULT_JWKS_CONNECT_MS;
+        int readMs = jwks != null ? jwks.getReadTimeoutMs() : DEFAULT_JWKS_READ_MS;
+        return buildRestTemplateWithTimeouts(connectMs, readMs);
     }
 
     /**

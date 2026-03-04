@@ -41,10 +41,18 @@ public class OAuthConfiguration {
     @Qualifier("microsoftJwtDecoder")
     public JwtDecoder microsoftJwtDecoder(EnvironmentSetting env,
                                           @Qualifier("oauthJwksRestTemplate") RestTemplate jwksRest) {
+        if (env == null) {
+            throw new IllegalStateException("EnvironmentSetting is required for microsoftJwtDecoder.");
+        }
         EnvironmentSetting.Security security = env.getSecurity();
+        if (security == null) {
+            throw new IllegalStateException("app.security is required for microsoftJwtDecoder.");
+        }
         String microsoftId = security.getMicrosoftClientId();
         String jwksUri = security.getMicrosoftJwksUri();
-
+        if (jwksUri == null || jwksUri.isBlank()) {
+            throw new IllegalStateException("Microsoft JWKS URI is not configured (app.security.microsoft-jwks-uri).");
+        }
         String authorityHost = security.getMicrosoftAuthorityHost();
         Set<String> wellKnownTenants = parseWellKnownTenants(security.getMicrosoftWellKnownTenants());
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(jwksUri)

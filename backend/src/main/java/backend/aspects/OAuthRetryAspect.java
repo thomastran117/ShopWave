@@ -71,11 +71,11 @@ public class OAuthRetryAspect {
                     try {
                         return joinPoint.proceed();
                     } catch (Throwable t) {
+                        // Fatal JVM errors must always be rethrown without wrapping so they propagate correctly
                         if (t instanceof Error e) {
                             throw e;
                         }
                         if (t instanceof Exception e) {
-                            // Rethrow OAuth types as-is so retryable vs non-retryable stay distinct; no double-wrap
                             if (e instanceof InvalidOAuthTokenException
                                     || e instanceof OAuthProviderTransientException
                                     || e instanceof OAuthVerificationError) {
@@ -83,6 +83,7 @@ public class OAuthRetryAspect {
                             }
                             throw e;
                         }
+                        // Theoretical: non-Exception, non-Error Throwable; do not wrap Error here (handled above)
                         throw new OAuthVerificationError("Unexpected throwable during OAuth verification", t);
                     }
                 });
@@ -95,7 +96,7 @@ public class OAuthRetryAspect {
             if (oauthMetrics != null) {
                 oauthMetrics.recordDuration(System.currentTimeMillis() - startMs);
             }
-            // Ensure wrapped Errors always propagate without being reclassified or swallowed
+            // Fatal JVM errors: rethrow immediately, never wrap or log with details
             if (e instanceof Error err) {
                 throw err;
             }

@@ -30,28 +30,58 @@ public class OAuthConfigValidator {
 
     @PostConstruct
     void validateOAuthConfig() {
+        if (env == null) {
+            return;
+        }
+        var oauth = env.getOauth();
+        boolean failFast = (oauth != null && oauth.isValidateConfigAtStartup());
         var security = env.getSecurity();
+        if (security == null) {
+            if (failFast) {
+                throw new IllegalStateException("OAuth configuration missing: app.security is not available.");
+            }
+            log.warn("OAuth config validation skipped: security config not available.");
+            return;
+        }
         String googleId = security.getGoogleClientId();
         String microsoftId = security.getMicrosoftClientId();
         String jwksUri = security.getMicrosoftJwksUri();
 
         if (googleId == null || googleId.isBlank()) {
-            throw new IllegalStateException(
-                    "Google OAuth client ID is not configured. Set app.security.google-client-id.");
+            if (failFast) {
+                throw new IllegalStateException(
+                        "Google OAuth client ID is not configured. Set app.security.google-client-id.");
+            }
+            log.warn("OAuth config: Google client ID not set (app.security.google-client-id). Set app.oauth.validate-config-at-startup=true to fail startup.");
         }
         if (microsoftId == null || microsoftId.isBlank()) {
-            throw new IllegalStateException(
-                    "Microsoft OAuth client ID is not configured. Set app.security.microsoft-client-id.");
+            if (failFast) {
+                throw new IllegalStateException(
+                        "Microsoft OAuth client ID is not configured. Set app.security.microsoft-client-id.");
+            }
+            log.warn("OAuth config: Microsoft client ID not set. Set app.oauth.validate-config-at-startup=true to fail startup.");
         }
         if (jwksUri == null || jwksUri.isBlank()) {
-            throw new IllegalStateException(
-                    "Microsoft OAuth JWKS URI is not configured. Set app.security.microsoft-jwks-uri.");
+            if (failFast) {
+                throw new IllegalStateException(
+                        "Microsoft OAuth JWKS URI is not configured. Set app.security.microsoft-jwks-uri.");
+            }
+            log.warn("OAuth config: Microsoft JWKS URI not set. Set app.oauth.validate-config-at-startup=true to fail startup.");
+        } else {
+            String trimmed = jwksUri.trim().toLowerCase();
+            if (!trimmed.startsWith("https://")) {
+                if (failFast) {
+                    throw new IllegalStateException(
+                            "Microsoft OAuth JWKS URI must use HTTPS. Got: " + jwksUri);
+                }
+                log.warn("OAuth config: Microsoft JWKS URI must use HTTPS. Set app.oauth.validate-config-at-startup=true to fail startup.");
+            }
         }
-        String trimmed = jwksUri.trim().toLowerCase();
-        if (!trimmed.startsWith("https://")) {
-            throw new IllegalStateException(
-                    "Microsoft OAuth JWKS URI must use HTTPS. Got: " + jwksUri);
+        if (!failFast && (googleId == null || googleId.isBlank() || microsoftId == null || microsoftId.isBlank()
+                || jwksUri == null || jwksUri.isBlank() || (jwksUri != null && !jwksUri.trim().toLowerCase().startsWith("https://")))) {
+            log.warn("OAuth config validation completed with warnings; startup continued. Set app.oauth.validate-config-at-startup=true for strict validation.");
+        } else {
+            log.debug("OAuth configuration validated (Google and Microsoft client IDs, JWKS URI present and HTTPS).");
         }
-        log.debug("OAuth configuration validated (Google and Microsoft client IDs, JWKS URI present and HTTPS).");
     }
 }

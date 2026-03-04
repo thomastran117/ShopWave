@@ -62,18 +62,17 @@ public class OAuthServiceImpl implements OAuthService {
         this.maxTokenLength = configured > 0 ? configured : DEFAULT_MAX_TOKEN_LENGTH;
     }
 
-    /** Lazy-init verifier so discovery fetch does not block startup. */
+    /** Lazy-init verifier so discovery fetch does not block startup. Full construction inside lock to avoid racy partial visibility. */
     private GoogleIdTokenVerifier getGoogleVerifier() {
-        GoogleIdTokenVerifier v = googleVerifier;
-        if (v == null) {
+        if (googleVerifier == null) {
             synchronized (this) {
-                v = googleVerifier;
-                if (v == null) {
-                    googleVerifier = v = buildGoogleVerifier(googleClientId, googleConnectMs, googleReadMs);
+                if (googleVerifier == null) {
+                    GoogleIdTokenVerifier built = buildGoogleVerifier(googleClientId, googleConnectMs, googleReadMs);
+                    googleVerifier = built;
                 }
             }
         }
-        return v;
+        return googleVerifier;
     }
 
     private static GoogleIdTokenVerifier buildGoogleVerifier(String clientId, int connectMs, int readMs) {
