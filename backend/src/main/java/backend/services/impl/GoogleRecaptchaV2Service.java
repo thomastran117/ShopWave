@@ -3,7 +3,6 @@ package backend.services.impl;
 import backend.configurations.environment.EnvironmentSetting;
 import backend.services.intf.CaptchaService;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -40,14 +39,8 @@ public class GoogleRecaptchaV2Service implements CaptchaService {
         this.secretKey = env.getSecurity().getRecaptchaSecretKey();
         this.restTemplate = recaptchaRestTemplate;
         this.recaptchaRetryTemplate = recaptchaRetryTemplate;
-    }
-
-    @PostConstruct
-    void validateRecaptchaSecretKey() {
         if (secretKey == null || secretKey.isBlank()) {
-            throw new IllegalStateException(
-                    "app.security.recaptcha-secret-key must be set when using Google reCAPTCHA verification. " +
-                    "Set RECAPTCHA_SECRET_KEY in the environment or app.security.recaptcha-secret-key in configuration.");
+            log.warn("reCAPTCHA secret key is not set (app.security.recaptcha-secret-key). Verification will always return false.");
         }
     }
 

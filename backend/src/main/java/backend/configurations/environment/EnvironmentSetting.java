@@ -17,9 +17,14 @@ public class EnvironmentSetting {
     private final Database database = new Database();
     private final Cache cache = new Cache();
     private final Recaptcha recaptcha = new Recaptcha();
+    private final OAuth oauth = new OAuth();
 
     public Cors getCors() {
         return cors;
+    }
+
+    public OAuth getOauth() {
+        return oauth;
     }
 
     public Recaptcha getRecaptcha() {
@@ -61,10 +66,31 @@ public class EnvironmentSetting {
     }
 
     public static class Security {
+        private static final String DEFAULT_MICROSOFT_JWKS_URI = "https://login.microsoftonline.com/common/discovery/v2.0/keys";
+
         private final Jwt jwt = new Jwt();
+        private final Jwks jwks = new Jwks();
 
         private String googleClientId = "";
+        private String microsoftClientId = "";
+        private String microsoftJwksUri = DEFAULT_MICROSOFT_JWKS_URI;
+        /** Microsoft issuer authority host (e.g. https://login.microsoftonline.com/ or sovereign cloud URL). */
+        private String microsoftAuthorityHost = "https://login.microsoftonline.com/";
+        /** Comma-separated well-known tenant segments (e.g. common,organizations,consumers). */
+        private String microsoftWellKnownTenants = "common,organizations,consumers";
+        /** Max OAuth token length (bytes) to avoid oversized token attacks. Typical ID tokens < 4KB; default 16384. */
+        private int oauthMaxTokenLength = 16_384;
         private String recaptchaSecretKey = "";
+
+        private final OAuthGoogle oauthGoogle = new OAuthGoogle();
+
+        public Jwks getJwks() {
+            return jwks;
+        }
+
+        public OAuthGoogle getOauthGoogle() {
+            return oauthGoogle;
+        }
 
         public Jwt getJwt() {
             return jwt;
@@ -78,12 +104,119 @@ public class EnvironmentSetting {
             this.googleClientId = googleClientId != null ? googleClientId : "";
         }
 
+        public String getMicrosoftClientId() {
+            return microsoftClientId != null ? microsoftClientId : "";
+        }
+
+        public void setMicrosoftClientId(String microsoftClientId) {
+            this.microsoftClientId = microsoftClientId != null ? microsoftClientId : "";
+        }
+
+        public String getMicrosoftJwksUri() {
+            return microsoftJwksUri != null ? microsoftJwksUri : DEFAULT_MICROSOFT_JWKS_URI;
+        }
+
+        public void setMicrosoftJwksUri(String microsoftJwksUri) {
+            this.microsoftJwksUri = microsoftJwksUri != null ? microsoftJwksUri : DEFAULT_MICROSOFT_JWKS_URI;
+        }
+
+        public String getMicrosoftAuthorityHost() {
+            return microsoftAuthorityHost != null ? microsoftAuthorityHost : "https://login.microsoftonline.com/";
+        }
+
+        public void setMicrosoftAuthorityHost(String microsoftAuthorityHost) {
+            this.microsoftAuthorityHost = microsoftAuthorityHost != null ? microsoftAuthorityHost : "https://login.microsoftonline.com/";
+        }
+
+        public String getMicrosoftWellKnownTenants() {
+            return microsoftWellKnownTenants != null ? microsoftWellKnownTenants : "common,organizations,consumers";
+        }
+
+        public void setMicrosoftWellKnownTenants(String microsoftWellKnownTenants) {
+            this.microsoftWellKnownTenants = microsoftWellKnownTenants != null ? microsoftWellKnownTenants : "common,organizations,consumers";
+        }
+
+        public int getOauthMaxTokenLength() {
+            return oauthMaxTokenLength > 0 ? oauthMaxTokenLength : 16_384;
+        }
+
+        public void setOauthMaxTokenLength(int oauthMaxTokenLength) {
+            this.oauthMaxTokenLength = Math.max(256, Math.min(64 * 1024, oauthMaxTokenLength));
+        }
+
         public String getRecaptchaSecretKey() {
             return recaptchaSecretKey != null ? recaptchaSecretKey : "";
         }
 
         public void setRecaptchaSecretKey(String recaptchaSecretKey) {
             this.recaptchaSecretKey = recaptchaSecretKey != null ? recaptchaSecretKey : "";
+        }
+
+        /**
+         * JWKS endpoint settings (timeouts, connection) for OAuth JWT verification.
+         * Used when fetching Microsoft JWKS to avoid blocking threads and to fail fast.
+         */
+        public static class Jwks {
+            private int connectTimeoutMs = 5_000;
+            private int readTimeoutMs = 10_000;
+            /** When true, startup validates JWKS reachability. Default false so startup is not dependent on external services. */
+            private boolean validateAtStartup = false;
+            /** When true and validateAtStartup is true, startup fails if JWKS unreachable. When false, log warning and continue (safe for non-prod). Default false. */
+            private boolean failStartupOnUnreachable = false;
+
+            public boolean isValidateAtStartup() {
+                return validateAtStartup;
+            }
+
+            public void setValidateAtStartup(boolean validateAtStartup) {
+                this.validateAtStartup = validateAtStartup;
+            }
+
+            public boolean isFailStartupOnUnreachable() {
+                return failStartupOnUnreachable;
+            }
+
+            public void setFailStartupOnUnreachable(boolean failStartupOnUnreachable) {
+                this.failStartupOnUnreachable = failStartupOnUnreachable;
+            }
+
+            public int getConnectTimeoutMs() {
+                return connectTimeoutMs;
+            }
+
+            public void setConnectTimeoutMs(int connectTimeoutMs) {
+                this.connectTimeoutMs = Math.max(1_000, Math.min(30_000, connectTimeoutMs));
+            }
+
+            public int getReadTimeoutMs() {
+                return readTimeoutMs;
+            }
+
+            public void setReadTimeoutMs(int readTimeoutMs) {
+                this.readTimeoutMs = Math.max(1_000, Math.min(60_000, readTimeoutMs));
+            }
+        }
+
+        /** Timeouts for Google OAuth token verification (cert fetch), similar to JWKS for Microsoft. */
+        public static class OAuthGoogle {
+            private int connectTimeoutMs = 5_000;
+            private int readTimeoutMs = 10_000;
+
+            public int getConnectTimeoutMs() {
+                return connectTimeoutMs;
+            }
+
+            public void setConnectTimeoutMs(int connectTimeoutMs) {
+                this.connectTimeoutMs = Math.max(1_000, Math.min(30_000, connectTimeoutMs));
+            }
+
+            public int getReadTimeoutMs() {
+                return readTimeoutMs;
+            }
+
+            public void setReadTimeoutMs(int readTimeoutMs) {
+                this.readTimeoutMs = Math.max(1_000, Math.min(60_000, readTimeoutMs));
+            }
         }
 
         public static class Jwt {
@@ -191,6 +324,111 @@ public class EnvironmentSetting {
 
             public void setMaxIntervalMs(long maxIntervalMs) {
                 this.maxIntervalMs = Math.max(1_000, Math.min(300_000, maxIntervalMs));
+            }
+        }
+    }
+
+    /**
+     * OAuth token verification: retry with exponential backoff and circuit breaker
+     * for calls to Google/Microsoft (e.g. JWKS fetch). Configurable via app.oauth.*.
+     */
+    public static class OAuth {
+        private final Retry retry = new Retry();
+        private final CircuitBreaker circuitBreaker = new CircuitBreaker();
+        /** When true (default), OAuthConfigValidator fails startup on missing/invalid config. Set false (e.g. local) to log and continue. */
+        private boolean validateConfigAtStartup = true;
+
+        public boolean isValidateConfigAtStartup() {
+            return validateConfigAtStartup;
+        }
+
+        public void setValidateConfigAtStartup(boolean validateConfigAtStartup) {
+            this.validateConfigAtStartup = validateConfigAtStartup;
+        }
+
+        public Retry getRetry() {
+            return retry;
+        }
+
+        public CircuitBreaker getCircuitBreaker() {
+            return circuitBreaker;
+        }
+
+        public static class Retry {
+            private int maxAttempts = 4;
+            private long initialIntervalMs = 200;
+            private double multiplier = 2.0;
+            private long maxIntervalMs = 10_000;
+
+            public int getMaxAttempts() {
+                return maxAttempts;
+            }
+
+            public void setMaxAttempts(int maxAttempts) {
+                this.maxAttempts = Math.max(1, Math.min(10, maxAttempts));
+            }
+
+            public long getInitialIntervalMs() {
+                return initialIntervalMs;
+            }
+
+            public void setInitialIntervalMs(long initialIntervalMs) {
+                this.initialIntervalMs = Math.max(50, Math.min(60_000, initialIntervalMs));
+            }
+
+            public double getMultiplier() {
+                return multiplier;
+            }
+
+            public void setMultiplier(double multiplier) {
+                this.multiplier = Math.max(1.0, Math.min(5.0, multiplier));
+            }
+
+            public long getMaxIntervalMs() {
+                return maxIntervalMs;
+            }
+
+            public void setMaxIntervalMs(long maxIntervalMs) {
+                this.maxIntervalMs = Math.max(1_000, Math.min(300_000, maxIntervalMs));
+            }
+        }
+
+        public static class CircuitBreaker {
+            private float failureRateThreshold = 50f;
+            private int waitDurationInOpenStateSeconds = 60;
+            private int slidingWindowSize = 10;
+            private int minimumNumberOfCalls = 5;
+
+            public float getFailureRateThreshold() {
+                return failureRateThreshold;
+            }
+
+            public void setFailureRateThreshold(float failureRateThreshold) {
+                this.failureRateThreshold = Math.max(1f, Math.min(100f, failureRateThreshold));
+            }
+
+            public int getWaitDurationInOpenStateSeconds() {
+                return waitDurationInOpenStateSeconds;
+            }
+
+            public void setWaitDurationInOpenStateSeconds(int waitDurationInOpenStateSeconds) {
+                this.waitDurationInOpenStateSeconds = Math.max(1, Math.min(3600, waitDurationInOpenStateSeconds));
+            }
+
+            public int getSlidingWindowSize() {
+                return slidingWindowSize;
+            }
+
+            public void setSlidingWindowSize(int slidingWindowSize) {
+                this.slidingWindowSize = Math.max(2, Math.min(1000, slidingWindowSize));
+            }
+
+            public int getMinimumNumberOfCalls() {
+                return minimumNumberOfCalls;
+            }
+
+            public void setMinimumNumberOfCalls(int minimumNumberOfCalls) {
+                this.minimumNumberOfCalls = Math.max(1, Math.min(100, minimumNumberOfCalls));
             }
         }
     }
