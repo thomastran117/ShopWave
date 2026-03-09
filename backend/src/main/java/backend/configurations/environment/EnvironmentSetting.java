@@ -18,6 +18,7 @@ public class EnvironmentSetting {
     private final Cache cache = new Cache();
     private final Recaptcha recaptcha = new Recaptcha();
     private final OAuth oauth = new OAuth();
+    private final Proxy proxy = new Proxy();
 
     public Cors getCors() {
         return cors;
@@ -45,6 +46,10 @@ public class EnvironmentSetting {
 
     public Cache getCache() {
         return cache;
+    }
+
+    public Proxy getProxy() {
+        return proxy;
     }
 
     public static class Cors {
@@ -565,6 +570,30 @@ public class EnvironmentSetting {
 
         public void setIdleTimeout(long idleTimeout) {
             this.idleTimeout = idleTimeout;
+        }
+    }
+
+    /**
+     * Trusted reverse-proxy configuration. Forwarded IP headers (X-Forwarded-For, etc.)
+     * are only honoured when the direct remote address matches a trusted proxy.
+     * Entries may be individual IPs or CIDR ranges (e.g. "10.0.0.0/8").
+     * When the list is empty, forwarded headers are ignored and remoteAddr is always used.
+     */
+    public static class Proxy {
+        private String trustedProxies = "";
+
+        public List<String> getTrustedProxies() {
+            if (trustedProxies == null || trustedProxies.isBlank()) {
+                return List.of();
+            }
+            return Arrays.stream(trustedProxies.split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .collect(Collectors.toList());
+        }
+
+        public void setTrustedProxies(String trustedProxies) {
+            this.trustedProxies = trustedProxies != null ? trustedProxies : "";
         }
     }
 }
