@@ -12,7 +12,8 @@
       "@/*": ["src/*"],
       "@components/*": ["src/components/*"],
       "@pages/*": ["src/pages/*"],
-      "@stores/*": ["src/stores/*"]
+      "@stores/*": ["src/stores/*"],
+      "@configuration/*": ["src/configuration/*"]
     },
     "ignoreDeprecations": "6.0",
 
