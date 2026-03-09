@@ -5,10 +5,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import backend.exceptions.http.ConflictException;
+import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
 import backend.exceptions.http.UnauthorizedException;
 import backend.models.core.User;
 import backend.models.enums.UserRole;
+import backend.models.enums.UserStatus;
 import backend.repositories.UserRepository;
 import backend.services.intf.UserService;
 
@@ -34,6 +36,8 @@ public class UserServiceImpl implements UserService {
         if (!passwordEncoder.matches(password, user.get().getPassword())) {
             throw new UnauthorizedException("Invalid username or password");
         }
+
+        validateAccountAccessible(user.get());
 
         return user.get();
     }
@@ -85,12 +89,24 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public User loginOrSignupGoogle(String email) {
-        return userRepository.findByEmail(email).orElseGet(() -> {
-            User user = new User();
-            user.setEmail(email);
-            user.setPassword(null);
-            user.setRole(UserRole.USER);
-            return userRepository.save(user);
-        });
+        Optional<User> existing = userRepository.findByEmail(email);
+
+        if (existing.isPresent()) {
+            validateAccountAccessible(existing.get());
+            return existing.get();
+        }
+
+        User user = new User();
+        user.setEmail(email);
+        user.setPassword(null);
+        user.setRole(UserRole.USER);
+        return userRepository.save(user);
+    }
+
+    private void validateAccountAccessible(User user) {
+        UserStatus status = user.getStatus();
+        if (status != UserStatus.ACTIVE && status != UserStatus.INACTIVE) {
+            throw new ForbiddenException("Account is " + status.name().toLowerCase().replace('_', ' '));
+        }
     }
 }
