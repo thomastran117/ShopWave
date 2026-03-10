@@ -86,6 +86,8 @@ public class EnvironmentSetting {
         /** Max OAuth token length (bytes) to avoid oversized token attacks. Typical ID tokens < 4KB; default 16384. */
         private int oauthMaxTokenLength = 16_384;
         private String recaptchaSecretKey = "";
+        /** BCrypt cost factor. Default 10 (secure for prod). Use 4–6 for local dev to reduce login latency. */
+        private int bcryptStrength = 10;
 
         private final OAuthGoogle oauthGoogle = new OAuthGoogle();
 
@@ -155,6 +157,14 @@ public class EnvironmentSetting {
 
         public void setRecaptchaSecretKey(String recaptchaSecretKey) {
             this.recaptchaSecretKey = recaptchaSecretKey != null ? recaptchaSecretKey : "";
+        }
+
+        public int getBcryptStrength() {
+            return bcryptStrength;
+        }
+
+        public void setBcryptStrength(int bcryptStrength) {
+            this.bcryptStrength = Math.max(4, Math.min(31, bcryptStrength));
         }
 
         /**
