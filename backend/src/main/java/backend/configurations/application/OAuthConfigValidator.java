@@ -16,7 +16,7 @@ import jakarta.annotation.PostConstruct;
  * Uses IllegalStateException for fail-fast; could be replaced with
  * {@code @Validated} on a dedicated OAuthConfigProperties bean if preferred.
  */
-@Component
+@Component("oauthConfigValidator")
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class OAuthConfigValidator {
 

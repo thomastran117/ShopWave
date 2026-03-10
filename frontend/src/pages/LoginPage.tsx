@@ -48,8 +48,8 @@ export default function LoginPage() {
 
   const handleGoogleLogin = () => {
     const clientId =
-      "199609700164-qjnh0va1o1l6a87vac4lmro1j6kfqhnq.apps.googleusercontent.com";
-    const redirectUri = "http://localhost:3090/auth/callback";
+      "199609700164-kob74jigm65p2i1gtcmc3dkk60766tk4.apps.googleusercontent.com";
+    const redirectUri = "http://localhost:3090/auth/google";
     const scope = "openid email profile";
 
     const params = new URLSearchParams({
