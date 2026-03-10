@@ -58,12 +58,12 @@ public class User {
     @Column(nullable = true)
     private Instant lastLoginAt;
 
-    @Column(length = 100)
+    @Column(nullable = true, length = 100)
     private String firstName;
 
-    @Column(length = 100)
+    @Column(nullable = true, length = 100)
     private String lastName;
 
-    @Column(length = 30)
+    @Column(nullable = true, length = 30)
     private String phoneNumber;
 }

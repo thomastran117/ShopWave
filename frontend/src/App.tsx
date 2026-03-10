@@ -42,7 +42,7 @@ function App() {
             />
             <Route path="/dashboard" element={<LoginPage />} />
             <Route path="/hello" element={<HelloTestPage />} />
-            <Route path="/auth/callback" element={<AuthCallback />} />
+            <Route path="/auth/google" element={<AuthCallback />} />
           </Routes>
         </div>
         <Footer />
