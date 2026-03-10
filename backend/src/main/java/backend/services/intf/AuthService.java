@@ -19,7 +19,7 @@ public interface AuthService {
     /**
      * Authenticate user with email/password and produce token pair.
      */
-    LoginResult login(String email, String password);
+    LoginResult localAuthenicate(String email, String password);
 
     /**
      * Validate refresh token and issue new access + refresh token pair.
@@ -29,7 +29,7 @@ public interface AuthService {
     /**
      * Authenticate via Google (verify id token, then login or signup) and produce token pair.
      */
-    LoginResult loginOrSignupGoogle(String email);
+    LoginResult googleAuthenicate(String token);
 
     /**
      * Revoke a single refresh token (e.g. logout). No-op if token already invalid.
