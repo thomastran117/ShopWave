@@ -90,11 +90,12 @@ public class TokenServiceImpl implements TokenService {
     }
 
     @Override
-    public String generateAccessToken(int userId, String role) {
+    public String generateAccessToken(int userId, String role, String email) {
         long ttlMs = env.getSecurity().getJwt().getAccessTokenTtlSeconds() * 1000L;
         return Jwts.builder()
                 .setSubject(String.valueOf(userId))
                 .claim("role", role)
+                .claim("email", email)
                 .setIssuedAt(new Date())
                 .setExpiration(new Date(System.currentTimeMillis() + ttlMs))
                 .signWith(getSigningKey(), SignatureAlgorithm.HS512)
@@ -102,10 +103,10 @@ public class TokenServiceImpl implements TokenService {
     }
 
     @Override
-    public String generateRefreshToken(int userId, String role) {
+    public String generateRefreshToken(int userId, String role, String email) {
         long ttlSeconds = env.getSecurity().getJwt().getRefreshTokenTtlSeconds();
         String tokenId = generateOpaqueToken();
-        String payload = userId + PAYLOAD_SEP + (role != null ? role : "");
+        String payload = userId + PAYLOAD_SEP + (role != null ? role : "") + PAYLOAD_SEP + (email != null ? email : "");
 
         cache.set(REFRESH_TOKEN_PREFIX + tokenId, payload, ttlSeconds);
         cache.setAdd(REFRESH_USER_SET_PREFIX + userId, tokenId);
@@ -124,12 +125,25 @@ public class TokenServiceImpl implements TokenService {
         if (refreshToken == null || refreshToken.isBlank()) return null;
         String raw = cache.get(REFRESH_TOKEN_PREFIX + refreshToken);
         if (raw == null) return null;
-        int sep = raw.indexOf(PAYLOAD_SEP);
-        if (sep <= 0) return null;
+        return parsePayload(raw);
+    }
+
+    private RefreshTokenPayload parsePayload(String raw) {
+        int sep1 = raw.indexOf(PAYLOAD_SEP);
+        if (sep1 <= 0) return null;
         try {
-            int userId = Integer.parseInt(raw.substring(0, sep));
-            String role = sep < raw.length() - 1 ? raw.substring(sep + 1) : "";
-            return new RefreshTokenPayload(userId, role);
+            int userId = Integer.parseInt(raw.substring(0, sep1));
+            int sep2 = raw.indexOf(PAYLOAD_SEP, sep1 + 1);
+            String role;
+            String email;
+            if (sep2 > 0) {
+                role = raw.substring(sep1 + 1, sep2);
+                email = sep2 < raw.length() - 1 ? raw.substring(sep2 + 1) : "";
+            } else {
+                role = sep1 < raw.length() - 1 ? raw.substring(sep1 + 1) : "";
+                email = "";
+            }
+            return new RefreshTokenPayload(userId, role, email);
         } catch (NumberFormatException e) {
             return null;
         }
@@ -140,33 +154,25 @@ public class TokenServiceImpl implements TokenService {
         String raw = cache.getAndDelete(REFRESH_TOKEN_PREFIX + oldToken);
         if (raw == null) return null;
 
-        int sep = raw.indexOf(PAYLOAD_SEP);
-        if (sep <= 0) return null;
-        int userId;
-        String role;
-        try {
-            userId = Integer.parseInt(raw.substring(0, sep));
-            role = sep < raw.length() - 1 ? raw.substring(sep + 1) : "";
-        } catch (NumberFormatException e) {
-            return null;
-        }
+        RefreshTokenPayload existing = parsePayload(raw);
+        if (existing == null) return null;
 
-        cache.setRemove(REFRESH_USER_SET_PREFIX + userId, oldToken);
+        cache.setRemove(REFRESH_USER_SET_PREFIX + existing.userId(), oldToken);
 
         long ttlSeconds = env.getSecurity().getJwt().getRefreshTokenTtlSeconds();
         String newTokenId = generateOpaqueToken();
-        String payload = userId + PAYLOAD_SEP + role;
+        String payload = existing.userId() + PAYLOAD_SEP + existing.role() + PAYLOAD_SEP + existing.email();
 
         cache.set(REFRESH_TOKEN_PREFIX + newTokenId, payload, ttlSeconds);
-        cache.setAdd(REFRESH_USER_SET_PREFIX + userId, newTokenId);
+        cache.setAdd(REFRESH_USER_SET_PREFIX + existing.userId(), newTokenId);
 
         return newTokenId;
     }
 
     @Override
-    public Map<String, Object> generateTokenPair(int userId, String role) {
-        String accessToken = generateAccessToken(userId, role);
-        String refreshToken = generateRefreshToken(userId, role);
+    public Map<String, Object> generateTokenPair(int userId, String role, String email) {
+        String accessToken = generateAccessToken(userId, role, email);
+        String refreshToken = generateRefreshToken(userId, role, email);
 
         Map<String, Object> tokens = new HashMap<>();
         tokens.put("accessToken", accessToken);

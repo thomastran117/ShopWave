@@ -4,6 +4,7 @@ import java.util.Map;
 
 import backend.services.intf.AuthService;
 import backend.services.intf.OAuthService;
+import backend.utilities.intf.Logger;
 import backend.dtos.responses.general.MessageResponse;
 import backend.dtos.requests.auth.LoginRequest;
 import backend.dtos.responses.auth.AuthResponse;
@@ -33,15 +34,23 @@ public class AuthController {
 
     private final AuthService authService;
     private final OAuthService oauthService;
-
-    public AuthController(AuthService authService, OAuthService oauthService) {
+    private final Logger logger;
+    
+    public AuthController(AuthService authService, OAuthService oauthService, Logger logger) {
         this.authService = authService;
         this.oauthService = oauthService;
+        this.logger = logger;
     }
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request, HttpServletResponse response) {
         try {
+            logger.info("hello!");
+            logger.debug("hello!");
+            logger.critical("hello!");
+            logger.warn("hello!");
+            logger.error("hello!");
+
             AuthService.LoginResult result = authService.localAuthenicate(request.getEmail(), request.getPassword());
 
             ResponseCookie cookie = ResponseCookie.from("refreshToken", result.refreshToken())

@@ -28,7 +28,7 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public LoginResult localAuthenicate(String email, String password) {
         User user = userService.login(email, password);
-        Map<String, Object> tokens = tokenService.generateTokenPair(user.getId().intValue(), user.getRole().toString());
+        Map<String, Object> tokens = tokenService.generateTokenPair(user.getId().intValue(), user.getRole().toString(), user.getEmail());
         String accessToken = (String) tokens.get("accessToken");
         String refreshToken = (String) tokens.get("refreshToken");
         return new LoginResult(accessToken, refreshToken, user.getEmail(), user.getRole().toString(), user.getId());
@@ -44,12 +44,11 @@ public class AuthServiceImpl implements AuthService {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid or expired refresh token");
         }
 
-        String newRefreshToken = tokenService.rotateRefreshToken(refreshToken);
-        if (newRefreshToken == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid or expired refresh token");
-        }
+        User user = userService.getUserByID(payload.userId());
 
-        String newAccessToken = tokenService.generateAccessToken(payload.userId(), payload.role());
+        tokenService.revokeRefreshToken(refreshToken);
+        String newRefreshToken = tokenService.generateRefreshToken(user.getId().intValue(), user.getRole().toString(), user.getEmail());
+        String newAccessToken = tokenService.generateAccessToken(user.getId().intValue(), user.getRole().toString(), user.getEmail());
         long expiresIn = tokenService.getAccessTokenExpiresInSeconds();
 
         return new RefreshResult(newAccessToken, newRefreshToken, expiresIn);
@@ -59,7 +58,7 @@ public class AuthServiceImpl implements AuthService {
     public LoginResult googleAuthenicate(String token) {
         OAuthUser oauthUser = oauthService.verifyGoogleToken(token);
         User user = userService.loginOrSignupGoogle(oauthUser.email());
-        Map<String, Object> tokens = tokenService.generateTokenPair(user.getId().intValue(), user.getRole().toString());
+        Map<String, Object> tokens = tokenService.generateTokenPair(user.getId().intValue(), user.getRole().toString(), user.getEmail());
         String accessToken = (String) tokens.get("accessToken");
         String refreshToken = (String) tokens.get("refreshToken");
         return new LoginResult(accessToken, refreshToken, user.getEmail(), user.getRole().toString(), user.getId());
