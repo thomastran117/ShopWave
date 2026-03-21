@@ -41,4 +41,22 @@ public interface CacheService {
      * Delete all keys matching pattern (e.g. "app:refresh:user:123:*"). Use sparingly.
      */
     long deleteByPattern(String pattern);
+
+    /**
+     * Acquires a distributed lock (SETNX) with a TTL.
+     *
+     * @param lockKey    the lock key (will be namespaced)
+     * @param lockValue  a unique token so only the owner can release
+     * @param ttlSeconds maximum time the lock is held before auto-expiry
+     * @return true if the lock was acquired, false if already held
+     */
+    boolean tryLock(String lockKey, String lockValue, long ttlSeconds);
+
+    /**
+     * Releases a distributed lock only if the caller still owns it (value matches).
+     *
+     * @param lockKey   the lock key (will be namespaced)
+     * @param lockValue the token used when acquiring the lock
+     */
+    void unlock(String lockKey, String lockValue);
 }

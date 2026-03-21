@@ -5,7 +5,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+
 import java.time.Duration;
+import java.util.Collections;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -105,5 +108,19 @@ public class CacheServiceImpl implements CacheService {
         if (keys == null || keys.isEmpty()) return 0;
         Long deleted = redisTemplate.delete(keys);
         return deleted != null ? deleted : 0;
+    }
+
+    @Override
+    public boolean tryLock(String lockKey, String lockValue, long ttlSeconds) {
+        Boolean acquired = redisTemplate.opsForValue()
+                .setIfAbsent(key(lockKey), lockValue, Duration.ofSeconds(ttlSeconds));
+        return Boolean.TRUE.equals(acquired);
+    }
+
+    @Override
+    public void unlock(String lockKey, String lockValue) {
+        String script = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+        DefaultRedisScript<Long> redisScript = new DefaultRedisScript<>(script, Long.class);
+        redisTemplate.execute(redisScript, Collections.singletonList(key(lockKey)), lockValue);
     }
 }
