@@ -19,6 +19,7 @@ public class EnvironmentSetting {
     private final Recaptcha recaptcha = new Recaptcha();
     private final OAuth oauth = new OAuth();
     private final Proxy proxy = new Proxy();
+    private final S3 s3 = new S3();
 
     public Cors getCors() {
         return cors;
@@ -50,6 +51,10 @@ public class EnvironmentSetting {
 
     public Proxy getProxy() {
         return proxy;
+    }
+
+    public S3 getS3() {
+        return s3;
     }
 
     public static class Cors {
@@ -599,6 +604,65 @@ public class EnvironmentSetting {
 
         public void setIdleTimeout(long idleTimeout) {
             this.idleTimeout = idleTimeout;
+        }
+    }
+
+    public static class S3 {
+        private String region = "us-east-1";
+        private String bucket = "";
+        private String accessKey = "";
+        private String secretKey = "";
+        /** Optional CDN / public base URL (e.g. https://cdn.example.com). Falls back to the standard S3 URL when blank. */
+        private String publicUrlBase = "";
+        /** Pre-signed PUT URL expiry in seconds. Default 300 (5 min). */
+        private int presignExpirySeconds = 300;
+
+        public String getRegion() {
+            return region != null ? region : "us-east-1";
+        }
+
+        public void setRegion(String region) {
+            this.region = region != null ? region : "us-east-1";
+        }
+
+        public String getBucket() {
+            return bucket != null ? bucket : "";
+        }
+
+        public void setBucket(String bucket) {
+            this.bucket = bucket != null ? bucket : "";
+        }
+
+        public String getAccessKey() {
+            return accessKey != null ? accessKey : "";
+        }
+
+        public void setAccessKey(String accessKey) {
+            this.accessKey = accessKey != null ? accessKey : "";
+        }
+
+        public String getSecretKey() {
+            return secretKey != null ? secretKey : "";
+        }
+
+        public void setSecretKey(String secretKey) {
+            this.secretKey = secretKey != null ? secretKey : "";
+        }
+
+        public String getPublicUrlBase() {
+            return publicUrlBase != null ? publicUrlBase : "";
+        }
+
+        public void setPublicUrlBase(String publicUrlBase) {
+            this.publicUrlBase = publicUrlBase != null ? publicUrlBase : "";
+        }
+
+        public int getPresignExpirySeconds() {
+            return presignExpirySeconds > 0 ? presignExpirySeconds : 300;
+        }
+
+        public void setPresignExpirySeconds(int presignExpirySeconds) {
+            this.presignExpirySeconds = Math.max(30, Math.min(3600, presignExpirySeconds));
         }
     }
 
