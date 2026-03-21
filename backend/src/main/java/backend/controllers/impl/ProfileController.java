@@ -29,7 +29,7 @@ public class ProfileController {
         this.profileService = profileService;
     }
 
-    @GetMapping
+    @GetMapping("")
     public ResponseEntity<ProfileResponse> getProfile() {
         try {
             long userId = resolveUserId();
@@ -41,7 +41,7 @@ public class ProfileController {
         }
     }
 
-    @PatchMapping
+    @PatchMapping("")
     public ResponseEntity<ProfileResponse> updateProfile(@Valid @RequestBody UpdateProfileRequest request) {
         try {
             long userId = resolveUserId();
