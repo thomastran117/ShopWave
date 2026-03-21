@@ -66,4 +66,7 @@ public class User {
 
     @Column(nullable = true, length = 30)
     private String phoneNumber;
+
+    @Column(nullable = true, length = 255)
+    private String address;
 }

@@ -103,6 +103,38 @@ public class UserServiceImpl implements UserService {
         return userRepository.save(user);
     }
 
+    @Override
+    public User loginOrSignupMicrosoft(String email) {
+        Optional<User> existing = userRepository.findByEmail(email);
+
+        if (existing.isPresent()) {
+            validateAccountAccessible(existing.get());
+            return existing.get();
+        }
+
+        User user = new User();
+        user.setEmail(email);
+        user.setPassword(null);
+        user.setRole(UserRole.USER);
+        return userRepository.save(user);
+    }
+
+    @Override
+    public User loginOrSignupApple(String email) {
+        Optional<User> existing = userRepository.findByEmail(email);
+
+        if (existing.isPresent()) {
+            validateAccountAccessible(existing.get());
+            return existing.get();
+        }
+
+        User user = new User();
+        user.setEmail(email);
+        user.setPassword(null);
+        user.setRole(UserRole.USER);
+        return userRepository.save(user);
+    }
+
     private void validateAccountAccessible(User user) {
         UserStatus status = user.getStatus();
         if (status != UserStatus.ACTIVE && status != UserStatus.INACTIVE) {

@@ -33,4 +33,15 @@ public interface OAuthService {
      */
     @OAuthResilient
     OAuthUser verifyMicrosoftToken(String microsoftToken);
+
+    /**
+     * Verify an Apple ID token and return the user claims.
+     *
+     * @param appleToken the ID token from the Apple sign-in client
+     * @return verified user info (sub, email, name, provider)
+     * @throws backend.security.oauth.InvalidOAuthTokenException   if the token is invalid or required claims are missing
+     * @throws backend.security.oauth.OAuthProviderTransientException if provider call failed transiently (retried by aspect)
+     */
+    @OAuthResilient
+    OAuthUser verifyAppleToken(String appleToken);
 }

@@ -15,19 +15,19 @@ public interface TokenService {
 
     Authentication getAuthentication(String token);
 
-    String generateAccessToken(int userId, String role);
+    String generateAccessToken(int userId, String role, String email);
 
     /**
      * Creates an opaque refresh token and stores it in cache (revocable). Not a JWT.
      */
-    String generateRefreshToken(int userId, String role);
+    String generateRefreshToken(int userId, String role, String email);
 
     boolean validateRefreshToken(String token);
 
     /**
      * Payload stored with a refresh token in cache.
      */
-    record RefreshTokenPayload(int userId, String role) {}
+    record RefreshTokenPayload(int userId, String role, String email) {}
 
     /**
      * Returns payload for a valid cache-backed refresh token, or null if invalid/expired/revoked.
@@ -39,7 +39,7 @@ public interface TokenService {
      */
     String rotateRefreshToken(String oldToken);
 
-    Map<String, Object> generateTokenPair(int userId, String role);
+    Map<String, Object> generateTokenPair(int userId, String role, String email);
 
     long getAccessTokenExpiresInSeconds();
 

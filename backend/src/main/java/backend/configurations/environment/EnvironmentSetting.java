@@ -72,6 +72,7 @@ public class EnvironmentSetting {
 
     public static class Security {
         private static final String DEFAULT_MICROSOFT_JWKS_URI = "https://login.microsoftonline.com/common/discovery/v2.0/keys";
+        private static final String DEFAULT_APPLE_JWKS_URI = "https://appleid.apple.com/auth/keys";
 
         private final Jwt jwt = new Jwt();
         private final Jwks jwks = new Jwks();
@@ -83,6 +84,8 @@ public class EnvironmentSetting {
         private String microsoftAuthorityHost = "https://login.microsoftonline.com/";
         /** Comma-separated well-known tenant segments (e.g. common,organizations,consumers). */
         private String microsoftWellKnownTenants = "common,organizations,consumers";
+        private String appleClientId = "";
+        private String appleJwksUri = DEFAULT_APPLE_JWKS_URI;
         /** Max OAuth token length (bytes) to avoid oversized token attacks. Typical ID tokens < 4KB; default 16384. */
         private int oauthMaxTokenLength = 16_384;
         private String recaptchaSecretKey = "";
@@ -141,6 +144,22 @@ public class EnvironmentSetting {
 
         public void setMicrosoftWellKnownTenants(String microsoftWellKnownTenants) {
             this.microsoftWellKnownTenants = microsoftWellKnownTenants != null ? microsoftWellKnownTenants : "common,organizations,consumers";
+        }
+
+        public String getAppleClientId() {
+            return appleClientId != null ? appleClientId : "";
+        }
+
+        public void setAppleClientId(String appleClientId) {
+            this.appleClientId = appleClientId != null ? appleClientId : "";
+        }
+
+        public String getAppleJwksUri() {
+            return appleJwksUri != null ? appleJwksUri : DEFAULT_APPLE_JWKS_URI;
+        }
+
+        public void setAppleJwksUri(String appleJwksUri) {
+            this.appleJwksUri = appleJwksUri != null ? appleJwksUri : DEFAULT_APPLE_JWKS_URI;
         }
 
         public int getOauthMaxTokenLength() {

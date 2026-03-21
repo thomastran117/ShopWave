@@ -16,4 +16,8 @@ public interface UserService {
     long getID(String email);
 
     User loginOrSignupGoogle(String email);
+
+    User loginOrSignupMicrosoft(String email);
+
+    User loginOrSignupApple(String email);
 }
