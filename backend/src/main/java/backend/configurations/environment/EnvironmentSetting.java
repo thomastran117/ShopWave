@@ -20,6 +20,7 @@ public class EnvironmentSetting {
     private final OAuth oauth = new OAuth();
     private final Proxy proxy = new Proxy();
     private final S3 s3 = new S3();
+    private final Stripe stripe = new Stripe();
 
     public Cors getCors() {
         return cors;
@@ -55,6 +56,10 @@ public class EnvironmentSetting {
 
     public S3 getS3() {
         return s3;
+    }
+
+    public Stripe getStripe() {
+        return stripe;
     }
 
     public static class Cors {
@@ -604,6 +609,80 @@ public class EnvironmentSetting {
 
         public void setIdleTimeout(long idleTimeout) {
             this.idleTimeout = idleTimeout;
+        }
+    }
+
+    public static class Stripe {
+        private String secretKey = "";
+        private String publishableKey = "";
+        private String webhookSecret = "";
+        private final Retry retry = new Retry();
+
+        public String getSecretKey() {
+            return secretKey != null ? secretKey : "";
+        }
+
+        public void setSecretKey(String secretKey) {
+            this.secretKey = secretKey != null ? secretKey : "";
+        }
+
+        public String getPublishableKey() {
+            return publishableKey != null ? publishableKey : "";
+        }
+
+        public void setPublishableKey(String publishableKey) {
+            this.publishableKey = publishableKey != null ? publishableKey : "";
+        }
+
+        public String getWebhookSecret() {
+            return webhookSecret != null ? webhookSecret : "";
+        }
+
+        public void setWebhookSecret(String webhookSecret) {
+            this.webhookSecret = webhookSecret != null ? webhookSecret : "";
+        }
+
+        public Retry getRetry() {
+            return retry;
+        }
+
+        public static class Retry {
+            private int maxAttempts = 3;
+            private long initialIntervalMs = 500;
+            private double multiplier = 2.0;
+            private long maxIntervalMs = 8000;
+
+            public int getMaxAttempts() {
+                return maxAttempts;
+            }
+
+            public void setMaxAttempts(int maxAttempts) {
+                this.maxAttempts = Math.max(1, Math.min(10, maxAttempts));
+            }
+
+            public long getInitialIntervalMs() {
+                return initialIntervalMs;
+            }
+
+            public void setInitialIntervalMs(long initialIntervalMs) {
+                this.initialIntervalMs = Math.max(100, Math.min(60_000, initialIntervalMs));
+            }
+
+            public double getMultiplier() {
+                return multiplier;
+            }
+
+            public void setMultiplier(double multiplier) {
+                this.multiplier = Math.max(1.0, Math.min(5.0, multiplier));
+            }
+
+            public long getMaxIntervalMs() {
+                return maxIntervalMs;
+            }
+
+            public void setMaxIntervalMs(long maxIntervalMs) {
+                this.maxIntervalMs = Math.max(1_000, Math.min(300_000, maxIntervalMs));
+            }
         }
     }
 
