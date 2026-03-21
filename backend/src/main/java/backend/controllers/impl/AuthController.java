@@ -13,6 +13,7 @@ import backend.exceptions.http.InternalServerErrorException;
 import backend.annotations.requireAuth.RequireAuth;
 import backend.models.other.OAuthUser;
 import backend.security.oauth.InvalidOAuthTokenException;
+import backend.security.oauth.OAuthProviderNotConfiguredException;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
@@ -158,8 +159,78 @@ public class AuthController {
             return ResponseEntity.ok(
                     new AuthResponse(result.accessToken(), result.email(), result.usertype(), result.userId())
                 );
+        } catch (OAuthProviderNotConfiguredException e) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", "Google sign-in is not available on this server"));
         } catch (InvalidOAuthTokenException e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid or expired Google token"));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/apple")
+    public ResponseEntity<?> appleLogin(@RequestBody Map<String, String> body, HttpServletResponse response) {
+        String idTokenString = body.get("idToken");
+        if (idTokenString == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Missing idToken"));
+        }
+
+        try {
+            AuthService.LoginResult result = authService.appleAuthenticate(idTokenString);
+
+            ResponseCookie cookie = ResponseCookie.from("refreshToken", result.refreshToken())
+                .httpOnly(true)
+                .secure(false)
+                .sameSite("Lax")
+                .path("/")
+                .maxAge(7 * 24 * 60 * 60)
+                .build();
+
+            response.addHeader("Set-Cookie", cookie.toString());
+
+            return ResponseEntity.ok(
+                    new AuthResponse(result.accessToken(), result.email(), result.usertype(), result.userId())
+                );
+        } catch (OAuthProviderNotConfiguredException e) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", "Apple sign-in is not available on this server"));
+        } catch (InvalidOAuthTokenException e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid or expired Apple token"));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/microsoft")
+    public ResponseEntity<?> microsoftLogin(@RequestBody Map<String, String> body, HttpServletResponse response) {
+        String idTokenString = body.get("idToken");
+        if (idTokenString == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Missing idToken"));
+        }
+
+        try {
+            AuthService.LoginResult result = authService.microsoftAuthenticate(idTokenString);
+
+            ResponseCookie cookie = ResponseCookie.from("refreshToken", result.refreshToken())
+                .httpOnly(true)
+                .secure(false)
+                .sameSite("Lax")
+                .path("/")
+                .maxAge(7 * 24 * 60 * 60)
+                .build();
+
+            response.addHeader("Set-Cookie", cookie.toString());
+
+            return ResponseEntity.ok(
+                    new AuthResponse(result.accessToken(), result.email(), result.usertype(), result.userId())
+                );
+        } catch (OAuthProviderNotConfiguredException e) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", "Microsoft sign-in is not available on this server"));
+        } catch (InvalidOAuthTokenException e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid or expired Microsoft token"));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {

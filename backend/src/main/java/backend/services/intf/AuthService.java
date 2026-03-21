@@ -32,6 +32,16 @@ public interface AuthService {
     LoginResult googleAuthenicate(String token);
 
     /**
+     * Authenticate via Microsoft (verify id token, then login or signup) and produce token pair.
+     */
+    LoginResult microsoftAuthenticate(String token);
+
+    /**
+     * Authenticate via Apple (verify id token, then login or signup) and produce token pair.
+     */
+    LoginResult appleAuthenticate(String token);
+
+    /**
      * Revoke a single refresh token (e.g. logout). No-op if token already invalid.
      */
     void revokeRefreshToken(String refreshToken);

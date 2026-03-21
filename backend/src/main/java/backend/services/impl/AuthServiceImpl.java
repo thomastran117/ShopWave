@@ -65,6 +65,26 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    public LoginResult microsoftAuthenticate(String token) {
+        OAuthUser oauthUser = oauthService.verifyMicrosoftToken(token);
+        User user = userService.loginOrSignupMicrosoft(oauthUser.email());
+        Map<String, Object> tokens = tokenService.generateTokenPair(user.getId().intValue(), user.getRole().toString(), user.getEmail());
+        String accessToken = (String) tokens.get("accessToken");
+        String refreshToken = (String) tokens.get("refreshToken");
+        return new LoginResult(accessToken, refreshToken, user.getEmail(), user.getRole().toString(), user.getId());
+    }
+
+    @Override
+    public LoginResult appleAuthenticate(String token) {
+        OAuthUser oauthUser = oauthService.verifyAppleToken(token);
+        User user = userService.loginOrSignupApple(oauthUser.email());
+        Map<String, Object> tokens = tokenService.generateTokenPair(user.getId().intValue(), user.getRole().toString(), user.getEmail());
+        String accessToken = (String) tokens.get("accessToken");
+        String refreshToken = (String) tokens.get("refreshToken");
+        return new LoginResult(accessToken, refreshToken, user.getEmail(), user.getRole().toString(), user.getId());
+    }
+
+    @Override
     public void revokeRefreshToken(String refreshToken) {
         tokenService.revokeRefreshToken(refreshToken);
     }

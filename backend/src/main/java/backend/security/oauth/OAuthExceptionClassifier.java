@@ -27,6 +27,7 @@ public final class OAuthExceptionClassifier {
             return t;
         }
         if (t instanceof InvalidOAuthTokenException
+                || t instanceof OAuthProviderNotConfiguredException
                 || t instanceof OAuthProviderTransientException
                 || t instanceof OAuthVerificationError
                 || t instanceof CallNotPermittedException) {
