@@ -1,8 +1,11 @@
 package backend.services.impl;
 
+import backend.http.ClientInfo;
+import backend.http.ClientRequestContext;
 import backend.models.core.User;
 import backend.models.other.OAuthUser;
 import backend.services.intf.AuthService;
+import backend.services.intf.DeviceService;
 import backend.services.intf.EmailVerificationService;
 import backend.services.intf.OAuthService;
 import backend.services.intf.TokenService;
@@ -20,24 +23,24 @@ public class AuthServiceImpl implements AuthService {
     private final TokenService tokenService;
     private final OAuthService oauthService;
     private final EmailVerificationService emailVerificationService;
+    private final DeviceService deviceService;
 
     public AuthServiceImpl(UserService userService,
                            OAuthService oauthService,
                            TokenService tokenService,
-                           EmailVerificationService emailVerificationService) {
+                           EmailVerificationService emailVerificationService,
+                           DeviceService deviceService) {
         this.userService = userService;
         this.tokenService = tokenService;
         this.oauthService = oauthService;
         this.emailVerificationService = emailVerificationService;
+        this.deviceService = deviceService;
     }
 
     @Override
-    public LoginResult localAuthenicate(String email, String password) {
+    public LoginAttemptResult localAuthenicate(String email, String password) {
         User user = userService.login(email, password);
-        Map<String, Object> tokens = tokenService.generateTokenPair(user.getId().intValue(), user.getRole().toString(), user.getEmail());
-        String accessToken = (String) tokens.get("accessToken");
-        String refreshToken = (String) tokens.get("refreshToken");
-        return new LoginResult(accessToken, refreshToken, user.getEmail(), user.getRole().toString(), user.getId());
+        return handleDeviceCheck(user);
     }
 
     @Override
@@ -61,33 +64,24 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public LoginResult googleAuthenicate(String token) {
+    public LoginAttemptResult googleAuthenicate(String token) {
         OAuthUser oauthUser = oauthService.verifyGoogleToken(token);
         User user = userService.loginOrSignupGoogle(oauthUser.email());
-        Map<String, Object> tokens = tokenService.generateTokenPair(user.getId().intValue(), user.getRole().toString(), user.getEmail());
-        String accessToken = (String) tokens.get("accessToken");
-        String refreshToken = (String) tokens.get("refreshToken");
-        return new LoginResult(accessToken, refreshToken, user.getEmail(), user.getRole().toString(), user.getId());
+        return handleDeviceCheck(user);
     }
 
     @Override
-    public LoginResult microsoftAuthenticate(String token) {
+    public LoginAttemptResult microsoftAuthenticate(String token) {
         OAuthUser oauthUser = oauthService.verifyMicrosoftToken(token);
         User user = userService.loginOrSignupMicrosoft(oauthUser.email());
-        Map<String, Object> tokens = tokenService.generateTokenPair(user.getId().intValue(), user.getRole().toString(), user.getEmail());
-        String accessToken = (String) tokens.get("accessToken");
-        String refreshToken = (String) tokens.get("refreshToken");
-        return new LoginResult(accessToken, refreshToken, user.getEmail(), user.getRole().toString(), user.getId());
+        return handleDeviceCheck(user);
     }
 
     @Override
-    public LoginResult appleAuthenticate(String token) {
+    public LoginAttemptResult appleAuthenticate(String token) {
         OAuthUser oauthUser = oauthService.verifyAppleToken(token);
         User user = userService.loginOrSignupApple(oauthUser.email());
-        Map<String, Object> tokens = tokenService.generateTokenPair(user.getId().intValue(), user.getRole().toString(), user.getEmail());
-        String accessToken = (String) tokens.get("accessToken");
-        String refreshToken = (String) tokens.get("refreshToken");
-        return new LoginResult(accessToken, refreshToken, user.getEmail(), user.getRole().toString(), user.getId());
+        return handleDeviceCheck(user);
     }
 
     @Override
@@ -105,6 +99,21 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    public LoginResult verifyDevice(String token) {
+        DeviceService.DeviceVerificationPayload payload = deviceService.consumeDeviceVerificationToken(token);
+        ClientInfo reconstructed = new ClientInfo(
+                payload.ip(),
+                payload.deviceType(),
+                payload.browser(),
+                payload.os(),
+                payload.userAgent()
+        );
+        deviceService.recordDeviceSeen(payload.userId(), reconstructed);
+        User user = userService.getUserByID(payload.userId());
+        return buildLoginResult(user);
+    }
+
+    @Override
     public void revokeRefreshToken(String refreshToken) {
         tokenService.revokeRefreshToken(refreshToken);
     }
@@ -112,5 +121,31 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public void revokeAllRefreshTokensForUser(int userId) {
         tokenService.revokeAllRefreshTokensForUser(userId);
+    }
+
+    // ---- private helpers ----
+
+    private LoginAttemptResult handleDeviceCheck(User user) {
+        ClientInfo clientInfo = ClientRequestContext.get();
+        String fingerprint = deviceService.computeFingerprint(clientInfo.userAgent());
+        if (deviceService.isKnownDevice(user.getId(), fingerprint)) {
+            deviceService.recordDeviceSeen(user.getId(), clientInfo);
+            return LoginAttemptResult.success(buildLoginResult(user));
+        } else {
+            deviceService.initiateDeviceVerification(user.getId(), user.getEmail(), clientInfo);
+            return LoginAttemptResult.pendingVerification();
+        }
+    }
+
+    private LoginResult buildLoginResult(User user) {
+        Map<String, Object> tokens = tokenService.generateTokenPair(
+                user.getId().intValue(), user.getRole().toString(), user.getEmail());
+        return new LoginResult(
+                (String) tokens.get("accessToken"),
+                (String) tokens.get("refreshToken"),
+                user.getEmail(),
+                user.getRole().toString(),
+                user.getId()
+        );
     }
 }

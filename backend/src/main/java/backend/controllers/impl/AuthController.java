@@ -1,14 +1,18 @@
 package backend.controllers.impl;
 
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import backend.services.intf.AuthService;
+import backend.services.intf.DeviceService;
 import backend.services.intf.OAuthService;
 import backend.utilities.intf.Logger;
 import backend.dtos.requests.auth.SignupRequest;
+import backend.dtos.responses.auth.AuthResponse;
+import backend.dtos.responses.device.DeviceResponse;
 import backend.dtos.responses.general.MessageResponse;
 import backend.dtos.requests.auth.LoginRequest;
-import backend.dtos.responses.auth.AuthResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.exceptions.http.InternalServerErrorException;
 import backend.annotations.requireAuth.RequireAuth;
@@ -19,7 +23,11 @@ import backend.security.oauth.OAuthProviderNotConfiguredException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -37,12 +45,35 @@ public class AuthController {
 
     private final AuthService authService;
     private final OAuthService oauthService;
+    private final DeviceService deviceService;
     private final Logger logger;
-    
-    public AuthController(AuthService authService, OAuthService oauthService, Logger logger) {
+
+    public AuthController(AuthService authService, OAuthService oauthService,
+                          DeviceService deviceService, Logger logger) {
         this.authService = authService;
         this.oauthService = oauthService;
+        this.deviceService = deviceService;
         this.logger = logger;
+    }
+
+    @PostMapping("/login")
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request, HttpServletResponse response) {
+        try {
+            AuthService.LoginAttemptResult attempt = authService.localAuthenicate(
+                    request.getEmail(), request.getPassword());
+
+            if (attempt.deviceVerificationRequired()) {
+                return ResponseEntity.ok(Map.of(
+                        "status", "DEVICE_VERIFICATION_REQUIRED",
+                        "message", "A verification email has been sent to your inbox. Please verify this device to continue."
+                ));
+            }
+            return buildLoginResponse(attempt.loginResult(), response);
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
     }
 
     @PostMapping("/signup")
@@ -74,30 +105,51 @@ public class AuthController {
         }
     }
 
-    @PostMapping("/login")
-    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request, HttpServletResponse response) {
+    @PostMapping("/verify-device")
+    public ResponseEntity<?> verifyDevice(@RequestParam(name = "token") String token,
+                                          HttpServletResponse response) {
         try {
-            logger.info("hello!");
-            logger.debug("hello!");
-            logger.critical("hello!");
-            logger.warn("hello!");
-            logger.error("hello!");
+            AuthService.LoginResult result = authService.verifyDevice(token);
+            return buildLoginResponse(result, response);
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
 
-            AuthService.LoginResult result = authService.localAuthenicate(request.getEmail(), request.getPassword());
+    @RequireAuth
+    @GetMapping("/devices")
+    public ResponseEntity<?> listDevices() {
+        try {
+            long userId = resolveUserId();
+            List<DeviceResponse> devices = deviceService.getDevicesForUser(userId).stream()
+                    .map(d -> new DeviceResponse(
+                            d.getId(),
+                            d.getFingerprint(),
+                            d.getDeviceType().name(),
+                            d.getBrowser(),
+                            d.getOs(),
+                            d.getLastIp(),
+                            d.getCreatedAt(),
+                            d.getLastSeenAt()
+                    ))
+                    .collect(Collectors.toList());
+            return ResponseEntity.ok(devices);
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
 
-            ResponseCookie cookie = ResponseCookie.from("refreshToken", result.refreshToken())
-                .httpOnly(true)
-                .secure(false)
-                .sameSite("Lax")
-                .path("/")
-                .maxAge(7 * 24 * 60 * 60)
-                .build();
-
-            response.addHeader("Set-Cookie", cookie.toString());
-
-            return ResponseEntity.ok(
-                    new AuthResponse(result.accessToken(), result.email(), result.usertype(), result.userId())
-                );
+    @RequireAuth
+    @DeleteMapping("/devices/{id}")
+    public ResponseEntity<?> removeDevice(@PathVariable long id) {
+        try {
+            long userId = resolveUserId();
+            deviceService.removeDevice(userId, id);
+            return ResponseEntity.noContent().build();
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -175,21 +227,15 @@ public class AuthController {
         try {
             OAuthUser oauthUser = oauthService.verifyGoogleToken(idTokenString);
 
-            AuthService.LoginResult result = authService.googleAuthenicate(oauthUser.email());
+            AuthService.LoginAttemptResult attempt = authService.googleAuthenicate(oauthUser.email());
 
-            ResponseCookie cookie = ResponseCookie.from("refreshToken", result.refreshToken())
-                .httpOnly(true)
-                .secure(false)
-                .sameSite("Lax")
-                .path("/")
-                .maxAge(7 * 24 * 60 * 60)
-                .build();
-
-            response.addHeader("Set-Cookie", cookie.toString());
-
-            return ResponseEntity.ok(
-                    new AuthResponse(result.accessToken(), result.email(), result.usertype(), result.userId())
-                );
+            if (attempt.deviceVerificationRequired()) {
+                return ResponseEntity.ok(Map.of(
+                        "status", "DEVICE_VERIFICATION_REQUIRED",
+                        "message", "A verification email has been sent to your inbox. Please verify this device to continue."
+                ));
+            }
+            return buildLoginResponse(attempt.loginResult(), response);
         } catch (OAuthProviderNotConfiguredException e) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", "Google sign-in is not available on this server"));
         } catch (InvalidOAuthTokenException e) {
@@ -209,21 +255,15 @@ public class AuthController {
         }
 
         try {
-            AuthService.LoginResult result = authService.appleAuthenticate(idTokenString);
+            AuthService.LoginAttemptResult attempt = authService.appleAuthenticate(idTokenString);
 
-            ResponseCookie cookie = ResponseCookie.from("refreshToken", result.refreshToken())
-                .httpOnly(true)
-                .secure(false)
-                .sameSite("Lax")
-                .path("/")
-                .maxAge(7 * 24 * 60 * 60)
-                .build();
-
-            response.addHeader("Set-Cookie", cookie.toString());
-
-            return ResponseEntity.ok(
-                    new AuthResponse(result.accessToken(), result.email(), result.usertype(), result.userId())
-                );
+            if (attempt.deviceVerificationRequired()) {
+                return ResponseEntity.ok(Map.of(
+                        "status", "DEVICE_VERIFICATION_REQUIRED",
+                        "message", "A verification email has been sent to your inbox. Please verify this device to continue."
+                ));
+            }
+            return buildLoginResponse(attempt.loginResult(), response);
         } catch (OAuthProviderNotConfiguredException e) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", "Apple sign-in is not available on this server"));
         } catch (InvalidOAuthTokenException e) {
@@ -243,21 +283,15 @@ public class AuthController {
         }
 
         try {
-            AuthService.LoginResult result = authService.microsoftAuthenticate(idTokenString);
+            AuthService.LoginAttemptResult attempt = authService.microsoftAuthenticate(idTokenString);
 
-            ResponseCookie cookie = ResponseCookie.from("refreshToken", result.refreshToken())
-                .httpOnly(true)
-                .secure(false)
-                .sameSite("Lax")
-                .path("/")
-                .maxAge(7 * 24 * 60 * 60)
-                .build();
-
-            response.addHeader("Set-Cookie", cookie.toString());
-
-            return ResponseEntity.ok(
-                    new AuthResponse(result.accessToken(), result.email(), result.usertype(), result.userId())
-                );
+            if (attempt.deviceVerificationRequired()) {
+                return ResponseEntity.ok(Map.of(
+                        "status", "DEVICE_VERIFICATION_REQUIRED",
+                        "message", "A verification email has been sent to your inbox. Please verify this device to continue."
+                ));
+            }
+            return buildLoginResponse(attempt.loginResult(), response);
         } catch (OAuthProviderNotConfiguredException e) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", "Microsoft sign-in is not available on this server"));
         } catch (InvalidOAuthTokenException e) {
@@ -273,5 +307,25 @@ public class AuthController {
     @GetMapping("/hello")
     public String Hello() {
         return "hello authorized user!";
+    }
+
+    // ---- private helpers ----
+
+    private ResponseEntity<?> buildLoginResponse(AuthService.LoginResult result, HttpServletResponse response) {
+        ResponseCookie cookie = ResponseCookie.from("refreshToken", result.refreshToken())
+                .httpOnly(true)
+                .secure(false)
+                .sameSite("Lax")
+                .path("/")
+                .maxAge(7 * 24 * 60 * 60)
+                .build();
+        response.addHeader("Set-Cookie", cookie.toString());
+        return ResponseEntity.ok(
+                new AuthResponse(result.accessToken(), result.email(), result.usertype(), result.userId()));
+    }
+
+    private long resolveUserId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return ((Number) auth.getPrincipal()).longValue();
     }
 }

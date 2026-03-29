@@ -805,6 +805,16 @@ public class EnvironmentSetting {
             this.verificationTokenTtlSeconds = Math.max(300, Math.min(604_800, verificationTokenTtlSeconds));
         }
 
+        private long deviceVerificationTokenTtlSeconds = 600;
+
+        public long getDeviceVerificationTokenTtlSeconds() {
+            return deviceVerificationTokenTtlSeconds > 0 ? deviceVerificationTokenTtlSeconds : 600;
+        }
+
+        public void setDeviceVerificationTokenTtlSeconds(long deviceVerificationTokenTtlSeconds) {
+            this.deviceVerificationTokenTtlSeconds = Math.max(60, Math.min(3_600, deviceVerificationTokenTtlSeconds));
+        }
+
         public Executor getExecutor() {
             return executor;
         }
