@@ -42,6 +42,24 @@ public interface AuthService {
     LoginResult appleAuthenticate(String token);
 
     /**
+     * Result of a successful signup: email and confirmation message.
+     * No tokens are issued — the user must verify their email first.
+     */
+    record SignupResult(String email, String message) {}
+
+    /**
+     * Register a new user with status PENDING_VERIFICATION, generate a verification token,
+     * and send a verification email asynchronously.
+     */
+    SignupResult signup(String email, String password, String usertype);
+
+    /**
+     * Consume a verification token from Redis and activate the user account.
+     * Throws BadRequestException if the token is missing or expired.
+     */
+    void verifyEmail(String token);
+
+    /**
      * Revoke a single refresh token (e.g. logout). No-op if token already invalid.
      */
     void revokeRefreshToken(String refreshToken);

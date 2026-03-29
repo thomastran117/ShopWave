@@ -21,6 +21,7 @@ public class EnvironmentSetting {
     private final Proxy proxy = new Proxy();
     private final S3 s3 = new S3();
     private final Stripe stripe = new Stripe();
+    private final Email email = new Email();
 
     public Cors getCors() {
         return cors;
@@ -60,6 +61,10 @@ public class EnvironmentSetting {
 
     public Stripe getStripe() {
         return stripe;
+    }
+
+    public Email getEmail() {
+        return email;
     }
 
     public static class Cors {
@@ -766,6 +771,115 @@ public class EnvironmentSetting {
 
         public void setTrustedProxies(String trustedProxies) {
             this.trustedProxies = trustedProxies != null ? trustedProxies : "";
+        }
+    }
+
+    public static class Email {
+        private String from = "noreply@shopwave.com";
+        private String verificationBaseUrl = "http://localhost:3000";
+        private long verificationTokenTtlSeconds = 86_400;
+        private final Executor executor = new Executor();
+        private final Retry retry = new Retry();
+
+        public String getFrom() {
+            return from != null ? from : "noreply@shopwave.com";
+        }
+
+        public void setFrom(String from) {
+            this.from = from != null ? from : "noreply@shopwave.com";
+        }
+
+        public String getVerificationBaseUrl() {
+            return verificationBaseUrl != null ? verificationBaseUrl : "http://localhost:3000";
+        }
+
+        public void setVerificationBaseUrl(String verificationBaseUrl) {
+            this.verificationBaseUrl = verificationBaseUrl != null ? verificationBaseUrl : "http://localhost:3000";
+        }
+
+        public long getVerificationTokenTtlSeconds() {
+            return verificationTokenTtlSeconds > 0 ? verificationTokenTtlSeconds : 86_400;
+        }
+
+        public void setVerificationTokenTtlSeconds(long verificationTokenTtlSeconds) {
+            this.verificationTokenTtlSeconds = Math.max(300, Math.min(604_800, verificationTokenTtlSeconds));
+        }
+
+        public Executor getExecutor() {
+            return executor;
+        }
+
+        public Retry getRetry() {
+            return retry;
+        }
+
+        public static class Executor {
+            private int corePoolSize = 2;
+            private int maxPoolSize = 4;
+            private int queueCapacity = 100;
+
+            public int getCorePoolSize() {
+                return corePoolSize;
+            }
+
+            public void setCorePoolSize(int corePoolSize) {
+                this.corePoolSize = Math.max(1, Math.min(20, corePoolSize));
+            }
+
+            public int getMaxPoolSize() {
+                return maxPoolSize;
+            }
+
+            public void setMaxPoolSize(int maxPoolSize) {
+                this.maxPoolSize = Math.max(1, Math.min(50, maxPoolSize));
+            }
+
+            public int getQueueCapacity() {
+                return queueCapacity;
+            }
+
+            public void setQueueCapacity(int queueCapacity) {
+                this.queueCapacity = Math.max(1, Math.min(10_000, queueCapacity));
+            }
+        }
+
+        public static class Retry {
+            private int maxAttempts = 3;
+            private long initialIntervalMs = 1_000;
+            private double multiplier = 2.0;
+            private long maxIntervalMs = 10_000;
+
+            public int getMaxAttempts() {
+                return maxAttempts;
+            }
+
+            public void setMaxAttempts(int maxAttempts) {
+                this.maxAttempts = Math.max(1, Math.min(10, maxAttempts));
+            }
+
+            public long getInitialIntervalMs() {
+                return initialIntervalMs;
+            }
+
+            public void setInitialIntervalMs(long initialIntervalMs) {
+                this.initialIntervalMs = Math.max(100, Math.min(60_000, initialIntervalMs));
+            }
+
+            public double getMultiplier() {
+                return multiplier;
+            }
+
+            public void setMultiplier(double multiplier) {
+                this.multiplier = Math.max(1.0, Math.min(5.0, multiplier));
+            }
+
+            public long getMaxIntervalMs() {
+                return maxIntervalMs;
+            }
+
+            public void setMaxIntervalMs(long maxIntervalMs) {
+                this.maxIntervalMs = Math.max(1_000, Math.min(300_000, maxIntervalMs));
+            }
         }
     }
 }

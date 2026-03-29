@@ -5,7 +5,9 @@ import backend.models.core.User;
 public interface UserService {
     User login(String email, String password);
 
-    boolean signup(String email, String password, String usertype);
+    User signup(String email, String password, String usertype);
+
+    void activateUser(long userId);
 
     boolean changePassword(long id, String password);
 

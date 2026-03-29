@@ -43,7 +43,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public boolean signup(String email, String password, String usertype) {
+    public User signup(String email, String password, String usertype) {
         if (userRepository.findByEmail(email).isPresent()) {
             throw new ConflictException("User already exists with email: " + email);
         }
@@ -52,9 +52,17 @@ public class UserServiceImpl implements UserService {
         user.setEmail(email);
         user.setPassword(passwordEncoder.encode(password));
         user.setRole(UserRole.USER);
+        user.setStatus(UserStatus.PENDING_VERIFICATION);
 
+        return userRepository.save(user);
+    }
+
+    @Override
+    public void activateUser(long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
+        user.setStatus(UserStatus.ACTIVE);
         userRepository.save(user);
-        return true;
     }
 
     @Override

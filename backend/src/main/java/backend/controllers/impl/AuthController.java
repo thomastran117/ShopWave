@@ -5,6 +5,7 @@ import java.util.Map;
 import backend.services.intf.AuthService;
 import backend.services.intf.OAuthService;
 import backend.utilities.intf.Logger;
+import backend.dtos.requests.auth.SignupRequest;
 import backend.dtos.responses.general.MessageResponse;
 import backend.dtos.requests.auth.LoginRequest;
 import backend.dtos.responses.auth.AuthResponse;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
@@ -41,6 +43,35 @@ public class AuthController {
         this.authService = authService;
         this.oauthService = oauthService;
         this.logger = logger;
+    }
+
+    @PostMapping("/signup")
+    public ResponseEntity<?> signup(@Valid @RequestBody SignupRequest request) {
+        try {
+            AuthService.SignupResult result = authService.signup(
+                    request.getEmail(),
+                    request.getPassword(),
+                    request.getRole() != null ? request.getRole().toString() : "USER"
+            );
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(new MessageResponse(result.message()));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/verify")
+    public ResponseEntity<?> verifyEmail(@RequestParam(name = "token") String token) {
+        try {
+            authService.verifyEmail(token);
+            return ResponseEntity.ok(new MessageResponse("Email verified successfully."));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
     }
 
     @PostMapping("/login")

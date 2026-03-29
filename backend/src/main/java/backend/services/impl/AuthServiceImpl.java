@@ -3,6 +3,7 @@ package backend.services.impl;
 import backend.models.core.User;
 import backend.models.other.OAuthUser;
 import backend.services.intf.AuthService;
+import backend.services.intf.EmailVerificationService;
 import backend.services.intf.OAuthService;
 import backend.services.intf.TokenService;
 import backend.services.intf.UserService;
@@ -18,11 +19,16 @@ public class AuthServiceImpl implements AuthService {
     private final UserService userService;
     private final TokenService tokenService;
     private final OAuthService oauthService;
+    private final EmailVerificationService emailVerificationService;
 
-    public AuthServiceImpl(UserService userService, OAuthService oauthService, TokenService tokenService) {
+    public AuthServiceImpl(UserService userService,
+                           OAuthService oauthService,
+                           TokenService tokenService,
+                           EmailVerificationService emailVerificationService) {
         this.userService = userService;
         this.tokenService = tokenService;
         this.oauthService = oauthService;
+        this.emailVerificationService = emailVerificationService;
     }
 
     @Override
@@ -82,6 +88,20 @@ public class AuthServiceImpl implements AuthService {
         String accessToken = (String) tokens.get("accessToken");
         String refreshToken = (String) tokens.get("refreshToken");
         return new LoginResult(accessToken, refreshToken, user.getEmail(), user.getRole().toString(), user.getId());
+    }
+
+    @Override
+    public SignupResult signup(String email, String password, String usertype) {
+        User user = userService.signup(email, password, usertype);
+        emailVerificationService.initiateVerification(user.getId(), user.getEmail());
+        return new SignupResult(user.getEmail(),
+                "Account created. Please check your email to verify your account.");
+    }
+
+    @Override
+    public void verifyEmail(String token) {
+        long userId = emailVerificationService.consumeVerificationToken(token);
+        userService.activateUser(userId);
     }
 
     @Override
