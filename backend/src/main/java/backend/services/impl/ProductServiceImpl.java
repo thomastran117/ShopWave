@@ -180,6 +180,7 @@ public class ProductServiceImpl implements ProductService {
                 product.getTags(),
                 product.getThumbnailUrl(),
                 product.getStock(),
+                product.getLowStockThreshold(),
                 product.getWeight(),
                 product.getWeightUnit(),
                 product.getStatus().name(),

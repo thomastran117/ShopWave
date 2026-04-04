@@ -67,6 +67,9 @@ public class Product {
     @Column(nullable = true)
     private Integer stock;
 
+    @Column(nullable = true)
+    private Integer lowStockThreshold;
+
     @Column(nullable = true, precision = 10, scale = 3)
     private BigDecimal weight;
 

@@ -22,6 +22,7 @@ public class ProductResponse {
     private String tags;
     private String thumbnailUrl;
     private Integer stock;
+    private Integer lowStockThreshold;
     private BigDecimal weight;
     private String weightUnit;
     private String status;
