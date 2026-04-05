@@ -16,6 +16,8 @@ import backend.dtos.responses.general.PagedResponse;
 import backend.dtos.responses.inventory.AdjustmentResponse;
 import backend.dtos.responses.inventory.InventoryItemResponse;
 import backend.dtos.responses.inventory.InventorySummaryResponse;
+import backend.dtos.responses.inventory.ProductSalesMetricResponse;
+import backend.repositories.projections.ProductSalesProjection;
 import backend.exceptions.http.BadRequestException;
 import backend.exceptions.http.ConflictException;
 import backend.exceptions.http.ForbiddenException;
@@ -306,6 +308,33 @@ public class InventoryServiceImpl implements InventoryService {
         return toInventoryItemResponse(product);
     }
 
+    @Override
+    public List<ProductSalesMetricResponse> getTopPurchasedProducts(long companyId, long ownerId, int limit) {
+        assertCompanyOwnership(companyId, ownerId);
+        return productRepository.findTopByUnitsSold(companyId, limit)
+                .stream()
+                .map(this::toSalesMetricResponse)
+                .toList();
+    }
+
+    @Override
+    public List<ProductSalesMetricResponse> getTopRevenueProducts(long companyId, long ownerId, int limit) {
+        assertCompanyOwnership(companyId, ownerId);
+        return productRepository.findTopByRevenue(companyId, limit)
+                .stream()
+                .map(this::toSalesMetricResponse)
+                .toList();
+    }
+
+    @Override
+    public List<ProductSalesMetricResponse> getNeverSoldProducts(long companyId, long ownerId, int limit) {
+        assertCompanyOwnership(companyId, ownerId);
+        return productRepository.findNeverSold(companyId, limit)
+                .stream()
+                .map(this::toSalesMetricResponse)
+                .toList();
+    }
+
     // --- Lock helpers (mirrors OrderServiceImpl — same lock namespace) ---
 
     private void acquireLocks(List<Long> sortedProductIds, String lockToken, List<String> acquiredLocks) {
@@ -379,6 +408,24 @@ public class InventoryServiceImpl implements InventoryService {
                 product.getPrice(),
                 product.getCurrency(),
                 product.getUpdatedAt()
+        );
+    }
+
+    private ProductSalesMetricResponse toSalesMetricResponse(ProductSalesProjection p) {
+        BigDecimal stockValue = null;
+        if (p.getCurrentStock() != null && p.getPrice() != null) {
+            stockValue = p.getPrice().multiply(BigDecimal.valueOf(p.getCurrentStock()));
+        }
+        return new ProductSalesMetricResponse(
+                p.getProductId(),
+                p.getProductName(),
+                p.getSku(),
+                p.getCurrentStock(),
+                p.getPrice(),
+                p.getCurrency(),
+                p.getTotalUnitsSold() != null ? p.getTotalUnitsSold() : 0L,
+                p.getTotalRevenue() != null ? p.getTotalRevenue() : BigDecimal.ZERO,
+                stockValue
         );
     }
 

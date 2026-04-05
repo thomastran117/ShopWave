@@ -7,6 +7,7 @@ import backend.dtos.responses.general.PagedResponse;
 import backend.dtos.responses.inventory.AdjustmentResponse;
 import backend.dtos.responses.inventory.InventoryItemResponse;
 import backend.dtos.responses.inventory.InventorySummaryResponse;
+import backend.dtos.responses.inventory.ProductSalesMetricResponse;
 
 import java.util.List;
 
@@ -32,4 +33,10 @@ public interface InventoryService {
 
     InventoryItemResponse updateSettings(
             long companyId, long productId, long ownerId, UpdateInventorySettingsRequest request);
+
+    List<ProductSalesMetricResponse> getTopPurchasedProducts(long companyId, long ownerId, int limit);
+
+    List<ProductSalesMetricResponse> getTopRevenueProducts(long companyId, long ownerId, int limit);
+
+    List<ProductSalesMetricResponse> getNeverSoldProducts(long companyId, long ownerId, int limit);
 }

@@ -13,6 +13,7 @@ import backend.dtos.responses.general.PagedResponse;
 import backend.dtos.responses.inventory.AdjustmentResponse;
 import backend.dtos.responses.inventory.InventoryItemResponse;
 import backend.dtos.responses.inventory.InventorySummaryResponse;
+import backend.dtos.responses.inventory.ProductSalesMetricResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.exceptions.http.InternalServerErrorException;
 import backend.services.intf.InventoryService;
@@ -118,6 +119,48 @@ public class InventoryController {
         try {
             long userId = resolveUserId();
             return ResponseEntity.ok(inventoryService.bulkAdjust(companyId, userId, request));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @GetMapping("/analytics/top-purchased")
+    public ResponseEntity<List<ProductSalesMetricResponse>> getTopPurchasedProducts(
+            @PathVariable long companyId,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(50) int limit) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(inventoryService.getTopPurchasedProducts(companyId, userId, limit));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @GetMapping("/analytics/top-revenue")
+    public ResponseEntity<List<ProductSalesMetricResponse>> getTopRevenueProducts(
+            @PathVariable long companyId,
+            @RequestParam(defaultValue = "10") @Min(1) @Max(50) int limit) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(inventoryService.getTopRevenueProducts(companyId, userId, limit));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @GetMapping("/analytics/never-sold")
+    public ResponseEntity<List<ProductSalesMetricResponse>> getNeverSoldProducts(
+            @PathVariable long companyId,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(50) int limit) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(inventoryService.getNeverSoldProducts(companyId, userId, limit));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
