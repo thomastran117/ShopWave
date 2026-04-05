@@ -1,5 +1,7 @@
 package backend.services.impl;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -15,6 +17,7 @@ import backend.dtos.responses.inventory.AdjustmentResponse;
 import backend.dtos.responses.inventory.InventoryItemResponse;
 import backend.dtos.responses.inventory.InventorySummaryResponse;
 import backend.exceptions.http.BadRequestException;
+import backend.exceptions.http.ConflictException;
 import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
 import backend.models.core.Company;
@@ -25,15 +28,26 @@ import backend.repositories.InventoryAdjustmentRepository;
 import backend.repositories.ProductRepository;
 import backend.repositories.UserRepository;
 import backend.repositories.specifications.InventorySpecification;
+import backend.services.intf.CacheService;
 import backend.services.intf.InventoryService;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class InventoryServiceImpl implements InventoryService {
+
+    private static final Logger log = LoggerFactory.getLogger(InventoryServiceImpl.class);
+
+    // Must match the lock key used by OrderServiceImpl to ensure mutual exclusion
+    private static final String LOCK_PREFIX = "lock:product:";
+    private static final long LOCK_TTL_SECONDS = 10;
+    private static final int LOCK_RETRY_ATTEMPTS = 5;
+    private static final long LOCK_RETRY_DELAY_MS = 100;
 
     private static final Set<String> SORTABLE_FIELDS = Set.of("name", "price", "stock", "updatedAt");
 
@@ -41,16 +55,19 @@ public class InventoryServiceImpl implements InventoryService {
     private final CompanyRepository companyRepository;
     private final InventoryAdjustmentRepository adjustmentRepository;
     private final UserRepository userRepository;
+    private final CacheService cacheService;
 
     public InventoryServiceImpl(
             ProductRepository productRepository,
             CompanyRepository companyRepository,
             InventoryAdjustmentRepository adjustmentRepository,
-            UserRepository userRepository) {
+            UserRepository userRepository,
+            CacheService cacheService) {
         this.productRepository = productRepository;
         this.companyRepository = companyRepository;
         this.adjustmentRepository = adjustmentRepository;
         this.userRepository = userRepository;
+        this.cacheService = cacheService;
     }
 
     @Override
@@ -130,38 +147,68 @@ public class InventoryServiceImpl implements InventoryService {
 
         assertCompanyOwnership(companyId, ownerId);
 
-        Product product = productRepository.findByIdAndCompanyId(productId, companyId)
-                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
+        String lockToken = UUID.randomUUID().toString();
+        String lockKey = LOCK_PREFIX + productId;
+        boolean lockAcquired = false;
 
-        if (product.getStock() == null) {
-            throw new BadRequestException("Stock tracking is not enabled for this product. Set an initial stock value first.");
+        try {
+            for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
+                if (cacheService.tryLock(lockKey, lockToken, LOCK_TTL_SECONDS)) {
+                    lockAcquired = true;
+                    break;
+                }
+                try {
+                    Thread.sleep(LOCK_RETRY_DELAY_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new ConflictException("Stock adjustment interrupted, please try again");
+                }
+            }
+
+            if (!lockAcquired) {
+                throw new ConflictException("Product is currently being updated by another operation, please try again shortly");
+            }
+
+            Product product = productRepository.findByIdAndCompanyId(productId, companyId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
+
+            if (product.getStock() == null) {
+                throw new BadRequestException("Stock tracking is not enabled for this product. Set an initial stock value first.");
+            }
+
+            int previousStock = product.getStock();
+            int delta = request.getDelta();
+
+            int rows = productRepository.adjustStock(productId, delta);
+            if (rows == 0) {
+                throw new BadRequestException(
+                        "Adjustment would result in negative stock. Current stock: " + previousStock + ", delta: " + delta);
+            }
+
+            InventoryAdjustment adjustment = new InventoryAdjustment();
+            adjustment.setProduct(productRepository.getReferenceById(productId));
+            adjustment.setAdjustedBy(userRepository.getReferenceById(ownerId));
+            adjustment.setDelta(delta);
+            adjustment.setPreviousStock(previousStock);
+            adjustment.setNewStock(previousStock + delta);
+            adjustment.setReason(request.getReason());
+            adjustment.setNote(request.getNote());
+            adjustmentRepository.save(adjustment);
+
+            product = productRepository.findByIdAndCompanyId(productId, companyId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
+
+            return toInventoryItemResponse(product);
+
+        } finally {
+            if (lockAcquired) {
+                try {
+                    cacheService.unlock(lockKey, lockToken);
+                } catch (Exception e) {
+                    log.error("Failed to release inventory lock for product {}: {}", productId, e.getMessage());
+                }
+            }
         }
-
-        int previousStock = product.getStock();
-        int delta = request.getDelta();
-
-        int rows = productRepository.adjustStock(productId, delta);
-        if (rows == 0) {
-            throw new BadRequestException(
-                    "Adjustment would result in negative stock. Current stock: " + previousStock + ", delta: " + delta);
-        }
-
-        int newStock = previousStock + delta;
-
-        InventoryAdjustment adjustment = new InventoryAdjustment();
-        adjustment.setProduct(productRepository.getReferenceById(productId));
-        adjustment.setAdjustedBy(userRepository.getReferenceById(ownerId));
-        adjustment.setDelta(delta);
-        adjustment.setPreviousStock(previousStock);
-        adjustment.setNewStock(newStock);
-        adjustment.setReason(request.getReason());
-        adjustment.setNote(request.getNote());
-        adjustmentRepository.save(adjustment);
-
-        product = productRepository.findByIdAndCompanyId(productId, companyId)
-                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
-
-        return toInventoryItemResponse(product);
     }
 
     @Override
@@ -171,58 +218,76 @@ public class InventoryServiceImpl implements InventoryService {
 
         List<BulkAdjustItem> items = request.getItems();
 
-        // Pass 1 — validation only, no writes
-        List<String> errors = new ArrayList<>();
-        for (BulkAdjustItem item : items) {
-            productRepository.findByIdAndCompanyId(item.getProductId(), companyId)
-                    .ifPresentOrElse(
-                            product -> {
-                                if (product.getStock() == null) {
-                                    errors.add("Product " + item.getProductId() + " does not have stock tracking enabled");
-                                }
-                            },
-                            () -> errors.add("Product " + item.getProductId() + " not found in this company")
-                    );
-        }
+        // Deduplicate and sort product IDs ascending — consistent lock ordering prevents deadlocks
+        // when concurrent bulk operations overlap on the same products.
+        List<Long> sortedProductIds = items.stream()
+                .map(BulkAdjustItem::getProductId)
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
 
-        if (!errors.isEmpty()) {
-            throw new BadRequestException("Bulk adjustment validation failed: " + String.join("; ", errors));
-        }
+        String lockToken = UUID.randomUUID().toString();
+        List<String> acquiredLocks = new ArrayList<>();
 
-        // Pass 2 — apply all adjustments atomically (rollback on any failure)
-        List<InventoryAdjustment> adjustments = new ArrayList<>();
-        for (BulkAdjustItem item : items) {
-            Product product = productRepository.findByIdAndCompanyId(item.getProductId(), companyId)
-                    .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + item.getProductId()));
+        try {
+            acquireLocks(sortedProductIds, lockToken, acquiredLocks);
 
-            int previousStock = product.getStock();
-            int delta = item.getDelta();
-
-            int rows = productRepository.adjustStock(item.getProductId(), delta);
-            if (rows == 0) {
-                throw new BadRequestException(
-                        "Adjustment for product " + item.getProductId() +
-                        " would result in negative stock. Current stock: " + previousStock + ", delta: " + delta);
+            // Pass 1 — validate all items before any writes
+            List<String> errors = new ArrayList<>();
+            for (BulkAdjustItem item : items) {
+                productRepository.findByIdAndCompanyId(item.getProductId(), companyId)
+                        .ifPresentOrElse(
+                                product -> {
+                                    if (product.getStock() == null) {
+                                        errors.add("Product " + item.getProductId() + " does not have stock tracking enabled");
+                                    }
+                                },
+                                () -> errors.add("Product " + item.getProductId() + " not found in this company")
+                        );
             }
 
-            InventoryAdjustment adjustment = new InventoryAdjustment();
-            adjustment.setProduct(productRepository.getReferenceById(item.getProductId()));
-            adjustment.setAdjustedBy(userRepository.getReferenceById(ownerId));
-            adjustment.setDelta(delta);
-            adjustment.setPreviousStock(previousStock);
-            adjustment.setNewStock(previousStock + delta);
-            adjustment.setReason(item.getReason());
-            adjustment.setNote(item.getNote());
-            adjustments.add(adjustment);
+            if (!errors.isEmpty()) {
+                throw new BadRequestException("Bulk adjustment validation failed: " + String.join("; ", errors));
+            }
+
+            // Pass 2 — apply all adjustments; any failure rolls back the entire transaction
+            List<InventoryAdjustment> adjustments = new ArrayList<>();
+            for (BulkAdjustItem item : items) {
+                Product product = productRepository.findByIdAndCompanyId(item.getProductId(), companyId)
+                        .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + item.getProductId()));
+
+                int previousStock = product.getStock();
+                int delta = item.getDelta();
+
+                int rows = productRepository.adjustStock(item.getProductId(), delta);
+                if (rows == 0) {
+                    throw new BadRequestException(
+                            "Adjustment for product " + item.getProductId() +
+                            " would result in negative stock. Current stock: " + previousStock + ", delta: " + delta);
+                }
+
+                InventoryAdjustment adjustment = new InventoryAdjustment();
+                adjustment.setProduct(productRepository.getReferenceById(item.getProductId()));
+                adjustment.setAdjustedBy(userRepository.getReferenceById(ownerId));
+                adjustment.setDelta(delta);
+                adjustment.setPreviousStock(previousStock);
+                adjustment.setNewStock(previousStock + delta);
+                adjustment.setReason(item.getReason());
+                adjustment.setNote(item.getNote());
+                adjustments.add(adjustment);
+            }
+
+            adjustmentRepository.saveAll(adjustments);
+
+            return items.stream()
+                    .map(item -> productRepository.findByIdAndCompanyId(item.getProductId(), companyId)
+                            .map(this::toInventoryItemResponse)
+                            .orElseThrow())
+                    .toList();
+
+        } finally {
+            releaseLocks(acquiredLocks, lockToken);
         }
-
-        adjustmentRepository.saveAll(adjustments);
-
-        return items.stream()
-                .map(item -> productRepository.findByIdAndCompanyId(item.getProductId(), companyId)
-                        .map(this::toInventoryItemResponse)
-                        .orElseThrow())
-                .toList();
     }
 
     @Override
@@ -241,7 +306,47 @@ public class InventoryServiceImpl implements InventoryService {
         return toInventoryItemResponse(product);
     }
 
-    // --- Private helpers ---
+    // --- Lock helpers (mirrors OrderServiceImpl — same lock namespace) ---
+
+    private void acquireLocks(List<Long> sortedProductIds, String lockToken, List<String> acquiredLocks) {
+        for (Long productId : sortedProductIds) {
+            String lockKey = LOCK_PREFIX + productId;
+            boolean acquired = false;
+
+            for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
+                if (cacheService.tryLock(lockKey, lockToken, LOCK_TTL_SECONDS)) {
+                    acquiredLocks.add(lockKey);
+                    acquired = true;
+                    break;
+                }
+                try {
+                    Thread.sleep(LOCK_RETRY_DELAY_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    releaseLocks(acquiredLocks, lockToken);
+                    throw new ConflictException("Bulk adjustment interrupted, please try again");
+                }
+            }
+
+            if (!acquired) {
+                releaseLocks(acquiredLocks, lockToken);
+                throw new ConflictException(
+                        "Product " + productId + " is currently being updated by another operation, please try again shortly");
+            }
+        }
+    }
+
+    private void releaseLocks(List<String> lockKeys, String lockToken) {
+        for (String lockKey : lockKeys) {
+            try {
+                cacheService.unlock(lockKey, lockToken);
+            } catch (Exception e) {
+                log.error("Failed to release inventory lock {}: {}", lockKey, e.getMessage());
+            }
+        }
+    }
+
+    // --- Private mapping helpers ---
 
     private Company assertCompanyOwnership(long companyId, long ownerId) {
         return companyRepository.findByIdAndOwnerId(companyId, ownerId)
