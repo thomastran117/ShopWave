@@ -37,7 +37,10 @@ import backend.services.intf.InventoryService;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -226,11 +229,21 @@ public class InventoryServiceImpl implements InventoryService {
 
         List<BulkAdjustItem> items = request.getItems();
 
-        // Deduplicate and sort product IDs ascending — consistent lock ordering prevents deadlocks
-        // when concurrent bulk operations overlap on the same products.
+        // Validate no duplicate productIds in the request
+        Set<Long> seen = new HashSet<>();
+        List<Long> duplicates = new ArrayList<>();
+        for (BulkAdjustItem item : items) {
+            if (!seen.add(item.getProductId())) {
+                duplicates.add(item.getProductId());
+            }
+        }
+        if (!duplicates.isEmpty()) {
+            throw new BadRequestException("Duplicate productIds in request: " + duplicates);
+        }
+
+        // Sort product IDs ascending — consistent lock ordering prevents deadlocks
         List<Long> sortedProductIds = items.stream()
                 .map(BulkAdjustItem::getProductId)
-                .distinct()
                 .sorted()
                 .collect(Collectors.toList());
 
@@ -240,18 +253,21 @@ public class InventoryServiceImpl implements InventoryService {
         try {
             acquireLocks(sortedProductIds, lockToken, acquiredLocks);
 
-            // Pass 1 — validate all items before any writes
+            // Pass 1 — load all products into a map, validate before any writes
+            List<Product> loaded = productRepository.findAllByIdInAndCompanyId(sortedProductIds, companyId);
+            Map<Long, Product> productMap = new HashMap<>();
+            for (Product p : loaded) {
+                productMap.put(p.getId(), p);
+            }
+
             List<String> errors = new ArrayList<>();
             for (BulkAdjustItem item : items) {
-                productRepository.findByIdAndCompanyId(item.getProductId(), companyId)
-                        .ifPresentOrElse(
-                                product -> {
-                                    if (product.getStock() == null) {
-                                        errors.add("Product " + item.getProductId() + " does not have stock tracking enabled");
-                                    }
-                                },
-                                () -> errors.add("Product " + item.getProductId() + " not found in this company")
-                        );
+                Product product = productMap.get(item.getProductId());
+                if (product == null) {
+                    errors.add("Product " + item.getProductId() + " not found in this company");
+                } else if (product.getStock() == null) {
+                    errors.add("Product " + item.getProductId() + " does not have stock tracking enabled");
+                }
             }
 
             if (!errors.isEmpty()) {
@@ -261,9 +277,7 @@ public class InventoryServiceImpl implements InventoryService {
             // Pass 2 — apply all adjustments; any failure rolls back the entire transaction
             List<InventoryAdjustment> adjustments = new ArrayList<>();
             for (BulkAdjustItem item : items) {
-                Product product = productRepository.findByIdAndCompanyId(item.getProductId(), companyId)
-                        .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + item.getProductId()));
-
+                Product product = productMap.get(item.getProductId());
                 int previousStock = product.getStock();
                 int delta = item.getDelta();
 
@@ -287,10 +301,10 @@ public class InventoryServiceImpl implements InventoryService {
 
             adjustmentRepository.saveAll(adjustments);
 
-            return items.stream()
-                    .map(item -> productRepository.findByIdAndCompanyId(item.getProductId(), companyId)
-                            .map(this::toInventoryItemResponse)
-                            .orElseThrow())
+            // Re-fetch after @Modifying to get fresh stock values
+            return productRepository.findAllByIdInAndCompanyId(sortedProductIds, companyId)
+                    .stream()
+                    .map(this::toInventoryItemResponse)
                     .toList();
 
         } finally {

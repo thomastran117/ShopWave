@@ -54,4 +54,8 @@ public class CreateProductRequest {
     private String weightUnit;
 
     private boolean featured = false;
+
+    private boolean purchasable = true;
+
+    private boolean listed = true;
 }

@@ -55,4 +55,8 @@ public class UpdateProductRequest {
     private ProductStatus status;
 
     private Boolean featured;
+
+    private Boolean purchasable;
+
+    private Boolean listed;
 }

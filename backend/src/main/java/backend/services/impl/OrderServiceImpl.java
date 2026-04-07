@@ -111,6 +111,9 @@ public class OrderServiceImpl implements OrderService {
                 if (product.getStatus() != ProductStatus.ACTIVE) {
                     throw new BadRequestException("Product '" + product.getName() + "' is not available for purchase");
                 }
+                if (!product.isPurchasable()) {
+                    throw new BadRequestException("Product '" + product.getName() + "' is not available for purchase");
+                }
             }
 
             List<OrderItem> orderItems = new ArrayList<>();

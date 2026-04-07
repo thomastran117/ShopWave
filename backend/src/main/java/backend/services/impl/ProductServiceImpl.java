@@ -4,7 +4,10 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import backend.dtos.requests.product.BatchCreateProductsRequest;
+import backend.dtos.requests.product.BatchDeleteProductsRequest;
 import backend.dtos.requests.product.CreateProductRequest;
 import backend.dtos.requests.product.UpdateProductRequest;
 import backend.dtos.responses.general.PagedResponse;
@@ -47,6 +50,7 @@ public class ProductServiceImpl implements ProductService {
             BigDecimal maxPrice,
             Boolean featured,
             ProductStatus status,
+            Boolean listed,
             int page,
             int size,
             String sort,
@@ -62,7 +66,7 @@ public class ProductServiceImpl implements ProductService {
 
         return new PagedResponse<>(
                 productRepository
-                        .findAll(ProductSpecification.withFilters(companyId, q, category, brand, minPrice, maxPrice, featured, status), pageable)
+                        .findAll(ProductSpecification.withFilters(companyId, q, category, brand, minPrice, maxPrice, featured, status, listed), pageable)
                         .map(this::toResponse)
         );
     }
@@ -110,6 +114,8 @@ public class ProductServiceImpl implements ProductService {
         product.setWeight(request.getWeight());
         product.setWeightUnit(request.getWeightUnit());
         product.setFeatured(request.isFeatured());
+        product.setPurchasable(request.isPurchasable());
+        product.setListed(request.isListed());
         product.setStatus(ProductStatus.DRAFT);
 
         return toResponse(productRepository.save(product));
@@ -144,6 +150,8 @@ public class ProductServiceImpl implements ProductService {
         if (request.getWeightUnit() != null) product.setWeightUnit(request.getWeightUnit());
         if (request.getStatus() != null) product.setStatus(request.getStatus());
         if (request.getFeatured() != null) product.setFeatured(request.getFeatured());
+        if (request.getPurchasable() != null) product.setPurchasable(request.getPurchasable());
+        if (request.getListed() != null) product.setListed(request.getListed());
 
         return toResponse(productRepository.save(product));
     }
@@ -157,6 +165,61 @@ public class ProductServiceImpl implements ProductService {
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
 
         productRepository.delete(product);
+    }
+
+    @Override
+    @Transactional
+    public List<ProductResponse> batchCreateProducts(long companyId, long ownerId, BatchCreateProductsRequest request) {
+        Company company = companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        List<ProductResponse> results = new java.util.ArrayList<>();
+
+        for (CreateProductRequest req : request.getProducts()) {
+            if (req.getSku() != null && !req.getSku().isBlank()
+                    && productRepository.existsBySkuAndCompanyId(req.getSku(), companyId)) {
+                throw new ConflictException("A product with SKU '" + req.getSku() + "' already exists in this company");
+            }
+
+            Product product = new Product();
+            product.setCompany(company);
+            product.setName(req.getName());
+            product.setDescription(req.getDescription());
+            product.setSku(req.getSku());
+            product.setPrice(req.getPrice());
+            product.setCompareAtPrice(req.getCompareAtPrice());
+            product.setCurrency(req.getCurrency() != null ? req.getCurrency().toUpperCase() : "USD");
+            product.setCategory(req.getCategory());
+            product.setBrand(req.getBrand());
+            product.setTags(req.getTags());
+            product.setThumbnailUrl(req.getThumbnailUrl());
+            product.setStock(req.getStock());
+            product.setWeight(req.getWeight());
+            product.setWeightUnit(req.getWeightUnit());
+            product.setFeatured(req.isFeatured());
+            product.setPurchasable(req.isPurchasable());
+            product.setListed(req.isListed());
+            product.setStatus(ProductStatus.DRAFT);
+
+            results.add(toResponse(productRepository.save(product)));
+        }
+
+        return results;
+    }
+
+    @Override
+    @Transactional
+    public void batchDeleteProducts(long companyId, long ownerId, BatchDeleteProductsRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        List<Product> products = productRepository.findAllByIdInAndCompanyId(request.getIds(), companyId);
+
+        if (products.size() != request.getIds().size()) {
+            throw new ResourceNotFoundException("One or more products were not found in this company");
+        }
+
+        productRepository.deleteAll(products);
     }
 
     private void assertCompanyExists(long companyId) {
@@ -185,6 +248,8 @@ public class ProductServiceImpl implements ProductService {
                 product.getWeightUnit(),
                 product.getStatus().name(),
                 product.isFeatured(),
+                product.isPurchasable(),
+                product.isListed(),
                 product.getCreatedAt(),
                 product.getUpdatedAt()
         );

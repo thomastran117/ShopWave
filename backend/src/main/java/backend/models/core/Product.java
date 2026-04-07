@@ -83,6 +83,12 @@ public class Product {
     @Column(nullable = false)
     private boolean featured = false;
 
+    @Column(nullable = false)
+    private boolean purchasable = true;
+
+    @Column(nullable = false)
+    private boolean listed = true;
+
     @CreatedDate
     @Column(nullable = false, updatable = false)
     private Instant createdAt;

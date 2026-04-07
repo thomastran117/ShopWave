@@ -27,6 +27,8 @@ public class ProductResponse {
     private String weightUnit;
     private String status;
     private boolean featured;
+    private boolean purchasable;
+    private boolean listed;
     private Instant createdAt;
     private Instant updatedAt;
 }

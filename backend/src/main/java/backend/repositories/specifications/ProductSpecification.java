@@ -34,7 +34,8 @@ public class ProductSpecification {
             BigDecimal minPrice,
             BigDecimal maxPrice,
             Boolean featured,
-            ProductStatus status) {
+            ProductStatus status,
+            Boolean listed) {
 
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
@@ -73,6 +74,10 @@ public class ProductSpecification {
 
             ProductStatus effectiveStatus = status != null ? status : ProductStatus.ACTIVE;
             predicates.add(cb.equal(root.get("status"), effectiveStatus));
+
+            if (listed != null) {
+                predicates.add(cb.equal(root.get("listed"), listed));
+            }
 
             return cb.and(predicates.toArray(new Predicate[0]));
         };

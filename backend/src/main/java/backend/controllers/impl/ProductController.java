@@ -7,6 +7,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import backend.annotations.requireAuth.RequireAuth;
+import backend.dtos.requests.product.BatchCreateProductsRequest;
+import backend.dtos.requests.product.BatchDeleteProductsRequest;
 import backend.dtos.requests.product.CreateProductRequest;
 import backend.dtos.requests.product.UpdateProductRequest;
 import backend.dtos.responses.general.PagedResponse;
@@ -43,12 +45,13 @@ public class ProductController {
             @RequestParam(required = false) BigDecimal maxPrice,
             @RequestParam(required = false) Boolean featured,
             @RequestParam(required = false) ProductStatus status,
+            @RequestParam(required = false) Boolean listed,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size,
             @RequestParam(defaultValue = "createdAt") String sort,
             @RequestParam(defaultValue = "desc") String direction) {
         try {
-            return ResponseEntity.ok(productService.searchProducts(companyId, q, category, brand, minPrice, maxPrice, featured, status, page, size, sort, direction));
+            return ResponseEntity.ok(productService.searchProducts(companyId, q, category, brand, minPrice, maxPrice, featured, status, listed, page, size, sort, direction));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -62,6 +65,37 @@ public class ProductController {
             @PathVariable long id) {
         try {
             return ResponseEntity.ok(productService.getProduct(companyId, id));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/batch-create")
+    @RequireAuth
+    public ResponseEntity<List<ProductResponse>> batchCreateProducts(
+            @PathVariable long companyId,
+            @Valid @RequestBody BatchCreateProductsRequest request) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.status(HttpStatus.CREATED).body(productService.batchCreateProducts(companyId, userId, request));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/batch-delete")
+    @RequireAuth
+    public ResponseEntity<Void> batchDeleteProducts(
+            @PathVariable long companyId,
+            @Valid @RequestBody BatchDeleteProductsRequest request) {
+        try {
+            long userId = resolveUserId();
+            productService.batchDeleteProducts(companyId, userId, request);
+            return ResponseEntity.noContent().build();
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
