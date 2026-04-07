@@ -35,6 +35,7 @@ import backend.services.intf.CacheService;
 import backend.services.intf.InventoryService;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -314,18 +315,18 @@ public class InventoryServiceImpl implements InventoryService {
     }
 
     @Override
-    public List<ProductSalesMetricResponse> getTopPurchasedProducts(long companyId, long ownerId, int limit) {
+    public List<ProductSalesMetricResponse> getTopPurchasedProducts(long companyId, long ownerId, int limit, Instant from, Instant to) {
         assertCompanyOwnership(companyId, ownerId);
-        return productRepository.findTopByUnitsSold(companyId, limit)
+        return productRepository.findTopByUnitsSold(companyId, limit, from, to)
                 .stream()
                 .map(this::toSalesMetricResponse)
                 .toList();
     }
 
     @Override
-    public List<ProductSalesMetricResponse> getTopRevenueProducts(long companyId, long ownerId, int limit) {
+    public List<ProductSalesMetricResponse> getTopRevenueProducts(long companyId, long ownerId, int limit, Instant from, Instant to) {
         assertCompanyOwnership(companyId, ownerId);
-        return productRepository.findTopByRevenue(companyId, limit)
+        return productRepository.findTopByRevenue(companyId, limit, from, to)
                 .stream()
                 .map(this::toSalesMetricResponse)
                 .toList();

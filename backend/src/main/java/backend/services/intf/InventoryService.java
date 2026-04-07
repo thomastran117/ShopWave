@@ -10,6 +10,7 @@ import backend.dtos.responses.inventory.InventoryItemResponse;
 import backend.dtos.responses.inventory.InventorySummaryResponse;
 import backend.dtos.responses.inventory.ProductSalesMetricResponse;
 
+import java.time.Instant;
 import java.util.List;
 
 public interface InventoryService {
@@ -37,9 +38,9 @@ public interface InventoryService {
     InventoryItemResponse updateSettings(
             long companyId, long productId, long ownerId, UpdateInventorySettingsRequest request);
 
-    List<ProductSalesMetricResponse> getTopPurchasedProducts(long companyId, long ownerId, int limit);
+    List<ProductSalesMetricResponse> getTopPurchasedProducts(long companyId, long ownerId, int limit, Instant from, Instant to);
 
-    List<ProductSalesMetricResponse> getTopRevenueProducts(long companyId, long ownerId, int limit);
+    List<ProductSalesMetricResponse> getTopRevenueProducts(long companyId, long ownerId, int limit, Instant from, Instant to);
 
     List<ProductSalesMetricResponse> getNeverSoldProducts(long companyId, long ownerId, int limit);
 }

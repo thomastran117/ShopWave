@@ -15,6 +15,7 @@ import backend.dtos.responses.inventory.InventoryItemResponse;
 import backend.dtos.responses.inventory.InventorySummaryResponse;
 import backend.dtos.responses.inventory.ProductSalesMetricResponse;
 import backend.exceptions.http.AppHttpException;
+import backend.exceptions.http.BadRequestException;
 import backend.exceptions.http.InternalServerErrorException;
 import backend.models.enums.ProductStatus;
 import backend.services.intf.InventoryService;
@@ -23,6 +24,11 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 
+import org.springframework.format.annotation.DateTimeFormat;
+
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 
 @RestController
@@ -137,10 +143,14 @@ public class InventoryController {
     @GetMapping("/analytics/top-purchased")
     public ResponseEntity<List<ProductSalesMetricResponse>> getTopPurchasedProducts(
             @PathVariable long companyId,
-            @RequestParam(defaultValue = "10") @Min(1) @Max(50) int limit) {
+            @RequestParam(defaultValue = "10") @Min(1) @Max(50) int limit,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         try {
+            validateDateRange(from, to);
             long userId = resolveUserId();
-            return ResponseEntity.ok(inventoryService.getTopPurchasedProducts(companyId, userId, limit));
+            return ResponseEntity.ok(inventoryService.getTopPurchasedProducts(
+                    companyId, userId, limit, toStartOfDay(from), toEndOfDay(to)));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -151,10 +161,14 @@ public class InventoryController {
     @GetMapping("/analytics/top-revenue")
     public ResponseEntity<List<ProductSalesMetricResponse>> getTopRevenueProducts(
             @PathVariable long companyId,
-            @RequestParam(defaultValue = "10") @Min(1) @Max(50) int limit) {
+            @RequestParam(defaultValue = "10") @Min(1) @Max(50) int limit,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         try {
+            validateDateRange(from, to);
             long userId = resolveUserId();
-            return ResponseEntity.ok(inventoryService.getTopRevenueProducts(companyId, userId, limit));
+            return ResponseEntity.ok(inventoryService.getTopRevenueProducts(
+                    companyId, userId, limit, toStartOfDay(from), toEndOfDay(to)));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -194,5 +208,19 @@ public class InventoryController {
     private long resolveUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         return ((Number) auth.getPrincipal()).longValue();
+    }
+
+    private static void validateDateRange(LocalDate from, LocalDate to) {
+        if (from != null && to != null && to.isBefore(from)) {
+            throw new BadRequestException("End date must be equal to or after start date");
+        }
+    }
+
+    private static Instant toStartOfDay(LocalDate date) {
+        return date == null ? null : date.atStartOfDay(ZoneOffset.UTC).toInstant();
+    }
+
+    private static Instant toEndOfDay(LocalDate date) {
+        return date == null ? null : date.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant().minusNanos(1);
     }
 }

@@ -11,6 +11,7 @@ import backend.models.core.Product;
 import backend.repositories.projections.ProductSalesProjection;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -56,7 +57,8 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
 
     /**
      * Returns the top N products for a company ranked by total units sold across PAID orders.
-     * Products with no sales appear at the bottom with totalUnitsSold = 0.
+     * Date range is applied inside the JOIN so products with no qualifying sales still appear
+     * with totalUnitsSold = 0 rather than being excluded. Null from/to means no bound.
      */
     @Query(nativeQuery = true, value = """
             SELECT
@@ -70,7 +72,10 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
                 COALESCE(SUM(oi.quantity * oi.unit_price), 0.00) AS totalRevenue
             FROM products p
             LEFT JOIN order_items oi ON oi.product_id = p.id
-            LEFT JOIN orders o ON oi.order_id = o.id AND o.status = 'PAID'
+            LEFT JOIN orders o ON oi.order_id = o.id
+                AND o.status = 'PAID'
+                AND (:from IS NULL OR o.created_at >= :from)
+                AND (:to   IS NULL OR o.created_at <= :to)
             WHERE p.company_id = :companyId
             GROUP BY p.id, p.name, p.sku, p.stock, p.price, p.currency
             ORDER BY totalUnitsSold DESC
@@ -78,11 +83,13 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
             """)
     List<ProductSalesProjection> findTopByUnitsSold(
             @Param("companyId") long companyId,
-            @Param("limit") int limit);
+            @Param("limit") int limit,
+            @Param("from") Instant from,
+            @Param("to") Instant to);
 
     /**
      * Returns the top N products for a company ranked by total revenue (unitPrice × quantity)
-     * across PAID orders. Uses the price snapshot captured at order time.
+     * across PAID orders. Date range is applied inside the JOIN. Null from/to means no bound.
      */
     @Query(nativeQuery = true, value = """
             SELECT
@@ -96,7 +103,10 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
                 COALESCE(SUM(oi.quantity * oi.unit_price), 0.00) AS totalRevenue
             FROM products p
             LEFT JOIN order_items oi ON oi.product_id = p.id
-            LEFT JOIN orders o ON oi.order_id = o.id AND o.status = 'PAID'
+            LEFT JOIN orders o ON oi.order_id = o.id
+                AND o.status = 'PAID'
+                AND (:from IS NULL OR o.created_at >= :from)
+                AND (:to   IS NULL OR o.created_at <= :to)
             WHERE p.company_id = :companyId
             GROUP BY p.id, p.name, p.sku, p.stock, p.price, p.currency
             ORDER BY totalRevenue DESC
@@ -104,7 +114,9 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
             """)
     List<ProductSalesProjection> findTopByRevenue(
             @Param("companyId") long companyId,
-            @Param("limit") int limit);
+            @Param("limit") int limit,
+            @Param("from") Instant from,
+            @Param("to") Instant to);
 
     /**
      * Returns products that have stock tracked and available (stock > 0) but have never
