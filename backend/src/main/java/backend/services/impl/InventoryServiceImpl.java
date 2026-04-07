@@ -23,6 +23,7 @@ import backend.exceptions.http.ConflictException;
 import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
 import backend.models.core.Company;
+import backend.models.enums.ProductStatus;
 import backend.models.core.InventoryAdjustment;
 import backend.models.core.Product;
 import backend.repositories.CompanyRepository;
@@ -76,6 +77,8 @@ public class InventoryServiceImpl implements InventoryService {
     public PagedResponse<InventoryItemResponse> getInventory(
             long companyId, long ownerId,
             String stockStatus, String q,
+            String category, String brand,
+            ProductStatus status, Integer minStock, Integer maxStock,
             int page, int size, String sort, String direction) {
 
         assertCompanyOwnership(companyId, ownerId);
@@ -88,7 +91,8 @@ public class InventoryServiceImpl implements InventoryService {
 
         return new PagedResponse<>(
                 productRepository
-                        .findAll(InventorySpecification.withFilters(companyId, stockStatus, q), pageable)
+                        .findAll(InventorySpecification.withFilters(
+                                companyId, stockStatus, q, category, brand, status, minStock, maxStock), pageable)
                         .map(this::toInventoryItemResponse)
         );
     }
@@ -97,7 +101,8 @@ public class InventoryServiceImpl implements InventoryService {
     public InventorySummaryResponse getSummary(long companyId, long ownerId) {
         assertCompanyOwnership(companyId, ownerId);
 
-        long totalProducts = productRepository.count(InventorySpecification.withFilters(companyId, null, null));
+        long totalProducts = productRepository.count(
+                InventorySpecification.withFilters(companyId, null, null, null, null, null, null, null));
         long trackedProducts = productRepository.countTrackedProducts(companyId);
         long outOfStockCount = productRepository.countOutOfStock(companyId);
         long lowStockCount = productRepository.countLowStock(companyId);

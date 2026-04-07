@@ -16,6 +16,7 @@ import backend.dtos.responses.inventory.InventorySummaryResponse;
 import backend.dtos.responses.inventory.ProductSalesMetricResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.exceptions.http.InternalServerErrorException;
+import backend.models.enums.ProductStatus;
 import backend.services.intf.InventoryService;
 
 import jakarta.validation.Valid;
@@ -38,15 +39,22 @@ public class InventoryController {
     @GetMapping
     public ResponseEntity<PagedResponse<InventoryItemResponse>> getInventory(
             @PathVariable long companyId,
-            @RequestParam(required = false) String stockStatus,
             @RequestParam(required = false) String q,
+            @RequestParam(required = false) String stockStatus,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String brand,
+            @RequestParam(required = false) ProductStatus status,
+            @RequestParam(required = false) Integer minStock,
+            @RequestParam(required = false) Integer maxStock,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size,
             @RequestParam(defaultValue = "updatedAt") String sort,
             @RequestParam(defaultValue = "desc") String direction) {
         try {
             long userId = resolveUserId();
-            return ResponseEntity.ok(inventoryService.getInventory(companyId, userId, stockStatus, q, page, size, sort, direction));
+            return ResponseEntity.ok(inventoryService.getInventory(
+                    companyId, userId, stockStatus, q, category, brand, status, minStock, maxStock,
+                    page, size, sort, direction));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {

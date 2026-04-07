@@ -1,6 +1,7 @@
 package backend.services.intf;
 
 import backend.dtos.requests.inventory.AdjustStockRequest;
+import backend.models.enums.ProductStatus;
 import backend.dtos.requests.inventory.BulkAdjustRequest;
 import backend.dtos.requests.inventory.UpdateInventorySettingsRequest;
 import backend.dtos.responses.general.PagedResponse;
@@ -16,6 +17,8 @@ public interface InventoryService {
     PagedResponse<InventoryItemResponse> getInventory(
             long companyId, long ownerId,
             String stockStatus, String q,
+            String category, String brand,
+            ProductStatus status, Integer minStock, Integer maxStock,
             int page, int size, String sort, String direction);
 
     InventorySummaryResponse getSummary(long companyId, long ownerId);
