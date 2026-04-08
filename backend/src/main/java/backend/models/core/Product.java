@@ -73,6 +73,21 @@ public class Product {
     @OrderBy("displayOrder ASC")
     private List<ProductImage> images = new ArrayList<>();
 
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @BatchSize(size = 50)
+    @OrderBy("position ASC")
+    private List<ProductOption> options = new ArrayList<>();
+
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @BatchSize(size = 50)
+    @OrderBy("displayOrder ASC")
+    private List<ProductVariant> variants = new ArrayList<>();
+
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @BatchSize(size = 50)
+    @OrderBy("displayOrder ASC")
+    private List<ProductAttribute> attributes = new ArrayList<>();
+
     @Column(nullable = true)
     private Integer stock;
 

@@ -10,12 +10,20 @@ import backend.annotations.requireAuth.RequireAuth;
 import backend.dtos.requests.product.AddProductImageRequest;
 import backend.dtos.requests.product.BatchCreateProductsRequest;
 import backend.dtos.requests.product.BatchDeleteProductsRequest;
+import backend.dtos.requests.product.CreateProductOptionRequest;
 import backend.dtos.requests.product.CreateProductRequest;
+import backend.dtos.requests.product.CreateProductVariantRequest;
 import backend.dtos.requests.product.ReorderProductImagesRequest;
+import backend.dtos.requests.product.SetProductAttributesRequest;
+import backend.dtos.requests.product.UpdateProductOptionRequest;
 import backend.dtos.requests.product.UpdateProductRequest;
+import backend.dtos.requests.product.UpdateProductVariantRequest;
 import backend.dtos.responses.general.PagedResponse;
+import backend.dtos.responses.product.ProductAttributeResponse;
 import backend.dtos.responses.product.ProductImageResponse;
+import backend.dtos.responses.product.ProductOptionResponse;
 import backend.dtos.responses.product.ProductResponse;
+import backend.dtos.responses.product.ProductVariantResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.exceptions.http.InternalServerErrorException;
 import backend.models.enums.ProductStatus;
@@ -223,6 +231,183 @@ public class ProductController {
         try {
             long userId = resolveUserId();
             return ResponseEntity.ok(productService.reorderProductImages(companyId, productId, userId, request));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    // --- Options ---
+
+    @GetMapping("/{productId}/options")
+    public ResponseEntity<List<ProductOptionResponse>> getProductOptions(
+            @PathVariable long companyId,
+            @PathVariable long productId) {
+        try {
+            return ResponseEntity.ok(productService.getProductOptions(companyId, productId));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/{productId}/options")
+    @RequireAuth
+    public ResponseEntity<ProductOptionResponse> addProductOption(
+            @PathVariable long companyId,
+            @PathVariable long productId,
+            @Valid @RequestBody CreateProductOptionRequest request) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(productService.addProductOption(companyId, productId, userId, request));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PatchMapping("/{productId}/options/{optionId}")
+    @RequireAuth
+    public ResponseEntity<ProductOptionResponse> updateProductOption(
+            @PathVariable long companyId,
+            @PathVariable long productId,
+            @PathVariable long optionId,
+            @Valid @RequestBody UpdateProductOptionRequest request) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(productService.updateProductOption(companyId, productId, optionId, userId, request));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @DeleteMapping("/{productId}/options/{optionId}")
+    @RequireAuth
+    public ResponseEntity<Void> deleteProductOption(
+            @PathVariable long companyId,
+            @PathVariable long productId,
+            @PathVariable long optionId) {
+        try {
+            long userId = resolveUserId();
+            productService.deleteProductOption(companyId, productId, optionId, userId);
+            return ResponseEntity.noContent().build();
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    // --- Variants ---
+
+    @GetMapping("/{productId}/variants")
+    public ResponseEntity<List<ProductVariantResponse>> getProductVariants(
+            @PathVariable long companyId,
+            @PathVariable long productId) {
+        try {
+            return ResponseEntity.ok(productService.getProductVariants(companyId, productId));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @GetMapping("/{productId}/variants/{variantId}")
+    public ResponseEntity<ProductVariantResponse> getProductVariant(
+            @PathVariable long companyId,
+            @PathVariable long productId,
+            @PathVariable long variantId) {
+        try {
+            return ResponseEntity.ok(productService.getProductVariant(companyId, productId, variantId));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/{productId}/variants")
+    @RequireAuth
+    public ResponseEntity<ProductVariantResponse> createProductVariant(
+            @PathVariable long companyId,
+            @PathVariable long productId,
+            @Valid @RequestBody CreateProductVariantRequest request) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(productService.createProductVariant(companyId, productId, userId, request));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PatchMapping("/{productId}/variants/{variantId}")
+    @RequireAuth
+    public ResponseEntity<ProductVariantResponse> updateProductVariant(
+            @PathVariable long companyId,
+            @PathVariable long productId,
+            @PathVariable long variantId,
+            @Valid @RequestBody UpdateProductVariantRequest request) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(productService.updateProductVariant(companyId, productId, variantId, userId, request));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @DeleteMapping("/{productId}/variants/{variantId}")
+    @RequireAuth
+    public ResponseEntity<Void> deleteProductVariant(
+            @PathVariable long companyId,
+            @PathVariable long productId,
+            @PathVariable long variantId) {
+        try {
+            long userId = resolveUserId();
+            productService.deleteProductVariant(companyId, productId, variantId, userId);
+            return ResponseEntity.noContent().build();
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    // --- Attributes ---
+
+    @GetMapping("/{productId}/attributes")
+    public ResponseEntity<List<ProductAttributeResponse>> getProductAttributes(
+            @PathVariable long companyId,
+            @PathVariable long productId) {
+        try {
+            return ResponseEntity.ok(productService.getProductAttributes(companyId, productId));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PutMapping("/{productId}/attributes")
+    @RequireAuth
+    public ResponseEntity<List<ProductAttributeResponse>> setProductAttributes(
+            @PathVariable long companyId,
+            @PathVariable long productId,
+            @Valid @RequestBody SetProductAttributesRequest request) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(productService.setProductAttributes(companyId, productId, userId, request));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {

@@ -30,10 +30,20 @@ public class OrderItem {
     @JoinColumn(name = "product_id", nullable = false)
     private Product product;
 
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "variant_id", nullable = true)
+    private ProductVariant variant;
+
+    @Column(nullable = true, length = 255)
+    private String variantTitle;
+
+    @Column(nullable = true, length = 100)
+    private String variantSku;
+
     @Column(nullable = false)
     private int quantity;
 
-    /** Snapshot of the product price at the time of order. */
+    /** Snapshot of the product/variant price at the time of order. */
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal unitPrice;
 

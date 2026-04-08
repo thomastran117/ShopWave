@@ -9,30 +9,47 @@ import org.springframework.transaction.annotation.Transactional;
 import backend.dtos.requests.product.AddProductImageRequest;
 import backend.dtos.requests.product.BatchCreateProductsRequest;
 import backend.dtos.requests.product.BatchDeleteProductsRequest;
+import backend.dtos.requests.product.CreateProductOptionRequest;
 import backend.dtos.requests.product.CreateProductRequest;
+import backend.dtos.requests.product.CreateProductVariantRequest;
 import backend.dtos.requests.product.ReorderProductImagesRequest;
+import backend.dtos.requests.product.SetProductAttributesRequest;
+import backend.dtos.requests.product.UpdateProductOptionRequest;
 import backend.dtos.requests.product.UpdateProductRequest;
+import backend.dtos.requests.product.UpdateProductVariantRequest;
 import backend.dtos.responses.general.PagedResponse;
+import backend.dtos.responses.product.ProductAttributeResponse;
 import backend.dtos.responses.product.ProductImageResponse;
+import backend.dtos.responses.product.ProductOptionResponse;
 import backend.dtos.responses.product.ProductResponse;
+import backend.dtos.responses.product.ProductVariantResponse;
 import backend.exceptions.http.BadRequestException;
 import backend.exceptions.http.ConflictException;
 import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
 import backend.models.core.Company;
 import backend.models.core.Product;
+import backend.models.core.ProductAttribute;
 import backend.models.core.ProductImage;
+import backend.models.core.ProductOption;
+import backend.models.core.ProductVariant;
 import backend.models.enums.ProductStatus;
 import backend.repositories.CompanyRepository;
+import backend.repositories.ProductAttributeRepository;
 import backend.repositories.ProductImageRepository;
+import backend.repositories.ProductOptionRepository;
 import backend.repositories.ProductRepository;
+import backend.repositories.ProductVariantRepository;
 import backend.repositories.specifications.ProductSpecification;
 import backend.services.intf.ProductService;
 
 import java.math.BigDecimal;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 public class ProductServiceImpl implements ProductService {
@@ -42,14 +59,23 @@ public class ProductServiceImpl implements ProductService {
     private final ProductRepository productRepository;
     private final CompanyRepository companyRepository;
     private final ProductImageRepository productImageRepository;
+    private final ProductOptionRepository productOptionRepository;
+    private final ProductVariantRepository productVariantRepository;
+    private final ProductAttributeRepository productAttributeRepository;
 
     public ProductServiceImpl(
             ProductRepository productRepository,
             CompanyRepository companyRepository,
-            ProductImageRepository productImageRepository) {
+            ProductImageRepository productImageRepository,
+            ProductOptionRepository productOptionRepository,
+            ProductVariantRepository productVariantRepository,
+            ProductAttributeRepository productAttributeRepository) {
         this.productRepository = productRepository;
         this.companyRepository = companyRepository;
         this.productImageRepository = productImageRepository;
+        this.productOptionRepository = productOptionRepository;
+        this.productVariantRepository = productVariantRepository;
+        this.productAttributeRepository = productAttributeRepository;
     }
 
     @Override
@@ -244,6 +270,8 @@ public class ProductServiceImpl implements ProductService {
         productRepository.deleteAll(products);
     }
 
+    // --- Images ---
+
     @Override
     public List<ProductImageResponse> getProductImages(long companyId, long productId) {
         productRepository.findByIdAndCompanyId(productId, companyId)
@@ -349,9 +377,214 @@ public class ProductServiceImpl implements ProductService {
                 .toList();
     }
 
+    // --- Options ---
+
+    @Override
+    public List<ProductOptionResponse> getProductOptions(long companyId, long productId) {
+        assertProductBelongsToCompany(companyId, productId);
+        return productOptionRepository.findAllByProductIdOrderByPositionAsc(productId)
+                .stream()
+                .map(this::toOptionResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public ProductOptionResponse addProductOption(long companyId, long productId, long ownerId, CreateProductOptionRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Product product = productRepository.findByIdAndCompanyId(productId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
+
+        if (productOptionRepository.countByProductId(productId) >= 3) {
+            throw new BadRequestException("Products can have at most 3 option types");
+        }
+
+        int position = productOptionRepository.countByProductId(productId);
+        ProductOption option = new ProductOption();
+        option.setProduct(product);
+        option.setName(request.getName());
+        option.setPosition(position);
+
+        return toOptionResponse(productOptionRepository.save(option));
+    }
+
+    @Override
+    @Transactional
+    public ProductOptionResponse updateProductOption(long companyId, long productId, long optionId, long ownerId, UpdateProductOptionRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        assertProductBelongsToCompany(companyId, productId);
+
+        ProductOption option = productOptionRepository.findByIdAndProductId(optionId, productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Option not found with id: " + optionId));
+
+        if (request.getName() != null) option.setName(request.getName());
+
+        return toOptionResponse(productOptionRepository.save(option));
+    }
+
+    @Override
+    @Transactional
+    public void deleteProductOption(long companyId, long productId, long optionId, long ownerId) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        assertProductBelongsToCompany(companyId, productId);
+
+        ProductOption option = productOptionRepository.findByIdAndProductId(optionId, productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Option not found with id: " + optionId));
+
+        productOptionRepository.delete(option);
+    }
+
+    // --- Variants ---
+
+    @Override
+    public List<ProductVariantResponse> getProductVariants(long companyId, long productId) {
+        assertProductBelongsToCompany(companyId, productId);
+        return productVariantRepository.findAllByProductIdOrderByDisplayOrderAsc(productId)
+                .stream()
+                .map(this::toVariantResponse)
+                .toList();
+    }
+
+    @Override
+    public ProductVariantResponse getProductVariant(long companyId, long productId, long variantId) {
+        assertProductBelongsToCompany(companyId, productId);
+        ProductVariant variant = productVariantRepository.findByIdAndProductId(variantId, productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Variant not found with id: " + variantId));
+        return toVariantResponse(variant);
+    }
+
+    @Override
+    @Transactional
+    public ProductVariantResponse createProductVariant(long companyId, long productId, long ownerId, CreateProductVariantRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Product product = productRepository.findByIdAndCompanyId(productId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
+
+        if (request.getSku() != null && !request.getSku().isBlank()
+                && productVariantRepository.existsBySkuAndProductCompanyId(request.getSku(), companyId)) {
+            throw new ConflictException("A variant with this SKU already exists in this company");
+        }
+
+        ProductVariant variant = new ProductVariant();
+        variant.setProduct(product);
+        variant.setSku(request.getSku());
+        variant.setPrice(request.getPrice());
+        variant.setCompareAtPrice(request.getCompareAtPrice());
+        variant.setStock(request.getStock());
+        variant.setLowStockThreshold(request.getLowStockThreshold());
+        variant.setPurchasable(request.isPurchasable());
+        variant.setOption1(request.getOption1());
+        variant.setOption2(request.getOption2());
+        variant.setOption3(request.getOption3());
+        variant.setDisplayOrder(request.getDisplayOrder());
+
+        return toVariantResponse(productVariantRepository.save(variant));
+    }
+
+    @Override
+    @Transactional
+    public ProductVariantResponse updateProductVariant(long companyId, long productId, long variantId, long ownerId, UpdateProductVariantRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        assertProductBelongsToCompany(companyId, productId);
+
+        ProductVariant variant = productVariantRepository.findByIdAndProductId(variantId, productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Variant not found with id: " + variantId));
+
+        if (request.getSku() != null && !request.getSku().equals(variant.getSku())) {
+            if (productVariantRepository.existsBySkuAndProductCompanyId(request.getSku(), companyId)) {
+                throw new ConflictException("A variant with this SKU already exists in this company");
+            }
+            variant.setSku(request.getSku());
+        }
+
+        if (request.getPrice() != null) variant.setPrice(request.getPrice());
+        if (request.getCompareAtPrice() != null) variant.setCompareAtPrice(request.getCompareAtPrice());
+        if (request.getStock() != null) variant.setStock(request.getStock());
+        if (request.getLowStockThreshold() != null) variant.setLowStockThreshold(request.getLowStockThreshold());
+        if (request.getPurchasable() != null) variant.setPurchasable(request.getPurchasable());
+        if (request.getOption1() != null) variant.setOption1(request.getOption1());
+        if (request.getOption2() != null) variant.setOption2(request.getOption2());
+        if (request.getOption3() != null) variant.setOption3(request.getOption3());
+        if (request.getDisplayOrder() != null) variant.setDisplayOrder(request.getDisplayOrder());
+
+        return toVariantResponse(productVariantRepository.save(variant));
+    }
+
+    @Override
+    @Transactional
+    public void deleteProductVariant(long companyId, long productId, long variantId, long ownerId) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        assertProductBelongsToCompany(companyId, productId);
+
+        ProductVariant variant = productVariantRepository.findByIdAndProductId(variantId, productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Variant not found with id: " + variantId));
+
+        productVariantRepository.delete(variant);
+    }
+
+    // --- Attributes ---
+
+    @Override
+    public List<ProductAttributeResponse> getProductAttributes(long companyId, long productId) {
+        assertProductBelongsToCompany(companyId, productId);
+        return productAttributeRepository.findAllByProductIdOrderByDisplayOrderAsc(productId)
+                .stream()
+                .map(this::toAttrResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public List<ProductAttributeResponse> setProductAttributes(long companyId, long productId, long ownerId, SetProductAttributesRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Product product = productRepository.findByIdAndCompanyId(productId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
+
+        productAttributeRepository.deleteAllByProductId(productId);
+
+        List<ProductAttribute> attributes = request.getAttributes().stream()
+                .map(item -> {
+                    ProductAttribute attr = new ProductAttribute();
+                    attr.setProduct(product);
+                    attr.setName(item.getName());
+                    attr.setValue(item.getValue());
+                    attr.setDisplayOrder(item.getDisplayOrder());
+                    return attr;
+                })
+                .toList();
+
+        return productAttributeRepository.saveAll(attributes)
+                .stream()
+                .map(this::toAttrResponse)
+                .toList();
+    }
+
+    // --- Helpers ---
+
     private void assertCompanyExists(long companyId) {
         if (!companyRepository.existsById(companyId)) {
             throw new ResourceNotFoundException("Company not found with id: " + companyId);
+        }
+    }
+
+    private void assertProductBelongsToCompany(long companyId, long productId) {
+        assertCompanyExists(companyId);
+        if (!productRepository.findByIdAndCompanyId(productId, companyId).isPresent()) {
+            throw new ResourceNotFoundException("Product not found with id: " + productId);
         }
     }
 
@@ -359,9 +592,51 @@ public class ProductServiceImpl implements ProductService {
         return new ProductImageResponse(img.getId(), img.getImageUrl(), img.getDisplayOrder(), img.getCreatedAt());
     }
 
+    private ProductOptionResponse toOptionResponse(ProductOption opt) {
+        return new ProductOptionResponse(opt.getId(), opt.getName(), opt.getPosition());
+    }
+
+    private ProductVariantResponse toVariantResponse(ProductVariant v) {
+        String title = Stream.of(v.getOption1(), v.getOption2(), v.getOption3())
+                .filter(Objects::nonNull)
+                .collect(Collectors.joining(" / "));
+        return new ProductVariantResponse(
+                v.getId(),
+                v.getSku(),
+                v.getPrice(),
+                v.getCompareAtPrice(),
+                v.getStock(),
+                v.getLowStockThreshold(),
+                v.isPurchasable(),
+                v.getOption1(),
+                v.getOption2(),
+                v.getOption3(),
+                title.isBlank() ? null : title,
+                v.getDisplayOrder(),
+                v.getCreatedAt(),
+                v.getUpdatedAt()
+        );
+    }
+
+    private ProductAttributeResponse toAttrResponse(ProductAttribute attr) {
+        return new ProductAttributeResponse(attr.getId(), attr.getName(), attr.getValue(), attr.getDisplayOrder());
+    }
+
     private ProductResponse toResponse(Product product) {
         List<ProductImageResponse> images = product.getImages().stream()
                 .map(this::toImageResponse)
+                .toList();
+
+        List<ProductOptionResponse> options = product.getOptions().stream()
+                .map(this::toOptionResponse)
+                .toList();
+
+        List<ProductVariantResponse> variants = product.getVariants().stream()
+                .map(this::toVariantResponse)
+                .toList();
+
+        List<ProductAttributeResponse> attributes = product.getAttributes().stream()
+                .map(this::toAttrResponse)
                 .toList();
 
         return new ProductResponse(
@@ -378,6 +653,9 @@ public class ProductServiceImpl implements ProductService {
                 product.getTags(),
                 product.getThumbnailUrl(),
                 images,
+                options,
+                variants,
+                attributes,
                 product.getStock(),
                 product.getLowStockThreshold(),
                 product.getWeight(),

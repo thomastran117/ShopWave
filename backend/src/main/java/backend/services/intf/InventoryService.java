@@ -44,4 +44,7 @@ public interface InventoryService {
     List<ProductSalesMetricResponse> getTopRevenueProducts(long companyId, long ownerId, int limit, Instant from, Instant to);
 
     List<ProductSalesMetricResponse> getNeverSoldProducts(long companyId, long ownerId, int limit);
+
+    InventoryItemResponse adjustVariantStock(
+            long companyId, long productId, long variantId, long ownerId, AdjustStockRequest request);
 }

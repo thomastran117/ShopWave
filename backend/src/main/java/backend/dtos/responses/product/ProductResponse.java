@@ -23,6 +23,9 @@ public class ProductResponse {
     private String tags;
     private String thumbnailUrl;
     private List<ProductImageResponse> images;
+    private List<ProductOptionResponse> options;
+    private List<ProductVariantResponse> variants;
+    private List<ProductAttributeResponse> attributes;
     private Integer stock;
     private Integer lowStockThreshold;
     private BigDecimal weight;

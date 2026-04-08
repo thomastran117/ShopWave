@@ -27,9 +27,11 @@ import backend.models.core.Company;
 import backend.models.enums.ProductStatus;
 import backend.models.core.InventoryAdjustment;
 import backend.models.core.Product;
+import backend.models.core.ProductVariant;
 import backend.repositories.CompanyRepository;
 import backend.repositories.InventoryAdjustmentRepository;
 import backend.repositories.ProductRepository;
+import backend.repositories.ProductVariantRepository;
 import backend.repositories.UserRepository;
 import backend.repositories.specifications.InventorySpecification;
 import backend.services.intf.CacheService;
@@ -59,7 +61,10 @@ public class InventoryServiceImpl implements InventoryService {
     private static final int LOCK_RETRY_ATTEMPTS = 5;
     private static final long LOCK_RETRY_DELAY_MS = 100;
 
+    private static final String VARIANT_LOCK_PREFIX = "lock:variant:";
+
     private final ProductRepository productRepository;
+    private final ProductVariantRepository variantRepository;
     private final CompanyRepository companyRepository;
     private final InventoryAdjustmentRepository adjustmentRepository;
     private final UserRepository userRepository;
@@ -67,11 +72,13 @@ public class InventoryServiceImpl implements InventoryService {
 
     public InventoryServiceImpl(
             ProductRepository productRepository,
+            ProductVariantRepository variantRepository,
             CompanyRepository companyRepository,
             InventoryAdjustmentRepository adjustmentRepository,
             UserRepository userRepository,
             CacheService cacheService) {
         this.productRepository = productRepository;
+        this.variantRepository = variantRepository;
         this.companyRepository = companyRepository;
         this.adjustmentRepository = adjustmentRepository;
         this.userRepository = userRepository;
@@ -487,6 +494,7 @@ public class InventoryServiceImpl implements InventoryService {
                 adj.getId(),
                 adj.getProduct().getId(),
                 adj.getProduct().getName(),
+                adj.getVariant() != null ? adj.getVariant().getId() : null,
                 adj.getAdjustedBy() != null ? adj.getAdjustedBy().getId() : null,
                 adj.getDelta(),
                 adj.getPreviousStock(),
@@ -495,5 +503,77 @@ public class InventoryServiceImpl implements InventoryService {
                 adj.getNote(),
                 adj.getCreatedAt()
         );
+    }
+
+    @Override
+    @Transactional
+    public InventoryItemResponse adjustVariantStock(
+            long companyId, long productId, long variantId, long ownerId, AdjustStockRequest request) {
+
+        assertCompanyOwnership(companyId, ownerId);
+
+        Product product = productRepository.findByIdAndCompanyId(productId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
+
+        String lockToken = UUID.randomUUID().toString();
+        String lockKey = VARIANT_LOCK_PREFIX + variantId;
+        boolean lockAcquired = false;
+
+        try {
+            for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
+                if (cacheService.tryLock(lockKey, lockToken, LOCK_TTL_SECONDS)) {
+                    lockAcquired = true;
+                    break;
+                }
+                try {
+                    Thread.sleep(LOCK_RETRY_DELAY_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new ConflictException("Stock adjustment interrupted, please try again");
+                }
+            }
+
+            if (!lockAcquired) {
+                throw new ConflictException("Variant is currently being updated by another operation, please try again shortly");
+            }
+
+            ProductVariant variant = variantRepository.findByIdAndProductId(variantId, productId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Variant not found with id: " + variantId));
+
+            if (variant.getStock() == null) {
+                throw new BadRequestException("Stock tracking is not enabled for this variant. Set an initial stock value first.");
+            }
+
+            int previousStock = variant.getStock();
+            int delta = request.getDelta();
+
+            int rows = variantRepository.adjustStock(variantId, delta);
+            if (rows == 0) {
+                throw new BadRequestException(
+                        "Adjustment would result in negative stock. Current stock: " + previousStock + ", delta: " + delta);
+            }
+
+            InventoryAdjustment adjustment = new InventoryAdjustment();
+            adjustment.setProduct(productRepository.getReferenceById(productId));
+            adjustment.setVariant(variantRepository.getReferenceById(variantId));
+            adjustment.setAdjustedBy(userRepository.getReferenceById(ownerId));
+            adjustment.setDelta(delta);
+            adjustment.setPreviousStock(previousStock);
+            adjustment.setNewStock(previousStock + delta);
+            adjustment.setReason(request.getReason());
+            adjustment.setNote(request.getNote());
+            adjustmentRepository.save(adjustment);
+
+            return toInventoryItemResponse(product);
+
+        } finally {
+            if (lockAcquired) {
+                try {
+                    cacheService.unlock(lockKey, lockToken);
+                } catch (Exception e) {
+                    log.error("Failed to release variant lock for variant {}: {}", variantId, e.getMessage());
+                }
+            }
+        }
     }
 }

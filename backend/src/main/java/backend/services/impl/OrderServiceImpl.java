@@ -22,6 +22,7 @@ import backend.models.core.Order;
 import backend.models.core.OrderCompensation;
 import backend.models.core.OrderItem;
 import backend.models.core.Product;
+import backend.models.core.ProductVariant;
 import backend.models.core.User;
 import backend.models.enums.CompensationStatus;
 import backend.models.enums.CompensationType;
@@ -31,6 +32,7 @@ import backend.repositories.CompanyRepository;
 import backend.repositories.OrderCompensationRepository;
 import backend.repositories.OrderRepository;
 import backend.repositories.ProductRepository;
+import backend.repositories.ProductVariantRepository;
 import backend.repositories.UserRepository;
 import backend.services.intf.CacheService;
 import backend.services.intf.OrderService;
@@ -48,6 +50,7 @@ public class OrderServiceImpl implements OrderService {
     private static final Logger log = LoggerFactory.getLogger(OrderServiceImpl.class);
 
     private static final String LOCK_PREFIX = "lock:product:";
+    private static final String VARIANT_LOCK_PREFIX = "lock:variant:";
     private static final long LOCK_TTL_SECONDS = 10;
     private static final int LOCK_RETRY_ATTEMPTS = 5;
     private static final long LOCK_RETRY_DELAY_MS = 100;
@@ -56,6 +59,7 @@ public class OrderServiceImpl implements OrderService {
     private final OrderRepository orderRepository;
     private final OrderCompensationRepository compensationRepository;
     private final ProductRepository productRepository;
+    private final ProductVariantRepository variantRepository;
     private final UserRepository userRepository;
     private final CompanyRepository companyRepository;
     private final PaymentService paymentService;
@@ -65,6 +69,7 @@ public class OrderServiceImpl implements OrderService {
             OrderRepository orderRepository,
             OrderCompensationRepository compensationRepository,
             ProductRepository productRepository,
+            ProductVariantRepository variantRepository,
             UserRepository userRepository,
             CompanyRepository companyRepository,
             PaymentService paymentService,
@@ -72,6 +77,7 @@ public class OrderServiceImpl implements OrderService {
         this.orderRepository = orderRepository;
         this.compensationRepository = compensationRepository;
         this.productRepository = productRepository;
+        this.variantRepository = variantRepository;
         this.userRepository = userRepository;
         this.companyRepository = companyRepository;
         this.paymentService = paymentService;
@@ -92,16 +98,25 @@ public class OrderServiceImpl implements OrderService {
                 .toList();
 
         Map<Long, Integer> quantityMap = new HashMap<>();
+        Map<Long, Long> variantMap = new HashMap<>();  // productId -> variantId
         for (CreateOrderRequest.OrderItemRequest item : itemRequests) {
             quantityMap.merge(item.getProductId(), item.getQuantity(), Integer::sum);
+            if (item.getVariantId() != null) {
+                variantMap.put(item.getProductId(), item.getVariantId());
+            }
         }
+
+        // Collect variant IDs that need locks (sorted for deadlock prevention)
+        List<Long> variantIdsToLock = variantMap.values().stream().sorted().toList();
 
         String lockToken = UUID.randomUUID().toString();
         List<String> acquiredLocks = new ArrayList<>();
         List<long[]> decrementedProducts = new ArrayList<>();
+        List<long[]> decrementedVariants = new ArrayList<>();
 
         try {
             acquireLocks(productIds, lockToken, acquiredLocks);
+            acquireVariantLocks(variantIdsToLock, lockToken, acquiredLocks);
 
             List<Product> products = productRepository.findAllById(productIds);
             if (products.size() != productIds.size()) {
@@ -120,6 +135,14 @@ public class OrderServiceImpl implements OrderService {
                 if (!product.isPurchasable()) {
                     throw new BadRequestException("Product '" + product.getName() + "' is not available for purchase");
                 }
+                boolean hasVariants = variantRepository.existsByProductId(product.getId());
+                Long requestedVariantId = variantMap.get(product.getId());
+                if (hasVariants && requestedVariantId == null) {
+                    throw new BadRequestException("Product '" + product.getName() + "' has variants — specify a variantId");
+                }
+                if (!hasVariants && requestedVariantId != null) {
+                    throw new BadRequestException("Product '" + product.getName() + "' has no variants");
+                }
             }
 
             List<OrderItem> orderItems = new ArrayList<>();
@@ -128,23 +151,46 @@ public class OrderServiceImpl implements OrderService {
             for (Long productId : productIds) {
                 Product product = productMap.get(productId);
                 int qty = quantityMap.get(productId);
-
-                int updated = productRepository.decrementStock(product.getId(), qty);
-                if (updated == 0) {
-                    safeRestoreStock(decrementedProducts);
-                    throw new ConflictException("Insufficient stock for product '" + product.getName() + "'");
-                }
-
-                decrementedProducts.add(new long[]{product.getId(), qty});
+                Long variantId = variantMap.get(productId);
 
                 OrderItem item = new OrderItem();
                 item.setProduct(product);
-                item.setQuantity(qty);
-                item.setUnitPrice(product.getPrice());
                 item.setProductName(product.getName());
-                orderItems.add(item);
+                item.setQuantity(qty);
 
-                totalAmount = totalAmount.add(product.getPrice().multiply(BigDecimal.valueOf(qty)));
+                if (variantId != null) {
+                    ProductVariant variant = variantRepository.findByIdAndProductId(variantId, productId)
+                            .orElseThrow(() -> new ResourceNotFoundException("Variant not found with id: " + variantId));
+
+                    if (!variant.isPurchasable()) {
+                        throw new BadRequestException("Variant is not available for purchase");
+                    }
+
+                    int updated = variantRepository.decrementStock(variantId, qty);
+                    if (updated == 0) {
+                        safeRestoreAll(decrementedProducts, decrementedVariants);
+                        throw new ConflictException("Insufficient stock for variant of product '" + product.getName() + "'");
+                    }
+                    decrementedVariants.add(new long[]{variantId, qty});
+
+                    item.setVariant(variant);
+                    item.setVariantTitle(buildVariantTitle(variant));
+                    item.setVariantSku(variant.getSku());
+                    item.setUnitPrice(variant.getPrice());
+                    totalAmount = totalAmount.add(variant.getPrice().multiply(BigDecimal.valueOf(qty)));
+                } else {
+                    int updated = productRepository.decrementStock(product.getId(), qty);
+                    if (updated == 0) {
+                        safeRestoreAll(decrementedProducts, decrementedVariants);
+                        throw new ConflictException("Insufficient stock for product '" + product.getName() + "'");
+                    }
+                    decrementedProducts.add(new long[]{product.getId(), qty});
+
+                    item.setUnitPrice(product.getPrice());
+                    totalAmount = totalAmount.add(product.getPrice().multiply(BigDecimal.valueOf(qty)));
+                }
+
+                orderItems.add(item);
             }
 
             String currency = request.getCurrency() != null ? request.getCurrency().toLowerCase() : "usd";
@@ -177,7 +223,7 @@ public class OrderServiceImpl implements OrderService {
                 order.setStatus(OrderStatus.FAILED);
                 order.setFailureReason("Payment intent creation failed: " + e.getMessage());
                 orderRepository.save(order);
-                scheduleStockCompensation(order, decrementedProducts);
+                scheduleStockCompensation(order, decrementedProducts, decrementedVariants);
                 throw e;
             }
 
@@ -188,7 +234,7 @@ public class OrderServiceImpl implements OrderService {
         } catch (ConflictException | ResourceNotFoundException | BadRequestException e) {
             throw e;
         } catch (Exception e) {
-            safeRestoreStock(decrementedProducts);
+            safeRestoreAll(decrementedProducts, decrementedVariants);
             throw e;
         } finally {
             releaseLocks(acquiredLocks, lockToken);
@@ -247,14 +293,23 @@ public class OrderServiceImpl implements OrderService {
 
         for (OrderItem item : order.getItems()) {
             try {
-                productRepository.restoreStock(item.getProduct().getId(), item.getQuantity());
-                recordCompensation(order, CompensationType.STOCK_RESTORE,
-                        "Restored " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.COMPLETED);
+                restoreItemStock(item);
+                if (item.getVariant() != null) {
+                    recordCompensation(order, CompensationType.STOCK_RESTORE,
+                            "[VARIANT] Restored " + item.getQuantity() + " units for variant " + item.getVariant().getId(), CompensationStatus.COMPLETED);
+                } else {
+                    recordCompensation(order, CompensationType.STOCK_RESTORE,
+                            "Restored " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.COMPLETED);
+                }
             } catch (Exception e) {
-                log.error("Failed to restore stock for product {} on order {}: {}",
-                        item.getProduct().getId(), order.getId(), e.getMessage());
-                recordCompensation(order, CompensationType.STOCK_RESTORE,
-                        "Failed to restore " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.FAILED, e.getMessage());
+                log.error("Failed to restore stock for item on order {}: {}", order.getId(), e.getMessage());
+                if (item.getVariant() != null) {
+                    recordCompensation(order, CompensationType.STOCK_RESTORE,
+                            "[VARIANT] Failed to restore " + item.getQuantity() + " units for variant " + item.getVariant().getId(), CompensationStatus.FAILED, e.getMessage());
+                } else {
+                    recordCompensation(order, CompensationType.STOCK_RESTORE,
+                            "Failed to restore " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.FAILED, e.getMessage());
+                }
             }
         }
 
@@ -282,14 +337,23 @@ public class OrderServiceImpl implements OrderService {
 
             for (OrderItem item : order.getItems()) {
                 try {
-                    productRepository.restoreStock(item.getProduct().getId(), item.getQuantity());
-                    recordCompensation(order, CompensationType.STOCK_RESTORE,
-                            "Restored " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.COMPLETED);
+                    restoreItemStock(item);
+                    if (item.getVariant() != null) {
+                        recordCompensation(order, CompensationType.STOCK_RESTORE,
+                                "[VARIANT] Restored " + item.getQuantity() + " units for variant " + item.getVariant().getId(), CompensationStatus.COMPLETED);
+                    } else {
+                        recordCompensation(order, CompensationType.STOCK_RESTORE,
+                                "Restored " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.COMPLETED);
+                    }
                 } catch (Exception e) {
-                    log.error("Failed to restore stock for product {} on failed order {}: {}",
-                            item.getProduct().getId(), order.getId(), e.getMessage());
-                    recordCompensation(order, CompensationType.STOCK_RESTORE,
-                            "Failed to restore " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.FAILED, e.getMessage());
+                    log.error("Failed to restore stock for item on failed order {}: {}", order.getId(), e.getMessage());
+                    if (item.getVariant() != null) {
+                        recordCompensation(order, CompensationType.STOCK_RESTORE,
+                                "[VARIANT] Failed to restore " + item.getQuantity() + " units for variant " + item.getVariant().getId(), CompensationStatus.FAILED, e.getMessage());
+                    } else {
+                        recordCompensation(order, CompensationType.STOCK_RESTORE,
+                                "Failed to restore " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.FAILED, e.getMessage());
+                    }
                 }
             }
 
@@ -311,14 +375,23 @@ public class OrderServiceImpl implements OrderService {
 
         for (OrderItem item : order.getItems()) {
             try {
-                productRepository.restoreStock(item.getProduct().getId(), item.getQuantity());
-                recordCompensation(order, CompensationType.STOCK_RESTORE,
-                        "Restored " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.COMPLETED);
+                restoreItemStock(item);
+                if (item.getVariant() != null) {
+                    recordCompensation(order, CompensationType.STOCK_RESTORE,
+                            "[VARIANT] Restored " + item.getQuantity() + " units for variant " + item.getVariant().getId(), CompensationStatus.COMPLETED);
+                } else {
+                    recordCompensation(order, CompensationType.STOCK_RESTORE,
+                            "Restored " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.COMPLETED);
+                }
             } catch (Exception e) {
-                log.error("Scheduled compensation: failed to restore stock for product {} on order {}: {}",
-                        item.getProduct().getId(), order.getId(), e.getMessage());
-                recordCompensation(order, CompensationType.STOCK_RESTORE,
-                        "Restore " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.FAILED, e.getMessage());
+                log.error("Scheduled compensation: failed to restore stock for item on order {}: {}", order.getId(), e.getMessage());
+                if (item.getVariant() != null) {
+                    recordCompensation(order, CompensationType.STOCK_RESTORE,
+                            "[VARIANT] Restore " + item.getQuantity() + " units for variant " + item.getVariant().getId(), CompensationStatus.FAILED, e.getMessage());
+                } else {
+                    recordCompensation(order, CompensationType.STOCK_RESTORE,
+                            "Restore " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.FAILED, e.getMessage());
+                }
             }
         }
 
@@ -355,10 +428,17 @@ public class OrderServiceImpl implements OrderService {
             switch (compensation.getType()) {
                 case STOCK_RESTORE -> {
                     String detail = compensation.getDetail();
-                    long productId = extractProductIdFromDetail(detail);
                     int quantity = extractQuantityFromDetail(detail);
-                    if (productId > 0 && quantity > 0) {
-                        productRepository.restoreStock(productId, quantity);
+                    if (detail != null && detail.startsWith("[VARIANT]")) {
+                        long variantId = extractVariantIdFromDetail(detail);
+                        if (variantId > 0 && quantity > 0) {
+                            variantRepository.restoreStock(variantId, quantity);
+                        }
+                    } else {
+                        long productId = extractProductIdFromDetail(detail);
+                        if (productId > 0 && quantity > 0) {
+                            productRepository.restoreStock(productId, quantity);
+                        }
                     }
                 }
                 case PAYMENT_CANCEL -> {
@@ -386,7 +466,7 @@ public class OrderServiceImpl implements OrderService {
         compensationRepository.save(compensation);
     }
 
-    private void scheduleStockCompensation(Order order, List<long[]> decrementedProducts) {
+    private void scheduleStockCompensation(Order order, List<long[]> decrementedProducts, List<long[]> decrementedVariants) {
         for (long[] entry : decrementedProducts) {
             try {
                 productRepository.restoreStock(entry[0], (int) entry[1]);
@@ -399,15 +479,42 @@ public class OrderServiceImpl implements OrderService {
                         "Restore " + entry[1] + " units for product " + entry[0], CompensationStatus.FAILED, e.getMessage());
             }
         }
+        for (long[] entry : decrementedVariants) {
+            try {
+                variantRepository.restoreStock(entry[0], (int) entry[1]);
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        "[VARIANT] Restored " + entry[1] + " units for variant " + entry[0], CompensationStatus.COMPLETED);
+            } catch (Exception e) {
+                log.error("Inline stock compensation failed for variant {} on order {}: {}",
+                        entry[0], order.getId(), e.getMessage());
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        "[VARIANT] Restore " + entry[1] + " units for variant " + entry[0], CompensationStatus.FAILED, e.getMessage());
+            }
+        }
     }
 
-    private void safeRestoreStock(List<long[]> decrementedProducts) {
+    private void safeRestoreAll(List<long[]> decrementedProducts, List<long[]> decrementedVariants) {
         for (long[] entry : decrementedProducts) {
             try {
                 productRepository.restoreStock(entry[0], (int) entry[1]);
             } catch (Exception e) {
                 log.error("Emergency stock restore failed for product {}: {}", entry[0], e.getMessage());
             }
+        }
+        for (long[] entry : decrementedVariants) {
+            try {
+                variantRepository.restoreStock(entry[0], (int) entry[1]);
+            } catch (Exception e) {
+                log.error("Emergency stock restore failed for variant {}: {}", entry[0], e.getMessage());
+            }
+        }
+    }
+
+    private void restoreItemStock(OrderItem item) {
+        if (item.getVariant() != null) {
+            variantRepository.restoreStock(item.getVariant().getId(), item.getQuantity());
+        } else {
+            productRepository.restoreStock(item.getProduct().getId(), item.getQuantity());
         }
     }
 
@@ -427,6 +534,32 @@ public class OrderServiceImpl implements OrderService {
             comp.setCompletedAt(Instant.now());
         }
         compensationRepository.save(comp);
+    }
+
+    private void acquireVariantLocks(List<Long> sortedVariantIds, String lockToken, List<String> acquiredLocks) {
+        for (Long variantId : sortedVariantIds) {
+            String lockKey = VARIANT_LOCK_PREFIX + variantId;
+            boolean acquired = false;
+
+            for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
+                if (cacheService.tryLock(lockKey, lockToken, LOCK_TTL_SECONDS)) {
+                    acquiredLocks.add(lockKey);
+                    acquired = true;
+                    break;
+                }
+                try {
+                    Thread.sleep(LOCK_RETRY_DELAY_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new ConflictException("Order processing interrupted, please try again");
+                }
+            }
+
+            if (!acquired) {
+                releaseLocks(acquiredLocks, lockToken);
+                throw new ConflictException("Variant is currently being purchased by another user, please try again shortly");
+            }
+        }
     }
 
     private void acquireLocks(List<Long> sortedProductIds, String lockToken, List<String> acquiredLocks) {
@@ -468,6 +601,21 @@ public class OrderServiceImpl implements OrderService {
     private static long extractProductIdFromDetail(String detail) {
         try {
             int idx = detail.lastIndexOf("product ");
+            if (idx >= 0) return Long.parseLong(detail.substring(idx + 8).trim());
+        } catch (Exception ignored) {}
+        return -1;
+    }
+
+    private static String buildVariantTitle(ProductVariant variant) {
+        String title = java.util.stream.Stream.of(variant.getOption1(), variant.getOption2(), variant.getOption3())
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.joining(" / "));
+        return title.isBlank() ? null : title;
+    }
+
+    private static long extractVariantIdFromDetail(String detail) {
+        try {
+            int idx = detail.lastIndexOf("variant ");
             if (idx >= 0) return Long.parseLong(detail.substring(idx + 8).trim());
         } catch (Exception ignored) {}
         return -1;
@@ -534,6 +682,9 @@ public class OrderServiceImpl implements OrderService {
                         item.getId(),
                         item.getProduct().getId(),
                         item.getProductName(),
+                        item.getVariant() != null ? item.getVariant().getId() : null,
+                        item.getVariantTitle(),
+                        item.getVariantSku(),
                         item.getQuantity(),
                         item.getUnitPrice()))
                 .toList();
@@ -554,6 +705,9 @@ public class OrderServiceImpl implements OrderService {
                         item.getId(),
                         item.getProduct().getId(),
                         item.getProductName(),
+                        item.getVariant() != null ? item.getVariant().getId() : null,
+                        item.getVariantTitle(),
+                        item.getVariantSku(),
                         item.getQuantity(),
                         item.getUnitPrice()
                 ))

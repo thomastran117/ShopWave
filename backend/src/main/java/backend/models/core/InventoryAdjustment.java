@@ -32,6 +32,10 @@ public class InventoryAdjustment {
     private Product product;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "variant_id", nullable = true)
+    private ProductVariant variant;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
     @JoinColumn(name = "user_id", nullable = true)
     private User adjustedBy;
 
