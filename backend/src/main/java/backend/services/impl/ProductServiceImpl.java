@@ -141,6 +141,9 @@ public class ProductServiceImpl implements ProductService {
         Product product = productRepository.findByIdAndCompanyId(productId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
 
+        ProductStatus originalStatus = product.getStatus();
+        boolean originalListed = product.isListed();
+
         if (request.getSku() != null && !request.getSku().equals(product.getSku())) {
             if (productRepository.existsBySkuAndCompanyId(request.getSku(), companyId)) {
                 throw new ConflictException("A product with this SKU already exists in this company");
@@ -164,6 +167,13 @@ public class ProductServiceImpl implements ProductService {
         if (request.getFeatured() != null) product.setFeatured(request.getFeatured());
         if (request.getPurchasable() != null) product.setPurchasable(request.getPurchasable());
         if (request.getListed() != null) product.setListed(request.getListed());
+
+        boolean activating = request.getStatus() == ProductStatus.ACTIVE && originalStatus != ProductStatus.ACTIVE;
+        boolean listing    = Boolean.TRUE.equals(request.getListed()) && !originalListed;
+
+        if ((activating || listing) && productImageRepository.countByProductId(productId) < 1) {
+            throw new BadRequestException("Product must have at least one image before it can be made active or listed");
+        }
 
         return toResponse(productRepository.save(product));
     }
@@ -264,7 +274,14 @@ public class ProductServiceImpl implements ProductService {
         image.setImageUrl(request.getImageUrl());
         image.setDisplayOrder(currentCount);
 
-        return toImageResponse(productImageRepository.save(image));
+        ProductImage saved = productImageRepository.save(image);
+
+        if (currentCount == 0) {
+            product.setThumbnailUrl(saved.getImageUrl());
+            productRepository.save(product);
+        }
+
+        return toImageResponse(saved);
     }
 
     @Override
@@ -273,13 +290,17 @@ public class ProductServiceImpl implements ProductService {
         companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
 
-        productRepository.findByIdAndCompanyId(productId, companyId)
+        Product product = productRepository.findByIdAndCompanyId(productId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
 
         ProductImage image = productImageRepository.findByIdAndProductId(imageId, productId)
                 .orElseThrow(() -> new ResourceNotFoundException("Image not found with id: " + imageId));
 
         productImageRepository.delete(image);
+
+        List<ProductImage> remaining = productImageRepository.findAllByProductIdOrderByDisplayOrderAsc(productId);
+        product.setThumbnailUrl(remaining.isEmpty() ? null : remaining.get(0).getImageUrl());
+        productRepository.save(product);
     }
 
     @Override
@@ -288,7 +309,7 @@ public class ProductServiceImpl implements ProductService {
         companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
 
-        productRepository.findByIdAndCompanyId(productId, companyId)
+        Product product = productRepository.findByIdAndCompanyId(productId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
 
         List<ProductImage> existing = productImageRepository.findAllByProductIdOrderByDisplayOrderAsc(productId);
@@ -316,8 +337,14 @@ public class ProductServiceImpl implements ProductService {
 
         productImageRepository.saveAll(existing);
 
-        return existing.stream()
+        List<ProductImage> reordered = existing.stream()
                 .sorted(java.util.Comparator.comparingInt(ProductImage::getDisplayOrder))
+                .toList();
+
+        product.setThumbnailUrl(reordered.get(0).getImageUrl());
+        productRepository.save(product);
+
+        return reordered.stream()
                 .map(this::toImageResponse)
                 .toList();
     }
