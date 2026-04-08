@@ -9,6 +9,7 @@ import backend.annotations.requireAuth.RequireAuth;
 import backend.dtos.requests.inventory.AdjustStockRequest;
 import backend.dtos.requests.inventory.BulkAdjustRequest;
 import backend.dtos.requests.inventory.UpdateInventorySettingsRequest;
+import backend.dtos.responses.general.CursorPagedResponse;
 import backend.dtos.responses.general.PagedResponse;
 import backend.dtos.responses.inventory.AdjustmentResponse;
 import backend.dtos.responses.inventory.InventoryItemResponse;
@@ -43,7 +44,7 @@ public class InventoryController {
     }
 
     @GetMapping
-    public ResponseEntity<PagedResponse<InventoryItemResponse>> getInventory(
+    public ResponseEntity<CursorPagedResponse<InventoryItemResponse>> getInventory(
             @PathVariable long companyId,
             @RequestParam(required = false) String q,
             @RequestParam(required = false) String stockStatus,
@@ -52,15 +53,13 @@ public class InventoryController {
             @RequestParam(required = false) ProductStatus status,
             @RequestParam(required = false) Integer minStock,
             @RequestParam(required = false) Integer maxStock,
-            @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size,
-            @RequestParam(defaultValue = "updatedAt") String sort,
-            @RequestParam(defaultValue = "desc") String direction) {
+            @RequestParam(required = false) String cursor,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size) {
         try {
             long userId = resolveUserId();
             return ResponseEntity.ok(inventoryService.getInventory(
                     companyId, userId, stockStatus, q, category, brand, status, minStock, maxStock,
-                    page, size, sort, direction));
+                    cursor, size));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {

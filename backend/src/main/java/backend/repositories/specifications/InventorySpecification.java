@@ -6,6 +6,7 @@ import org.springframework.data.jpa.domain.Specification;
 import backend.models.core.Product;
 import backend.models.enums.ProductStatus;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -15,14 +16,7 @@ public class InventorySpecification {
 
     /**
      * Builds a dynamic specification for inventory list/search queries.
-     *
-     * @param stockStatus ALL | IN_STOCK | LOW_STOCK | OUT_OF_STOCK | UNTRACKED
-     * @param q           free-text search on name and sku (case-insensitive LIKE)
-     * @param category    exact match on category (case-insensitive)
-     * @param brand       exact match on brand (case-insensitive)
-     * @param status      ProductStatus enum filter (ACTIVE, DRAFT, ARCHIVED)
-     * @param minStock    inclusive lower bound on stock (ignored when null)
-     * @param maxStock    inclusive upper bound on stock (ignored when null)
+     * Delegates to the cursor-aware overload with null cursor values (first page).
      */
     public static Specification<Product> withFilters(
             long companyId,
@@ -33,6 +27,26 @@ public class InventorySpecification {
             ProductStatus status,
             Integer minStock,
             Integer maxStock) {
+
+        return withFilters(companyId, stockStatus, q, category, brand, status, minStock, maxStock, null, null);
+    }
+
+    /**
+     * Cursor-aware overload. When {@code cursorUpdatedAt} and {@code cursorId} are non-null,
+     * appends a keyset predicate for {@code (updatedAt DESC, id DESC)} pagination:
+     * {@code (updatedAt < cursorUpdatedAt) OR (updatedAt = cursorUpdatedAt AND id < cursorId)}.
+     */
+    public static Specification<Product> withFilters(
+            long companyId,
+            String stockStatus,
+            String q,
+            String category,
+            String brand,
+            ProductStatus status,
+            Integer minStock,
+            Integer maxStock,
+            Instant cursorUpdatedAt,
+            Long cursorId) {
 
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
@@ -87,6 +101,15 @@ public class InventorySpecification {
                 predicates.add(cb.and(
                         cb.isNotNull(root.get("stock")),
                         cb.lessThanOrEqualTo(root.get("stock"), maxStock)));
+            }
+
+            if (cursorUpdatedAt != null && cursorId != null) {
+                Predicate beforeTime = cb.lessThan(root.get("updatedAt"), cursorUpdatedAt);
+                Predicate sameTimeEarlierId = cb.and(
+                        cb.equal(root.get("updatedAt"), cursorUpdatedAt),
+                        cb.lessThan(root.get("id"), cursorId)
+                );
+                predicates.add(cb.or(beforeTime, sameTimeEarlierId));
             }
 
             return cb.and(predicates.toArray(new Predicate[0]));

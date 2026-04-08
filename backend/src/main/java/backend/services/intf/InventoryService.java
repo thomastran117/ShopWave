@@ -4,6 +4,7 @@ import backend.dtos.requests.inventory.AdjustStockRequest;
 import backend.models.enums.ProductStatus;
 import backend.dtos.requests.inventory.BulkAdjustRequest;
 import backend.dtos.requests.inventory.UpdateInventorySettingsRequest;
+import backend.dtos.responses.general.CursorPagedResponse;
 import backend.dtos.responses.general.PagedResponse;
 import backend.dtos.responses.inventory.AdjustmentResponse;
 import backend.dtos.responses.inventory.InventoryItemResponse;
@@ -15,12 +16,12 @@ import java.util.List;
 
 public interface InventoryService {
 
-    PagedResponse<InventoryItemResponse> getInventory(
+    CursorPagedResponse<InventoryItemResponse> getInventory(
             long companyId, long ownerId,
             String stockStatus, String q,
             String category, String brand,
             ProductStatus status, Integer minStock, Integer maxStock,
-            int page, int size, String sort, String direction);
+            String cursor, int size);
 
     InventorySummaryResponse getSummary(long companyId, long ownerId);
 

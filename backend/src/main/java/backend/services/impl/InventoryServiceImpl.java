@@ -12,6 +12,7 @@ import backend.dtos.requests.inventory.AdjustStockRequest;
 import backend.dtos.requests.inventory.BulkAdjustItem;
 import backend.dtos.requests.inventory.BulkAdjustRequest;
 import backend.dtos.requests.inventory.UpdateInventorySettingsRequest;
+import backend.dtos.responses.general.CursorPagedResponse;
 import backend.dtos.responses.general.PagedResponse;
 import backend.dtos.responses.inventory.AdjustmentResponse;
 import backend.dtos.responses.inventory.InventoryItemResponse;
@@ -35,8 +36,10 @@ import backend.services.intf.CacheService;
 import backend.services.intf.InventoryService;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -55,8 +58,6 @@ public class InventoryServiceImpl implements InventoryService {
     private static final long LOCK_TTL_SECONDS = 10;
     private static final int LOCK_RETRY_ATTEMPTS = 5;
     private static final long LOCK_RETRY_DELAY_MS = 100;
-
-    private static final Set<String> SORTABLE_FIELDS = Set.of("name", "price", "stock", "updatedAt");
 
     private final ProductRepository productRepository;
     private final CompanyRepository companyRepository;
@@ -78,27 +79,52 @@ public class InventoryServiceImpl implements InventoryService {
     }
 
     @Override
-    public PagedResponse<InventoryItemResponse> getInventory(
+    public CursorPagedResponse<InventoryItemResponse> getInventory(
             long companyId, long ownerId,
             String stockStatus, String q,
             String category, String brand,
             ProductStatus status, Integer minStock, Integer maxStock,
-            int page, int size, String sort, String direction) {
+            String cursor, int size) {
 
         assertCompanyOwnership(companyId, ownerId);
 
         if (size > 50) size = 50;
 
-        String sortField = (sort != null && SORTABLE_FIELDS.contains(sort)) ? sort : "updatedAt";
-        Sort.Direction sortDir = "asc".equalsIgnoreCase(direction) ? Sort.Direction.ASC : Sort.Direction.DESC;
-        Pageable pageable = PageRequest.of(page, size, Sort.by(sortDir, sortField));
+        Instant cursorUpdatedAt = null;
+        Long cursorId = null;
 
-        return new PagedResponse<>(
-                productRepository
-                        .findAll(InventorySpecification.withFilters(
-                                companyId, stockStatus, q, category, brand, status, minStock, maxStock), pageable)
-                        .map(this::toInventoryItemResponse)
-        );
+        if (cursor != null && !cursor.isBlank()) {
+            try {
+                byte[] decoded = Base64.getDecoder().decode(cursor);
+                String[] parts = new String(decoded, StandardCharsets.UTF_8).split(":", 2);
+                cursorUpdatedAt = Instant.ofEpochMilli(Long.parseLong(parts[0]));
+                cursorId = Long.parseLong(parts[1]);
+            } catch (Exception e) {
+                throw new BadRequestException("Invalid cursor");
+            }
+        }
+
+        // Always sort updatedAt DESC, id DESC for stable keyset pagination.
+        // Fetch one extra to detect whether another page exists.
+        Pageable pageable = PageRequest.of(0, size + 1,
+                Sort.by(Sort.Direction.DESC, "updatedAt").and(Sort.by(Sort.Direction.DESC, "id")));
+
+        List<Product> results = productRepository.findAll(
+                InventorySpecification.withFilters(
+                        companyId, stockStatus, q, category, brand, status, minStock, maxStock,
+                        cursorUpdatedAt, cursorId),
+                pageable).getContent();
+
+        boolean hasMore = results.size() > size;
+        List<Product> page = hasMore ? results.subList(0, size) : results;
+
+        String nextCursor = hasMore ? encodeCursor(page.get(page.size() - 1)) : null;
+
+        List<InventoryItemResponse> items = page.stream()
+                .map(this::toInventoryItemResponse)
+                .toList();
+
+        return new CursorPagedResponse<>(items, nextCursor, hasMore, items.size());
     }
 
     @Override
@@ -353,6 +379,13 @@ public class InventoryServiceImpl implements InventoryService {
                 .stream()
                 .map(this::toSalesMetricResponse)
                 .toList();
+    }
+
+    // --- Cursor helpers ---
+
+    private static String encodeCursor(Product p) {
+        String raw = p.getUpdatedAt().toEpochMilli() + ":" + p.getId();
+        return Base64.getEncoder().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 
     // --- Lock helpers (mirrors OrderServiceImpl — same lock namespace) ---

@@ -11,10 +11,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import backend.dtos.requests.order.CreateOrderRequest;
 import backend.dtos.responses.general.PagedResponse;
+import backend.dtos.responses.order.CompanyOrderResponse;
 import backend.dtos.responses.order.OrderItemResponse;
 import backend.dtos.responses.order.OrderResponse;
 import backend.exceptions.http.BadRequestException;
 import backend.exceptions.http.ConflictException;
+import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
 import backend.models.core.Order;
 import backend.models.core.OrderCompensation;
@@ -25,6 +27,7 @@ import backend.models.enums.CompensationStatus;
 import backend.models.enums.CompensationType;
 import backend.models.enums.OrderStatus;
 import backend.models.enums.ProductStatus;
+import backend.repositories.CompanyRepository;
 import backend.repositories.OrderCompensationRepository;
 import backend.repositories.OrderRepository;
 import backend.repositories.ProductRepository;
@@ -54,6 +57,7 @@ public class OrderServiceImpl implements OrderService {
     private final OrderCompensationRepository compensationRepository;
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
+    private final CompanyRepository companyRepository;
     private final PaymentService paymentService;
     private final CacheService cacheService;
 
@@ -62,12 +66,14 @@ public class OrderServiceImpl implements OrderService {
             OrderCompensationRepository compensationRepository,
             ProductRepository productRepository,
             UserRepository userRepository,
+            CompanyRepository companyRepository,
             PaymentService paymentService,
             CacheService cacheService) {
         this.orderRepository = orderRepository;
         this.compensationRepository = compensationRepository;
         this.productRepository = productRepository;
         this.userRepository = userRepository;
+        this.companyRepository = companyRepository;
         this.paymentService = paymentService;
         this.cacheService = cacheService;
     }
@@ -483,6 +489,63 @@ public class OrderServiceImpl implements OrderService {
         idx = detail.lastIndexOf("intent: ");
         if (idx >= 0) return detail.substring(idx + 8).trim();
         return null;
+    }
+
+    @Override
+    public PagedResponse<CompanyOrderResponse> getCompanyOrders(long companyId, long ownerId, OrderStatus status, int page, int size) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        if (size > 50) size = 50;
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+
+        if (status != null) {
+            return new PagedResponse<>(
+                    orderRepository.findAllByProductCompanyIdAndStatus(companyId, status, pageable)
+                            .map(o -> toCompanyOrderResponse(o, companyId)));
+        }
+        return new PagedResponse<>(
+                orderRepository.findAllByProductCompanyId(companyId, pageable)
+                        .map(o -> toCompanyOrderResponse(o, companyId)));
+    }
+
+    @Override
+    public CompanyOrderResponse getCompanyOrder(long companyId, long orderId, long ownerId) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+
+        return toCompanyOrderResponse(order, companyId);
+    }
+
+    private CompanyOrderResponse toCompanyOrderResponse(Order order, long companyId) {
+        List<OrderItem> companyItems = order.getItems().stream()
+                .filter(item -> item.getProduct().getCompany().getId() == companyId)
+                .toList();
+
+        BigDecimal total = companyItems.stream()
+                .map(item -> item.getUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        List<OrderItemResponse> itemResponses = companyItems.stream()
+                .map(item -> new OrderItemResponse(
+                        item.getId(),
+                        item.getProduct().getId(),
+                        item.getProductName(),
+                        item.getQuantity(),
+                        item.getUnitPrice()))
+                .toList();
+
+        return new CompanyOrderResponse(
+                order.getId(),
+                order.getUser().getId(),
+                order.getStatus().name(),
+                order.getCurrency(),
+                total,
+                itemResponses,
+                order.getCreatedAt());
     }
 
     private OrderResponse toResponse(Order order) {

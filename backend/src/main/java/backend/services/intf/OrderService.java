@@ -2,6 +2,7 @@ package backend.services.intf;
 
 import backend.dtos.requests.order.CreateOrderRequest;
 import backend.dtos.responses.general.PagedResponse;
+import backend.dtos.responses.order.CompanyOrderResponse;
 import backend.dtos.responses.order.OrderResponse;
 import backend.models.enums.OrderStatus;
 
@@ -12,4 +13,6 @@ public interface OrderService {
     OrderResponse cancelOrder(long orderId, long userId);
     void handlePaymentSuccess(String paymentIntentId);
     void handlePaymentFailure(String paymentIntentId);
+    PagedResponse<CompanyOrderResponse> getCompanyOrders(long companyId, long ownerId, OrderStatus status, int page, int size);
+    CompanyOrderResponse getCompanyOrder(long companyId, long orderId, long ownerId);
 }
