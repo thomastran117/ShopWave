@@ -7,11 +7,14 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import backend.annotations.requireAuth.RequireAuth;
+import backend.dtos.requests.product.AddProductImageRequest;
 import backend.dtos.requests.product.BatchCreateProductsRequest;
 import backend.dtos.requests.product.BatchDeleteProductsRequest;
 import backend.dtos.requests.product.CreateProductRequest;
+import backend.dtos.requests.product.ReorderProductImagesRequest;
 import backend.dtos.requests.product.UpdateProductRequest;
 import backend.dtos.responses.general.PagedResponse;
+import backend.dtos.responses.product.ProductImageResponse;
 import backend.dtos.responses.product.ProductResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.exceptions.http.InternalServerErrorException;
@@ -157,6 +160,69 @@ public class ProductController {
             long userId = resolveUserId();
             productService.deleteProduct(companyId, id, userId);
             return ResponseEntity.noContent().build();
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @GetMapping("/{productId}/images")
+    public ResponseEntity<List<ProductImageResponse>> getProductImages(
+            @PathVariable long companyId,
+            @PathVariable long productId) {
+        try {
+            return ResponseEntity.ok(productService.getProductImages(companyId, productId));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/{productId}/images")
+    @RequireAuth
+    public ResponseEntity<ProductImageResponse> addProductImage(
+            @PathVariable long companyId,
+            @PathVariable long productId,
+            @Valid @RequestBody AddProductImageRequest request) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(productService.addProductImage(companyId, productId, userId, request));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @DeleteMapping("/{productId}/images/{imageId}")
+    @RequireAuth
+    public ResponseEntity<Void> deleteProductImage(
+            @PathVariable long companyId,
+            @PathVariable long productId,
+            @PathVariable long imageId) {
+        try {
+            long userId = resolveUserId();
+            productService.deleteProductImage(companyId, productId, imageId, userId);
+            return ResponseEntity.noContent().build();
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PatchMapping("/{productId}/images/reorder")
+    @RequireAuth
+    public ResponseEntity<List<ProductImageResponse>> reorderProductImages(
+            @PathVariable long companyId,
+            @PathVariable long productId,
+            @Valid @RequestBody ReorderProductImagesRequest request) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(productService.reorderProductImages(companyId, productId, userId, request));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {

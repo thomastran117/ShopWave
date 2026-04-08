@@ -6,24 +6,31 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import backend.dtos.requests.product.AddProductImageRequest;
 import backend.dtos.requests.product.BatchCreateProductsRequest;
 import backend.dtos.requests.product.BatchDeleteProductsRequest;
 import backend.dtos.requests.product.CreateProductRequest;
+import backend.dtos.requests.product.ReorderProductImagesRequest;
 import backend.dtos.requests.product.UpdateProductRequest;
 import backend.dtos.responses.general.PagedResponse;
+import backend.dtos.responses.product.ProductImageResponse;
 import backend.dtos.responses.product.ProductResponse;
+import backend.exceptions.http.BadRequestException;
 import backend.exceptions.http.ConflictException;
 import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
 import backend.models.core.Company;
 import backend.models.core.Product;
+import backend.models.core.ProductImage;
 import backend.models.enums.ProductStatus;
 import backend.repositories.CompanyRepository;
+import backend.repositories.ProductImageRepository;
 import backend.repositories.ProductRepository;
 import backend.repositories.specifications.ProductSpecification;
 import backend.services.intf.ProductService;
 
 import java.math.BigDecimal;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -34,10 +41,15 @@ public class ProductServiceImpl implements ProductService {
 
     private final ProductRepository productRepository;
     private final CompanyRepository companyRepository;
+    private final ProductImageRepository productImageRepository;
 
-    public ProductServiceImpl(ProductRepository productRepository, CompanyRepository companyRepository) {
+    public ProductServiceImpl(
+            ProductRepository productRepository,
+            CompanyRepository companyRepository,
+            ProductImageRepository productImageRepository) {
         this.productRepository = productRepository;
         this.companyRepository = companyRepository;
+        this.productImageRepository = productImageRepository;
     }
 
     @Override
@@ -222,13 +234,109 @@ public class ProductServiceImpl implements ProductService {
         productRepository.deleteAll(products);
     }
 
+    @Override
+    public List<ProductImageResponse> getProductImages(long companyId, long productId) {
+        productRepository.findByIdAndCompanyId(productId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
+
+        return productImageRepository.findAllByProductIdOrderByDisplayOrderAsc(productId)
+                .stream()
+                .map(this::toImageResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public ProductImageResponse addProductImage(long companyId, long productId, long ownerId, AddProductImageRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Product product = productRepository.findByIdAndCompanyId(productId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
+
+        int currentCount = productImageRepository.countByProductId(productId);
+        if (currentCount >= 5) {
+            throw new BadRequestException("Product already has the maximum of 5 images");
+        }
+
+        ProductImage image = new ProductImage();
+        image.setProduct(product);
+        image.setImageUrl(request.getImageUrl());
+        image.setDisplayOrder(currentCount);
+
+        return toImageResponse(productImageRepository.save(image));
+    }
+
+    @Override
+    @Transactional
+    public void deleteProductImage(long companyId, long productId, long imageId, long ownerId) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        productRepository.findByIdAndCompanyId(productId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
+
+        ProductImage image = productImageRepository.findByIdAndProductId(imageId, productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Image not found with id: " + imageId));
+
+        productImageRepository.delete(image);
+    }
+
+    @Override
+    @Transactional
+    public List<ProductImageResponse> reorderProductImages(long companyId, long productId, long ownerId, ReorderProductImagesRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        productRepository.findByIdAndCompanyId(productId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
+
+        List<ProductImage> existing = productImageRepository.findAllByProductIdOrderByDisplayOrderAsc(productId);
+        List<Long> requestedIds = request.getImageIds();
+
+        if (requestedIds.size() != existing.size()) {
+            throw new BadRequestException("imageIds must contain all " + existing.size() + " image(s) for this product");
+        }
+
+        Set<Long> existingIds = new HashSet<>();
+        for (ProductImage img : existing) existingIds.add(img.getId());
+
+        for (Long id : requestedIds) {
+            if (!existingIds.contains(id)) {
+                throw new BadRequestException("Image id " + id + " does not belong to this product");
+            }
+        }
+
+        java.util.Map<Long, ProductImage> imageMap = new java.util.HashMap<>();
+        for (ProductImage img : existing) imageMap.put(img.getId(), img);
+
+        for (int i = 0; i < requestedIds.size(); i++) {
+            imageMap.get(requestedIds.get(i)).setDisplayOrder(i);
+        }
+
+        productImageRepository.saveAll(existing);
+
+        return existing.stream()
+                .sorted(java.util.Comparator.comparingInt(ProductImage::getDisplayOrder))
+                .map(this::toImageResponse)
+                .toList();
+    }
+
     private void assertCompanyExists(long companyId) {
         if (!companyRepository.existsById(companyId)) {
             throw new ResourceNotFoundException("Company not found with id: " + companyId);
         }
     }
 
+    private ProductImageResponse toImageResponse(ProductImage img) {
+        return new ProductImageResponse(img.getId(), img.getImageUrl(), img.getDisplayOrder(), img.getCreatedAt());
+    }
+
     private ProductResponse toResponse(Product product) {
+        List<ProductImageResponse> images = product.getImages().stream()
+                .map(this::toImageResponse)
+                .toList();
+
         return new ProductResponse(
                 product.getId(),
                 product.getCompany().getId(),
@@ -242,6 +350,7 @@ public class ProductServiceImpl implements ProductService {
                 product.getBrand(),
                 product.getTags(),
                 product.getThumbnailUrl(),
+                images,
                 product.getStock(),
                 product.getLowStockThreshold(),
                 product.getWeight(),

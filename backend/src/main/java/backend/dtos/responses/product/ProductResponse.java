@@ -5,6 +5,7 @@ import lombok.Getter;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 
 @Getter
 @AllArgsConstructor
@@ -21,6 +22,7 @@ public class ProductResponse {
     private String brand;
     private String tags;
     private String thumbnailUrl;
+    private List<ProductImageResponse> images;
     private Integer stock;
     private Integer lowStockThreshold;
     private BigDecimal weight;
