@@ -18,6 +18,7 @@ import backend.exceptions.http.BadRequestException;
 import backend.exceptions.http.ConflictException;
 import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
+import backend.models.core.InventoryAdjustment;
 import backend.models.core.LocationStock;
 import backend.models.core.Order;
 import backend.models.core.OrderCompensation;
@@ -25,11 +26,13 @@ import backend.models.core.OrderItem;
 import backend.models.core.Product;
 import backend.models.core.ProductVariant;
 import backend.models.core.User;
+import backend.models.enums.AdjustmentReason;
 import backend.models.enums.CompensationStatus;
 import backend.models.enums.CompensationType;
 import backend.models.enums.OrderStatus;
 import backend.models.enums.ProductStatus;
 import backend.repositories.CompanyRepository;
+import backend.repositories.InventoryAdjustmentRepository;
 import backend.repositories.LocationStockRepository;
 import backend.repositories.OrderCompensationRepository;
 import backend.repositories.OrderRepository;
@@ -63,6 +66,7 @@ public class OrderServiceImpl implements OrderService {
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
     private final LocationStockRepository locationStockRepository;
+    private final InventoryAdjustmentRepository adjustmentRepository;
     private final UserRepository userRepository;
     private final CompanyRepository companyRepository;
     private final PaymentService paymentService;
@@ -74,6 +78,7 @@ public class OrderServiceImpl implements OrderService {
             ProductRepository productRepository,
             ProductVariantRepository variantRepository,
             LocationStockRepository locationStockRepository,
+            InventoryAdjustmentRepository adjustmentRepository,
             UserRepository userRepository,
             CompanyRepository companyRepository,
             PaymentService paymentService,
@@ -83,6 +88,7 @@ public class OrderServiceImpl implements OrderService {
         this.productRepository = productRepository;
         this.variantRepository = variantRepository;
         this.locationStockRepository = locationStockRepository;
+        this.adjustmentRepository = adjustmentRepository;
         this.userRepository = userRepository;
         this.companyRepository = companyRepository;
         this.paymentService = paymentService;
@@ -119,6 +125,9 @@ public class OrderServiceImpl implements OrderService {
         List<long[]> decrementedProducts = new ArrayList<>();
         List<long[]> decrementedVariants = new ArrayList<>();
         List<long[]> decrementedLocationStocks = new ArrayList<>();
+        // [product, variant (null for product-level), prevStock, newStock]
+        record PurchaseRecord(Product prod, ProductVariant var, int prevStock, int newStock) {}
+        List<PurchaseRecord> purchaseRecords = new ArrayList<>();
 
         try {
             acquireLocks(productIds, lockToken, acquiredLocks);
@@ -172,12 +181,14 @@ public class OrderServiceImpl implements OrderService {
                         throw new BadRequestException("Variant is not available for purchase");
                     }
 
+                    int prevVariantStock = variant.getStock() != null ? variant.getStock() : 0;
                     int updated = variantRepository.decrementStock(variantId, qty);
                     if (updated == 0) {
                         safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
                         throw new ConflictException("Insufficient stock for variant of product '" + product.getName() + "'");
                     }
                     decrementedVariants.add(new long[]{variantId, qty});
+                    purchaseRecords.add(new PurchaseRecord(product, variant, prevVariantStock, prevVariantStock - qty));
 
                     item.setVariant(variant);
                     item.setVariantTitle(buildVariantTitle(variant));
@@ -185,12 +196,14 @@ public class OrderServiceImpl implements OrderService {
                     item.setUnitPrice(variant.getPrice());
                     totalAmount = totalAmount.add(variant.getPrice().multiply(BigDecimal.valueOf(qty)));
                 } else {
+                    int prevProductStock = product.getStock() != null ? product.getStock() : 0;
                     int updated = productRepository.decrementStock(product.getId(), qty);
                     if (updated == 0) {
                         safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
                         throw new ConflictException("Insufficient stock for product '" + product.getName() + "'");
                     }
                     decrementedProducts.add(new long[]{product.getId(), qty});
+                    purchaseRecords.add(new PurchaseRecord(product, null, prevProductStock, prevProductStock - qty));
 
                     item.setUnitPrice(product.getPrice());
                     totalAmount = totalAmount.add(product.getPrice().multiply(BigDecimal.valueOf(qty)));
@@ -237,6 +250,23 @@ public class OrderServiceImpl implements OrderService {
             order.setItems(orderItems);
 
             order = orderRepository.save(order);
+
+            // Record PURCHASE adjustments — order is now persisted so orderId is set.
+            // previousStock is captured from the in-memory entity while the lock is held: no race condition.
+            List<InventoryAdjustment> purchaseAdjs = new ArrayList<>();
+            for (PurchaseRecord pr : purchaseRecords) {
+                InventoryAdjustment adj = new InventoryAdjustment();
+                adj.setProduct(pr.prod());
+                adj.setVariant(pr.var());
+                adj.setDelta(pr.newStock() - pr.prevStock()); // negative (e.g. -3)
+                adj.setPreviousStock(pr.prevStock());
+                adj.setNewStock(pr.newStock());
+                adj.setReason(AdjustmentReason.PURCHASE);
+                adj.setNote("Order #" + order.getId());
+                adj.setOrderId(order.getId());
+                purchaseAdjs.add(adj);
+            }
+            adjustmentRepository.saveAll(purchaseAdjs);
 
             PaymentIntentResult paymentIntent;
             try {
@@ -321,6 +351,7 @@ public class OrderServiceImpl implements OrderService {
         for (OrderItem item : order.getItems()) {
             try {
                 restoreItemStock(item);
+                recordCancelAdjustment(item, order.getId());
                 if (item.getVariant() != null) {
                     recordCompensation(order, CompensationType.STOCK_RESTORE,
                             "[VARIANT] Restored " + item.getQuantity() + " units for variant " + item.getVariant().getId(), CompensationStatus.COMPLETED);
@@ -365,6 +396,7 @@ public class OrderServiceImpl implements OrderService {
             for (OrderItem item : order.getItems()) {
                 try {
                     restoreItemStock(item);
+                    recordCancelAdjustment(item, order.getId());
                     if (item.getVariant() != null) {
                         recordCompensation(order, CompensationType.STOCK_RESTORE,
                                 "[VARIANT] Restored " + item.getQuantity() + " units for variant " + item.getVariant().getId(), CompensationStatus.COMPLETED);
@@ -403,6 +435,7 @@ public class OrderServiceImpl implements OrderService {
         for (OrderItem item : order.getItems()) {
             try {
                 restoreItemStock(item);
+                recordCancelAdjustment(item, order.getId());
                 if (item.getVariant() != null) {
                     recordCompensation(order, CompensationType.STOCK_RESTORE,
                             "[VARIANT] Restored " + item.getQuantity() + " units for variant " + item.getVariant().getId(), CompensationStatus.COMPLETED);
@@ -593,6 +626,28 @@ public class OrderServiceImpl implements OrderService {
             comp.setCompletedAt(Instant.now());
         }
         compensationRepository.save(comp);
+    }
+
+    /**
+     * Records an ORDER_CANCELLED adjustment for a single order item after stock has been restored.
+     * previousStock/newStock are set to 0 — the restore is atomic and reading before it would be a
+     * TOCTOU race. The delta (+qty) and orderId are the authoritative audit values.
+     */
+    private void recordCancelAdjustment(OrderItem item, long orderId) {
+        try {
+            InventoryAdjustment adj = new InventoryAdjustment();
+            adj.setProduct(item.getProduct());
+            adj.setVariant(item.getVariant());
+            adj.setDelta(item.getQuantity()); // positive = stock returned
+            adj.setPreviousStock(0);
+            adj.setNewStock(0);
+            adj.setReason(AdjustmentReason.ORDER_CANCELLED);
+            adj.setNote("Order #" + orderId + " cancelled/failed");
+            adj.setOrderId(orderId);
+            adjustmentRepository.save(adj);
+        } catch (Exception e) {
+            log.warn("Failed to record cancel adjustment for order {}: {}", orderId, e.getMessage());
+        }
     }
 
     private void acquireVariantLocks(List<Long> sortedVariantIds, String lockToken, List<String> acquiredLocks) {

@@ -33,6 +33,8 @@ import backend.repositories.InventoryAdjustmentRepository;
 import backend.repositories.ProductRepository;
 import backend.repositories.ProductVariantRepository;
 import backend.repositories.UserRepository;
+import backend.models.enums.AdjustmentReason;
+import backend.repositories.specifications.AdjustmentSpecification;
 import backend.repositories.specifications.InventorySpecification;
 import backend.services.intf.CacheService;
 import backend.services.intf.InventoryService;
@@ -495,6 +497,7 @@ public class InventoryServiceImpl implements InventoryService {
                 adj.getProduct().getId(),
                 adj.getProduct().getName(),
                 adj.getVariant() != null ? adj.getVariant().getId() : null,
+                adj.getOrderId(),
                 adj.getAdjustedBy() != null ? adj.getAdjustedBy().getId() : null,
                 adj.getDelta(),
                 adj.getPreviousStock(),
@@ -502,6 +505,24 @@ public class InventoryServiceImpl implements InventoryService {
                 adj.getReason().name(),
                 adj.getNote(),
                 adj.getCreatedAt()
+        );
+    }
+
+    @Override
+    public PagedResponse<AdjustmentResponse> getCompanyAdjustmentHistory(
+            long companyId, long ownerId, AdjustmentReason reason,
+            Instant from, Instant to, Long productId, Long userId, int page, int size) {
+
+        assertCompanyOwnership(companyId, ownerId);
+
+        if (size > 50) size = 50;
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+
+        return new PagedResponse<>(
+                adjustmentRepository.findAll(
+                        AdjustmentSpecification.withFilters(companyId, reason, from, to, productId, userId),
+                        pageable
+                ).map(this::toAdjustmentResponse)
         );
     }
 

@@ -18,7 +18,9 @@ import java.time.Instant;
 @NoArgsConstructor
 @AllArgsConstructor
 @Table(name = "inventory_adjustments", indexes = {
-        @Index(name = "idx_inv_adj_product", columnList = "product_id")
+        @Index(name = "idx_inv_adj_product", columnList = "product_id"),
+        @Index(name = "idx_inv_adj_product_created", columnList = "product_id, created_at"),
+        @Index(name = "idx_inv_adj_order", columnList = "order_id")
 })
 @EntityListeners(AuditingEntityListener.class)
 public class InventoryAdjustment {
@@ -54,6 +56,9 @@ public class InventoryAdjustment {
 
     @Column(nullable = true, columnDefinition = "TEXT")
     private String note;
+
+    @Column(name = "order_id", nullable = true)
+    private Long orderId;
 
     @CreatedDate
     @Column(nullable = false, updatable = false)

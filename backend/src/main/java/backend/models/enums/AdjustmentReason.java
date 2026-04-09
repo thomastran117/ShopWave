@@ -4,6 +4,7 @@ public enum AdjustmentReason {
     MANUAL_ADJUSTMENT,
     PURCHASE,
     RETURN,
+    ORDER_CANCELLED,
     DAMAGE,
     THEFT,
     EXPIRY,

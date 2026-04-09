@@ -12,6 +12,7 @@ public class AdjustmentResponse {
     private Long productId;
     private String productName;
     private Long variantId;
+    private Long orderId;
     private Long adjustedByUserId;
     private int delta;
     private int previousStock;

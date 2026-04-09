@@ -18,6 +18,7 @@ import backend.dtos.responses.inventory.ProductSalesMetricResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.exceptions.http.BadRequestException;
 import backend.exceptions.http.InternalServerErrorException;
+import backend.models.enums.AdjustmentReason;
 import backend.models.enums.ProductStatus;
 import backend.dtos.responses.inventory.LocationStockResponse;
 import backend.services.intf.InventoryService;
@@ -202,6 +203,29 @@ public class InventoryController {
         try {
             long userId = resolveUserId();
             return ResponseEntity.ok(inventoryService.updateSettings(companyId, productId, userId, request));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @GetMapping("/adjustments")
+    public ResponseEntity<PagedResponse<AdjustmentResponse>> getCompanyAdjustmentHistory(
+            @PathVariable long companyId,
+            @RequestParam(required = false) AdjustmentReason reason,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) Long productId,
+            @RequestParam(required = false) Long userId,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size) {
+        try {
+            validateDateRange(from, to);
+            long ownerId = resolveUserId();
+            return ResponseEntity.ok(inventoryService.getCompanyAdjustmentHistory(
+                    companyId, ownerId, reason, toStartOfDay(from), toEndOfDay(to),
+                    productId, userId, page, size));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {

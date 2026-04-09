@@ -1,6 +1,7 @@
 package backend.services.intf;
 
 import backend.dtos.requests.inventory.AdjustStockRequest;
+import backend.models.enums.AdjustmentReason;
 import backend.models.enums.ProductStatus;
 import backend.dtos.requests.inventory.BulkAdjustRequest;
 import backend.dtos.requests.inventory.UpdateInventorySettingsRequest;
@@ -47,4 +48,8 @@ public interface InventoryService {
 
     InventoryItemResponse adjustVariantStock(
             long companyId, long productId, long variantId, long ownerId, AdjustStockRequest request);
+
+    PagedResponse<AdjustmentResponse> getCompanyAdjustmentHistory(
+            long companyId, long ownerId, AdjustmentReason reason,
+            Instant from, Instant to, Long productId, Long userId, int page, int size);
 }
