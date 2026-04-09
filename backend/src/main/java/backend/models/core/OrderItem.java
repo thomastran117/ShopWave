@@ -14,7 +14,8 @@ import java.math.BigDecimal;
 @NoArgsConstructor
 @AllArgsConstructor
 @Table(name = "order_items", indexes = {
-        @Index(name = "idx_order_item_order", columnList = "order_id")
+        @Index(name = "idx_order_item_order", columnList = "order_id"),
+        @Index(name = "idx_order_item_fulfillment_loc", columnList = "fulfillment_location_id")
 })
 public class OrderItem {
 
@@ -49,4 +50,12 @@ public class OrderItem {
 
     @Column(nullable = false, length = 255)
     private String productName;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "fulfillment_location_id", nullable = true)
+    private InventoryLocation fulfillmentLocation;
+
+    /** Snapshot of the fulfillment location name at the time of order. */
+    @Column(nullable = true, length = 255)
+    private String fulfillmentLocationName;
 }

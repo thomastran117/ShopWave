@@ -18,6 +18,7 @@ import backend.exceptions.http.BadRequestException;
 import backend.exceptions.http.ConflictException;
 import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
+import backend.models.core.LocationStock;
 import backend.models.core.Order;
 import backend.models.core.OrderCompensation;
 import backend.models.core.OrderItem;
@@ -29,6 +30,7 @@ import backend.models.enums.CompensationType;
 import backend.models.enums.OrderStatus;
 import backend.models.enums.ProductStatus;
 import backend.repositories.CompanyRepository;
+import backend.repositories.LocationStockRepository;
 import backend.repositories.OrderCompensationRepository;
 import backend.repositories.OrderRepository;
 import backend.repositories.ProductRepository;
@@ -60,6 +62,7 @@ public class OrderServiceImpl implements OrderService {
     private final OrderCompensationRepository compensationRepository;
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
+    private final LocationStockRepository locationStockRepository;
     private final UserRepository userRepository;
     private final CompanyRepository companyRepository;
     private final PaymentService paymentService;
@@ -70,6 +73,7 @@ public class OrderServiceImpl implements OrderService {
             OrderCompensationRepository compensationRepository,
             ProductRepository productRepository,
             ProductVariantRepository variantRepository,
+            LocationStockRepository locationStockRepository,
             UserRepository userRepository,
             CompanyRepository companyRepository,
             PaymentService paymentService,
@@ -78,6 +82,7 @@ public class OrderServiceImpl implements OrderService {
         this.compensationRepository = compensationRepository;
         this.productRepository = productRepository;
         this.variantRepository = variantRepository;
+        this.locationStockRepository = locationStockRepository;
         this.userRepository = userRepository;
         this.companyRepository = companyRepository;
         this.paymentService = paymentService;
@@ -113,6 +118,7 @@ public class OrderServiceImpl implements OrderService {
         List<String> acquiredLocks = new ArrayList<>();
         List<long[]> decrementedProducts = new ArrayList<>();
         List<long[]> decrementedVariants = new ArrayList<>();
+        List<long[]> decrementedLocationStocks = new ArrayList<>();
 
         try {
             acquireLocks(productIds, lockToken, acquiredLocks);
@@ -168,7 +174,7 @@ public class OrderServiceImpl implements OrderService {
 
                     int updated = variantRepository.decrementStock(variantId, qty);
                     if (updated == 0) {
-                        safeRestoreAll(decrementedProducts, decrementedVariants);
+                        safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
                         throw new ConflictException("Insufficient stock for variant of product '" + product.getName() + "'");
                     }
                     decrementedVariants.add(new long[]{variantId, qty});
@@ -181,13 +187,34 @@ public class OrderServiceImpl implements OrderService {
                 } else {
                     int updated = productRepository.decrementStock(product.getId(), qty);
                     if (updated == 0) {
-                        safeRestoreAll(decrementedProducts, decrementedVariants);
+                        safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
                         throw new ConflictException("Insufficient stock for product '" + product.getName() + "'");
                     }
                     decrementedProducts.add(new long[]{product.getId(), qty});
 
                     item.setUnitPrice(product.getPrice());
                     totalAmount = totalAmount.add(product.getPrice().multiply(BigDecimal.valueOf(qty)));
+                }
+
+                // Location stock — pick best-stocked active location (if any exist for this product)
+                long variantRefForLoc = (variantId != null) ? variantId : 0L;
+                List<LocationStock> locCandidates = (variantId != null)
+                        ? locationStockRepository.findTopByVariantStockDesc(
+                                productId, variantRefForLoc, org.springframework.data.domain.PageRequest.of(0, 1))
+                        : locationStockRepository.findTopByProductStockDesc(
+                                productId, org.springframework.data.domain.PageRequest.of(0, 1));
+
+                if (!locCandidates.isEmpty()) {
+                    LocationStock ls = locCandidates.get(0);
+                    int lsUpdated = locationStockRepository.decrementStock(ls.getId(), qty);
+                    if (lsUpdated == 0) {
+                        safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
+                        throw new ConflictException("Insufficient stock at location '" +
+                                ls.getLocation().getName() + "' for product '" + product.getName() + "'");
+                    }
+                    decrementedLocationStocks.add(new long[]{ls.getId(), qty});
+                    item.setFulfillmentLocation(ls.getLocation());
+                    item.setFulfillmentLocationName(ls.getLocation().getName());
                 }
 
                 orderItems.add(item);
@@ -223,7 +250,7 @@ public class OrderServiceImpl implements OrderService {
                 order.setStatus(OrderStatus.FAILED);
                 order.setFailureReason("Payment intent creation failed: " + e.getMessage());
                 orderRepository.save(order);
-                scheduleStockCompensation(order, decrementedProducts, decrementedVariants);
+                scheduleStockCompensation(order, decrementedProducts, decrementedVariants, decrementedLocationStocks);
                 throw e;
             }
 
@@ -234,7 +261,7 @@ public class OrderServiceImpl implements OrderService {
         } catch (ConflictException | ResourceNotFoundException | BadRequestException e) {
             throw e;
         } catch (Exception e) {
-            safeRestoreAll(decrementedProducts, decrementedVariants);
+            safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
             throw e;
         } finally {
             releaseLocks(acquiredLocks, lockToken);
@@ -429,7 +456,12 @@ public class OrderServiceImpl implements OrderService {
                 case STOCK_RESTORE -> {
                     String detail = compensation.getDetail();
                     int quantity = extractQuantityFromDetail(detail);
-                    if (detail != null && detail.startsWith("[VARIANT]")) {
+                    if (detail != null && detail.startsWith("[LOC:")) {
+                        long locationStockId = extractLocationStockIdFromDetail(detail);
+                        if (locationStockId > 0 && quantity > 0) {
+                            locationStockRepository.restoreStock(locationStockId, quantity);
+                        }
+                    } else if (detail != null && detail.startsWith("[VARIANT]")) {
                         long variantId = extractVariantIdFromDetail(detail);
                         if (variantId > 0 && quantity > 0) {
                             variantRepository.restoreStock(variantId, quantity);
@@ -466,7 +498,8 @@ public class OrderServiceImpl implements OrderService {
         compensationRepository.save(compensation);
     }
 
-    private void scheduleStockCompensation(Order order, List<long[]> decrementedProducts, List<long[]> decrementedVariants) {
+    private void scheduleStockCompensation(Order order, List<long[]> decrementedProducts,
+                                            List<long[]> decrementedVariants, List<long[]> decrementedLocationStocks) {
         for (long[] entry : decrementedProducts) {
             try {
                 productRepository.restoreStock(entry[0], (int) entry[1]);
@@ -491,9 +524,22 @@ public class OrderServiceImpl implements OrderService {
                         "[VARIANT] Restore " + entry[1] + " units for variant " + entry[0], CompensationStatus.FAILED, e.getMessage());
             }
         }
+        for (long[] entry : decrementedLocationStocks) {
+            try {
+                locationStockRepository.restoreStock(entry[0], (int) entry[1]);
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        "[LOC:" + entry[0] + "] Restored " + entry[1] + " units", CompensationStatus.COMPLETED);
+            } catch (Exception e) {
+                log.error("Inline location stock compensation failed for locationStockId {} on order {}: {}",
+                        entry[0], order.getId(), e.getMessage());
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        "[LOC:" + entry[0] + "] Restore " + entry[1] + " units", CompensationStatus.FAILED, e.getMessage());
+            }
+        }
     }
 
-    private void safeRestoreAll(List<long[]> decrementedProducts, List<long[]> decrementedVariants) {
+    private void safeRestoreAll(List<long[]> decrementedProducts, List<long[]> decrementedVariants,
+                                List<long[]> decrementedLocationStocks) {
         for (long[] entry : decrementedProducts) {
             try {
                 productRepository.restoreStock(entry[0], (int) entry[1]);
@@ -508,6 +554,13 @@ public class OrderServiceImpl implements OrderService {
                 log.error("Emergency stock restore failed for variant {}: {}", entry[0], e.getMessage());
             }
         }
+        for (long[] entry : decrementedLocationStocks) {
+            try {
+                locationStockRepository.restoreStock(entry[0], (int) entry[1]);
+            } catch (Exception e) {
+                log.error("Emergency location stock restore failed for locationStockId {}: {}", entry[0], e.getMessage());
+            }
+        }
     }
 
     private void restoreItemStock(OrderItem item) {
@@ -515,6 +568,12 @@ public class OrderServiceImpl implements OrderService {
             variantRepository.restoreStock(item.getVariant().getId(), item.getQuantity());
         } else {
             productRepository.restoreStock(item.getProduct().getId(), item.getQuantity());
+        }
+        if (item.getFulfillmentLocation() != null) {
+            long variantRef = item.getVariant() != null ? item.getVariant().getId() : 0L;
+            locationStockRepository.findByLocationIdAndProductIdAndVariantRef(
+                            item.getFulfillmentLocation().getId(), item.getProduct().getId(), variantRef)
+                    .ifPresent(ls -> locationStockRepository.restoreStock(ls.getId(), item.getQuantity()));
         }
     }
 
@@ -621,6 +680,16 @@ public class OrderServiceImpl implements OrderService {
         return -1;
     }
 
+    // Parses "[LOC:42] Restored 3 units" → 42
+    private static long extractLocationStockIdFromDetail(String detail) {
+        try {
+            int start = detail.indexOf("[LOC:") + 5;
+            int end = detail.indexOf("]", start);
+            if (start > 4 && end > start) return Long.parseLong(detail.substring(start, end).trim());
+        } catch (Exception ignored) {}
+        return -1;
+    }
+
     private static int extractQuantityFromDetail(String detail) {
         try {
             int startIdx = detail.indexOf("Restore ") >= 0 ? detail.indexOf("Restore ") + 8 : detail.indexOf("Restored ") + 9;
@@ -686,7 +755,9 @@ public class OrderServiceImpl implements OrderService {
                         item.getVariantTitle(),
                         item.getVariantSku(),
                         item.getQuantity(),
-                        item.getUnitPrice()))
+                        item.getUnitPrice(),
+                        item.getFulfillmentLocation() != null ? item.getFulfillmentLocation().getId() : null,
+                        item.getFulfillmentLocationName()))
                 .toList();
 
         return new CompanyOrderResponse(
@@ -709,7 +780,9 @@ public class OrderServiceImpl implements OrderService {
                         item.getVariantTitle(),
                         item.getVariantSku(),
                         item.getQuantity(),
-                        item.getUnitPrice()
+                        item.getUnitPrice(),
+                        item.getFulfillmentLocation() != null ? item.getFulfillmentLocation().getId() : null,
+                        item.getFulfillmentLocationName()
                 ))
                 .toList();
 

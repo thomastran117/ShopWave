@@ -19,7 +19,9 @@ import backend.exceptions.http.AppHttpException;
 import backend.exceptions.http.BadRequestException;
 import backend.exceptions.http.InternalServerErrorException;
 import backend.models.enums.ProductStatus;
+import backend.dtos.responses.inventory.LocationStockResponse;
 import backend.services.intf.InventoryService;
+import backend.services.intf.LocationInventoryService;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -38,9 +40,12 @@ import java.util.List;
 public class InventoryController {
 
     private final InventoryService inventoryService;
+    private final LocationInventoryService locationInventoryService;
 
-    public InventoryController(InventoryService inventoryService) {
+    public InventoryController(InventoryService inventoryService,
+                               LocationInventoryService locationInventoryService) {
         this.inventoryService = inventoryService;
+        this.locationInventoryService = locationInventoryService;
     }
 
     @GetMapping
@@ -197,6 +202,20 @@ public class InventoryController {
         try {
             long userId = resolveUserId();
             return ResponseEntity.ok(inventoryService.updateSettings(companyId, productId, userId, request));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @GetMapping("/{productId}/locations")
+    public ResponseEntity<List<LocationStockResponse>> getProductLocationStocks(
+            @PathVariable long companyId,
+            @PathVariable long productId) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(locationInventoryService.getProductLocationStocks(companyId, productId, userId));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {

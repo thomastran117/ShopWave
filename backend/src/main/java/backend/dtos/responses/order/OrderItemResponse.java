@@ -16,4 +16,6 @@ public class OrderItemResponse {
     private String variantSku;
     private int quantity;
     private BigDecimal unitPrice;
+    private Long fulfillmentLocationId;
+    private String fulfillmentLocationName;
 }
