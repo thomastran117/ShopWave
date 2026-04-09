@@ -23,10 +23,13 @@ public class CreateOrderRequest {
     @Setter
     public static class OrderItemRequest {
 
-        @NotNull(message = "Product ID is required")
+        /** Either productId or bundleId must be set, not both. Validated in service layer. */
         private Long productId;
 
         private Long variantId;
+
+        /** Set to order a bundle instead of a single product. Mutually exclusive with productId. */
+        private Long bundleId;
 
         @NotNull(message = "Quantity is required")
         @Min(value = 1, message = "Quantity must be at least 1")

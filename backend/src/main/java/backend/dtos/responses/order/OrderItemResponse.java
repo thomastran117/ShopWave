@@ -19,4 +19,6 @@ public class OrderItemResponse {
     private Long fulfillmentLocationId;
     private String fulfillmentLocationName;
     private boolean backorder;
+    private Long bundleId;
+    private String bundleName;
 }

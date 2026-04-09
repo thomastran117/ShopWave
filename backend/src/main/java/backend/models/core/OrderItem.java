@@ -27,8 +27,8 @@ public class OrderItem {
     @JoinColumn(name = "order_id", nullable = false)
     private Order order;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "product_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "product_id", nullable = true)
     private Product product;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = true)
@@ -62,4 +62,13 @@ public class OrderItem {
     /** True when this item was placed against zero stock (backorder). Cleared on fulfillment. */
     @Column(nullable = false)
     private boolean backorder = false;
+
+    /** Non-null for bundle order items; null for regular product items. */
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "bundle_id", nullable = true)
+    private ProductBundle bundle;
+
+    /** Snapshot of bundle name at order time. */
+    @Column(name = "bundle_name", nullable = true, length = 255)
+    private String bundleName;
 }

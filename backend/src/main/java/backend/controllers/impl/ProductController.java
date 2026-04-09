@@ -19,6 +19,7 @@ import backend.dtos.requests.product.UpdateProductOptionRequest;
 import backend.dtos.requests.product.UpdateProductRequest;
 import backend.dtos.requests.product.UpdateProductVariantRequest;
 import backend.dtos.responses.general.PagedResponse;
+import backend.dtos.responses.product.BundleResponse;
 import backend.dtos.responses.product.ProductAttributeResponse;
 import backend.dtos.responses.product.ProductImageResponse;
 import backend.dtos.responses.product.ProductOptionResponse;
@@ -27,6 +28,7 @@ import backend.dtos.responses.product.ProductVariantResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.exceptions.http.InternalServerErrorException;
 import backend.models.enums.ProductStatus;
+import backend.services.intf.BundleService;
 import backend.services.intf.ProductService;
 
 import jakarta.validation.Valid;
@@ -41,9 +43,11 @@ import java.util.List;
 public class ProductController {
 
     private final ProductService productService;
+    private final BundleService bundleService;
 
-    public ProductController(ProductService productService) {
+    public ProductController(ProductService productService, BundleService bundleService) {
         this.productService = productService;
+        this.bundleService = bundleService;
     }
 
     @GetMapping
@@ -413,6 +417,24 @@ public class ProductController {
         } catch (Exception e) {
             throw new InternalServerErrorException();
         }
+    }
+
+    // --- Bundle discoverability endpoints (public read, under /products/bundles) ---
+
+    @GetMapping("/bundles")
+    public ResponseEntity<PagedResponse<BundleResponse>> listBundles(
+            @PathVariable long companyId,
+            @RequestParam(required = false) ProductStatus status,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size) {
+        return ResponseEntity.ok(bundleService.listBundles(companyId, status, page, size));
+    }
+
+    @GetMapping("/bundles/{bundleId}")
+    public ResponseEntity<BundleResponse> getBundle(
+            @PathVariable long companyId,
+            @PathVariable long bundleId) {
+        return ResponseEntity.ok(bundleService.getBundle(companyId, bundleId));
     }
 
     private long resolveUserId() {

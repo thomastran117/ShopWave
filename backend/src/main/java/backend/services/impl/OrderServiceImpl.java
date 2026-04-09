@@ -18,12 +18,14 @@ import backend.exceptions.http.BadRequestException;
 import backend.exceptions.http.ConflictException;
 import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
+import backend.models.core.BundleItem;
 import backend.models.core.InventoryAdjustment;
 import backend.models.core.LocationStock;
 import backend.models.core.Order;
 import backend.models.core.OrderCompensation;
 import backend.models.core.OrderItem;
 import backend.models.core.Product;
+import backend.models.core.ProductBundle;
 import backend.models.core.ProductVariant;
 import backend.models.core.User;
 import backend.models.enums.AdjustmentReason;
@@ -31,6 +33,7 @@ import backend.models.enums.CompensationStatus;
 import backend.models.enums.CompensationType;
 import backend.models.enums.OrderStatus;
 import backend.models.enums.ProductStatus;
+import backend.repositories.BundleRepository;
 import backend.repositories.CompanyRepository;
 import backend.repositories.InventoryAdjustmentRepository;
 import backend.repositories.InventoryLocationRepository;
@@ -69,6 +72,7 @@ public class OrderServiceImpl implements OrderService {
     private final LocationStockRepository locationStockRepository;
     private final InventoryAdjustmentRepository adjustmentRepository;
     private final InventoryLocationRepository locationRepository;
+    private final BundleRepository bundleRepository;
     private final UserRepository userRepository;
     private final CompanyRepository companyRepository;
     private final PaymentService paymentService;
@@ -83,6 +87,7 @@ public class OrderServiceImpl implements OrderService {
             LocationStockRepository locationStockRepository,
             InventoryAdjustmentRepository adjustmentRepository,
             InventoryLocationRepository locationRepository,
+            BundleRepository bundleRepository,
             UserRepository userRepository,
             CompanyRepository companyRepository,
             PaymentService paymentService,
@@ -95,6 +100,7 @@ public class OrderServiceImpl implements OrderService {
         this.locationStockRepository = locationStockRepository;
         this.adjustmentRepository = adjustmentRepository;
         this.locationRepository = locationRepository;
+        this.bundleRepository = bundleRepository;
         this.userRepository = userRepository;
         this.companyRepository = companyRepository;
         this.paymentService = paymentService;
@@ -109,15 +115,53 @@ public class OrderServiceImpl implements OrderService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
 
         List<CreateOrderRequest.OrderItemRequest> itemRequests = request.getItems();
-        List<Long> productIds = itemRequests.stream()
+
+        // Validate: each item must have exactly one of productId or bundleId
+        for (CreateOrderRequest.OrderItemRequest ir : itemRequests) {
+            if (ir.getProductId() == null && ir.getBundleId() == null) {
+                throw new BadRequestException("Each order item must specify either a productId or a bundleId");
+            }
+            if (ir.getProductId() != null && ir.getBundleId() != null) {
+                throw new BadRequestException("Each order item must specify either a productId or a bundleId, not both");
+            }
+        }
+
+        List<CreateOrderRequest.OrderItemRequest> productItemRequests = itemRequests.stream()
+                .filter(i -> i.getBundleId() == null).toList();
+        List<CreateOrderRequest.OrderItemRequest> bundleItemRequests = itemRequests.stream()
+                .filter(i -> i.getBundleId() != null).toList();
+
+        // Resolve and validate bundles before locking (fail fast)
+        Map<Long, ProductBundle> resolvedBundles = new HashMap<>();
+        for (CreateOrderRequest.OrderItemRequest ir : bundleItemRequests) {
+            long bundleId = ir.getBundleId();
+            if (resolvedBundles.containsKey(bundleId)) continue;
+            ProductBundle bundle = bundleRepository.findById(bundleId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Bundle not found with id: " + bundleId));
+            if (bundle.getStatus() != backend.models.enums.ProductStatus.ACTIVE || !bundle.isListed()) {
+                throw new BadRequestException("Bundle '" + bundle.getName() + "' is not available for purchase");
+            }
+            resolvedBundles.put(bundleId, bundle);
+        }
+
+        // Collect product IDs from product items
+        List<Long> productIds = productItemRequests.stream()
                 .map(CreateOrderRequest.OrderItemRequest::getProductId)
-                .distinct()
-                .sorted()
-                .toList();
+                .collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new))
+                .stream().toList();
+
+        // Merge constituent product IDs from all bundles into the lock set (sorted, deduplicated)
+        java.util.TreeSet<Long> allProductIdSet = new java.util.TreeSet<>(productIds);
+        for (ProductBundle bundle : resolvedBundles.values()) {
+            for (BundleItem bi : bundle.getItems()) {
+                allProductIdSet.add(bi.getProduct().getId());
+            }
+        }
+        List<Long> allProductIds = new ArrayList<>(allProductIdSet);
 
         Map<Long, Integer> quantityMap = new HashMap<>();
         Map<Long, Long> variantMap = new HashMap<>();  // productId -> variantId
-        for (CreateOrderRequest.OrderItemRequest item : itemRequests) {
+        for (CreateOrderRequest.OrderItemRequest item : productItemRequests) {
             quantityMap.merge(item.getProductId(), item.getQuantity(), Integer::sum);
             if (item.getVariantId() != null) {
                 variantMap.put(item.getProductId(), item.getVariantId());
@@ -137,7 +181,7 @@ public class OrderServiceImpl implements OrderService {
         List<PurchaseRecord> purchaseRecords = new ArrayList<>();
 
         try {
-            acquireLocks(productIds, lockToken, acquiredLocks);
+            acquireLocks(allProductIds, lockToken, acquiredLocks);
             acquireVariantLocks(variantIdsToLock, lockToken, acquiredLocks);
 
             List<Product> products = productRepository.findAllById(productIds);
@@ -250,6 +294,50 @@ public class OrderServiceImpl implements OrderService {
                 }
 
                 orderItems.add(item);
+            }
+
+            // Process bundle items (inside lock block — all constituent product IDs are already locked)
+            for (CreateOrderRequest.OrderItemRequest req : bundleItemRequests) {
+                ProductBundle bundle = resolvedBundles.get(req.getBundleId());
+                int bundleQty = req.getQuantity();
+
+                OrderItem bundleItem = new OrderItem();
+                bundleItem.setBundle(bundle);
+                bundleItem.setBundleName(bundle.getName());
+                bundleItem.setProduct(null);
+                bundleItem.setQuantity(bundleQty);
+                bundleItem.setUnitPrice(bundle.getPrice());
+                bundleItem.setProductName(bundle.getName());
+                totalAmount = totalAmount.add(bundle.getPrice().multiply(BigDecimal.valueOf(bundleQty)));
+
+                for (BundleItem bi : bundle.getItems()) {
+                    int totalQty = bundleQty * bi.getQuantity();
+
+                    int prevStock, updated;
+                    if (bi.getVariant() != null) {
+                        prevStock = bi.getVariant().getStock() != null ? bi.getVariant().getStock() : 0;
+                        updated = variantRepository.decrementStock(bi.getVariant().getId(), totalQty);
+                    } else {
+                        prevStock = bi.getProduct().getStock() != null ? bi.getProduct().getStock() : 0;
+                        updated = productRepository.decrementStock(bi.getProduct().getId(), totalQty);
+                    }
+
+                    if (updated == 0) {
+                        safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
+                        throw new ConflictException("Insufficient stock for bundle '" + bundle.getName() +
+                                "' (product: '" + bi.getProduct().getName() + "')");
+                    }
+
+                    int newStock = prevStock - totalQty;
+                    if (bi.getVariant() != null) {
+                        decrementedVariants.add(new long[]{bi.getVariant().getId(), totalQty});
+                    } else {
+                        decrementedProducts.add(new long[]{bi.getProduct().getId(), totalQty});
+                    }
+                    purchaseRecords.add(new PurchaseRecord(bi.getProduct(), bi.getVariant(), prevStock, newStock));
+                }
+
+                orderItems.add(bundleItem);
             }
 
             String currency = request.getCurrency() != null ? request.getCurrency().toLowerCase() : "usd";
@@ -383,22 +471,12 @@ public class OrderServiceImpl implements OrderService {
             try {
                 restoreItemStock(item);
                 recordCancelAdjustment(item, order.getId());
-                if (item.getVariant() != null) {
-                    recordCompensation(order, CompensationType.STOCK_RESTORE,
-                            "[VARIANT] Restored " + item.getQuantity() + " units for variant " + item.getVariant().getId(), CompensationStatus.COMPLETED);
-                } else {
-                    recordCompensation(order, CompensationType.STOCK_RESTORE,
-                            "Restored " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.COMPLETED);
-                }
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        buildRestoreDetail(item) + " restored for order cancellation", CompensationStatus.COMPLETED);
             } catch (Exception e) {
                 log.error("Failed to restore stock for item on order {}: {}", order.getId(), e.getMessage());
-                if (item.getVariant() != null) {
-                    recordCompensation(order, CompensationType.STOCK_RESTORE,
-                            "[VARIANT] Failed to restore " + item.getQuantity() + " units for variant " + item.getVariant().getId(), CompensationStatus.FAILED, e.getMessage());
-                } else {
-                    recordCompensation(order, CompensationType.STOCK_RESTORE,
-                            "Failed to restore " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.FAILED, e.getMessage());
-                }
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        buildRestoreDetail(item) + " failed to restore", CompensationStatus.FAILED, e.getMessage());
             }
         }
 
@@ -429,22 +507,12 @@ public class OrderServiceImpl implements OrderService {
                 try {
                     restoreItemStock(item);
                     recordCancelAdjustment(item, order.getId());
-                    if (item.getVariant() != null) {
-                        recordCompensation(order, CompensationType.STOCK_RESTORE,
-                                "[VARIANT] Restored " + item.getQuantity() + " units for variant " + item.getVariant().getId(), CompensationStatus.COMPLETED);
-                    } else {
-                        recordCompensation(order, CompensationType.STOCK_RESTORE,
-                                "Restored " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.COMPLETED);
-                    }
+                    recordCompensation(order, CompensationType.STOCK_RESTORE,
+                            buildRestoreDetail(item) + " restored for payment failure", CompensationStatus.COMPLETED);
                 } catch (Exception e) {
                     log.error("Failed to restore stock for item on failed order {}: {}", order.getId(), e.getMessage());
-                    if (item.getVariant() != null) {
-                        recordCompensation(order, CompensationType.STOCK_RESTORE,
-                                "[VARIANT] Failed to restore " + item.getQuantity() + " units for variant " + item.getVariant().getId(), CompensationStatus.FAILED, e.getMessage());
-                    } else {
-                        recordCompensation(order, CompensationType.STOCK_RESTORE,
-                                "Failed to restore " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.FAILED, e.getMessage());
-                    }
+                    recordCompensation(order, CompensationType.STOCK_RESTORE,
+                            buildRestoreDetail(item) + " failed to restore", CompensationStatus.FAILED, e.getMessage());
                 }
             }
 
@@ -468,22 +536,12 @@ public class OrderServiceImpl implements OrderService {
             try {
                 restoreItemStock(item);
                 recordCancelAdjustment(item, order.getId());
-                if (item.getVariant() != null) {
-                    recordCompensation(order, CompensationType.STOCK_RESTORE,
-                            "[VARIANT] Restored " + item.getQuantity() + " units for variant " + item.getVariant().getId(), CompensationStatus.COMPLETED);
-                } else {
-                    recordCompensation(order, CompensationType.STOCK_RESTORE,
-                            "Restored " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.COMPLETED);
-                }
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        buildRestoreDetail(item) + " restored by scheduler", CompensationStatus.COMPLETED);
             } catch (Exception e) {
                 log.error("Scheduled compensation: failed to restore stock for item on order {}: {}", order.getId(), e.getMessage());
-                if (item.getVariant() != null) {
-                    recordCompensation(order, CompensationType.STOCK_RESTORE,
-                            "[VARIANT] Restore " + item.getQuantity() + " units for variant " + item.getVariant().getId(), CompensationStatus.FAILED, e.getMessage());
-                } else {
-                    recordCompensation(order, CompensationType.STOCK_RESTORE,
-                            "Restore " + item.getQuantity() + " units for product " + item.getProduct().getId(), CompensationStatus.FAILED, e.getMessage());
-                }
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        buildRestoreDetail(item) + " failed in scheduler", CompensationStatus.FAILED, e.getMessage());
             }
         }
 
@@ -630,6 +688,20 @@ public class OrderServiceImpl implements OrderService {
 
     private void restoreItemStock(OrderItem item) {
         if (item.isBackorder()) return;  // no stock was decremented for backorder items — nothing to restore
+
+        if (item.getBundle() != null) {
+            // Restore each constituent product's stock (no location stock for bundle items)
+            for (BundleItem bi : item.getBundle().getItems()) {
+                int totalQty = item.getQuantity() * bi.getQuantity();
+                if (bi.getVariant() != null) {
+                    variantRepository.restoreStock(bi.getVariant().getId(), totalQty);
+                } else {
+                    productRepository.restoreStock(bi.getProduct().getId(), totalQty);
+                }
+            }
+            return;
+        }
+
         if (item.getVariant() != null) {
             variantRepository.restoreStock(item.getVariant().getId(), item.getQuantity());
         } else {
@@ -668,6 +740,24 @@ public class OrderServiceImpl implements OrderService {
      */
     private void recordCancelAdjustment(OrderItem item, long orderId) {
         try {
+            if (item.getBundle() != null) {
+                // One adjustment per bundle constituent
+                for (BundleItem bi : item.getBundle().getItems()) {
+                    int totalQty = item.getQuantity() * bi.getQuantity();
+                    InventoryAdjustment adj = new InventoryAdjustment();
+                    adj.setProduct(bi.getProduct());
+                    adj.setVariant(bi.getVariant());
+                    adj.setDelta(totalQty);
+                    adj.setPreviousStock(0);
+                    adj.setNewStock(0);
+                    adj.setReason(AdjustmentReason.ORDER_CANCELLED);
+                    adj.setNote("Bundle order #" + orderId + " cancelled — bundle: " + item.getBundleName());
+                    adj.setOrderId(orderId);
+                    adjustmentRepository.save(adj);
+                }
+                return;
+            }
+
             InventoryAdjustment adj = new InventoryAdjustment();
             adj.setProduct(item.getProduct());
             adj.setVariant(item.getVariant());
@@ -681,6 +771,17 @@ public class OrderServiceImpl implements OrderService {
         } catch (Exception e) {
             log.warn("Failed to record cancel adjustment for order {}: {}", orderId, e.getMessage());
         }
+    }
+
+    private static String buildRestoreDetail(OrderItem item) {
+        if (item.getBundle() != null) {
+            return "[BUNDLE:" + item.getBundle().getId() + "] " + item.getQuantity() + " unit(s) of bundle " + item.getBundleName();
+        }
+        if (item.getVariant() != null) {
+            return "[VARIANT] " + item.getQuantity() + " units for variant " + item.getVariant().getId();
+        }
+        return "Restored " + item.getQuantity() + " units for product " +
+                (item.getProduct() != null ? item.getProduct().getId() : "unknown");
     }
 
     private void acquireVariantLocks(List<Long> sortedVariantIds, String lockToken, List<String> acquiredLocks) {
@@ -887,7 +988,9 @@ public class OrderServiceImpl implements OrderService {
 
     private CompanyOrderResponse toCompanyOrderResponse(Order order, long companyId) {
         List<OrderItem> companyItems = order.getItems().stream()
-                .filter(item -> item.getProduct().getCompany().getId() == companyId)
+                .filter(item -> item.getBundle() != null
+                        ? item.getBundle().getCompany().getId() == companyId
+                        : item.getProduct() != null && item.getProduct().getCompany().getId() == companyId)
                 .toList();
 
         BigDecimal total = companyItems.stream()
@@ -897,7 +1000,7 @@ public class OrderServiceImpl implements OrderService {
         List<OrderItemResponse> itemResponses = companyItems.stream()
                 .map(item -> new OrderItemResponse(
                         item.getId(),
-                        item.getProduct().getId(),
+                        item.getProduct() != null ? item.getProduct().getId() : null,
                         item.getProductName(),
                         item.getVariant() != null ? item.getVariant().getId() : null,
                         item.getVariantTitle(),
@@ -906,7 +1009,9 @@ public class OrderServiceImpl implements OrderService {
                         item.getUnitPrice(),
                         item.getFulfillmentLocation() != null ? item.getFulfillmentLocation().getId() : null,
                         item.getFulfillmentLocationName(),
-                        item.isBackorder()))
+                        item.isBackorder(),
+                        item.getBundle() != null ? item.getBundle().getId() : null,
+                        item.getBundleName()))
                 .toList();
 
         return new CompanyOrderResponse(
@@ -923,7 +1028,7 @@ public class OrderServiceImpl implements OrderService {
         List<OrderItemResponse> items = order.getItems().stream()
                 .map(item -> new OrderItemResponse(
                         item.getId(),
-                        item.getProduct().getId(),
+                        item.getProduct() != null ? item.getProduct().getId() : null,
                         item.getProductName(),
                         item.getVariant() != null ? item.getVariant().getId() : null,
                         item.getVariantTitle(),
@@ -932,7 +1037,9 @@ public class OrderServiceImpl implements OrderService {
                         item.getUnitPrice(),
                         item.getFulfillmentLocation() != null ? item.getFulfillmentLocation().getId() : null,
                         item.getFulfillmentLocationName(),
-                        item.isBackorder()
+                        item.isBackorder(),
+                        item.getBundle() != null ? item.getBundle().getId() : null,
+                        item.getBundleName()
                 ))
                 .toList();
 
