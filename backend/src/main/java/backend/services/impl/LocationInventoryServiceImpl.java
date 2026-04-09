@@ -53,6 +53,7 @@ public class LocationInventoryServiceImpl implements LocationInventoryService {
     private final InventoryAdjustmentRepository adjustmentRepository;
     private final UserRepository userRepository;
     private final CacheService cacheService;
+    private final StockAlertService stockAlertService;
 
     public LocationInventoryServiceImpl(
             InventoryLocationRepository locationRepository,
@@ -62,7 +63,8 @@ public class LocationInventoryServiceImpl implements LocationInventoryService {
             ProductVariantRepository variantRepository,
             InventoryAdjustmentRepository adjustmentRepository,
             UserRepository userRepository,
-            CacheService cacheService) {
+            CacheService cacheService,
+            StockAlertService stockAlertService) {
         this.locationRepository = locationRepository;
         this.locationStockRepository = locationStockRepository;
         this.companyRepository = companyRepository;
@@ -71,6 +73,7 @@ public class LocationInventoryServiceImpl implements LocationInventoryService {
         this.adjustmentRepository = adjustmentRepository;
         this.userRepository = userRepository;
         this.cacheService = cacheService;
+        this.stockAlertService = stockAlertService;
     }
 
     // --- Location CRUD ---
@@ -262,6 +265,13 @@ public class LocationInventoryServiceImpl implements LocationInventoryService {
                 adjustment.setReason(AdjustmentReason.MANUAL_ADJUSTMENT);
                 adjustment.setNote("Location stock set for location: " + location.getName());
                 adjustmentRepository.save(adjustment);
+
+                if (delta < 0) {
+                    stockAlertService.checkAndAlertLocation(
+                            locationStock.getId(), location.getName(),
+                            productId, product.getName(),
+                            variantId, newStock, locationStock.getLowStockThreshold());
+                }
             }
 
             return toLocationStockResponse(locationStock);
@@ -284,10 +294,10 @@ public class LocationInventoryServiceImpl implements LocationInventoryService {
                                                       Long variantId) {
         assertCompanyOwnership(companyId, ownerId);
 
-        locationRepository.findByIdAndCompanyId(locationId, companyId)
+        InventoryLocation location = locationRepository.findByIdAndCompanyId(locationId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Location not found with id: " + locationId));
 
-        productRepository.findByIdAndCompanyId(productId, companyId)
+        Product product = productRepository.findByIdAndCompanyId(productId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
 
         long variantRef = 0L;
@@ -344,6 +354,13 @@ public class LocationInventoryServiceImpl implements LocationInventoryService {
             adjustment.setReason(request.getReason());
             adjustment.setNote(request.getNote());
             adjustmentRepository.save(adjustment);
+
+            if (delta < 0) {
+                stockAlertService.checkAndAlertLocation(
+                        locationStock.getId(), location.getName(),
+                        productId, product.getName(),
+                        variantId, previousStock + delta, locationStock.getLowStockThreshold());
+            }
 
             locationStock.setStock(previousStock + delta);
             return toLocationStockResponse(locationStock);

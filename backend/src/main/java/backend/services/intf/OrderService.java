@@ -15,4 +15,6 @@ public interface OrderService {
     void handlePaymentFailure(String paymentIntentId);
     PagedResponse<CompanyOrderResponse> getCompanyOrders(long companyId, long ownerId, OrderStatus status, int page, int size);
     CompanyOrderResponse getCompanyOrder(long companyId, long orderId, long ownerId);
+
+    void fulfillPendingBackorders(long productId, Long variantId, int availableQty, Long fulfillmentLocationId);
 }

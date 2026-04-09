@@ -71,6 +71,7 @@ public class InventoryServiceImpl implements InventoryService {
     private final InventoryAdjustmentRepository adjustmentRepository;
     private final UserRepository userRepository;
     private final CacheService cacheService;
+    private final StockAlertService stockAlertService;
 
     public InventoryServiceImpl(
             ProductRepository productRepository,
@@ -78,13 +79,15 @@ public class InventoryServiceImpl implements InventoryService {
             CompanyRepository companyRepository,
             InventoryAdjustmentRepository adjustmentRepository,
             UserRepository userRepository,
-            CacheService cacheService) {
+            CacheService cacheService,
+            StockAlertService stockAlertService) {
         this.productRepository = productRepository;
         this.variantRepository = variantRepository;
         this.companyRepository = companyRepository;
         this.adjustmentRepository = adjustmentRepository;
         this.userRepository = userRepository;
         this.cacheService = cacheService;
+        this.stockAlertService = stockAlertService;
     }
 
     @Override
@@ -241,6 +244,12 @@ public class InventoryServiceImpl implements InventoryService {
             adjustment.setNote(request.getNote());
             adjustmentRepository.save(adjustment);
 
+            if (delta < 0) {
+                stockAlertService.checkAndAlert(
+                        productId, product.getName(), null, null,
+                        previousStock + delta, product.getLowStockThreshold());
+            }
+
             product = productRepository.findByIdAndCompanyId(productId, companyId)
                     .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
 
@@ -335,6 +344,18 @@ public class InventoryServiceImpl implements InventoryService {
             }
 
             adjustmentRepository.saveAll(adjustments);
+
+            // Low stock alerts for decremented items
+            for (BulkAdjustItem item : items) {
+                int delta = item.getDelta();
+                if (delta < 0) {
+                    Product p = productMap.get(item.getProductId());
+                    int newStock = p.getStock() + delta;
+                    stockAlertService.checkAndAlert(
+                            item.getProductId(), p.getName(), null, null,
+                            newStock, p.getLowStockThreshold());
+                }
+            }
 
             // Re-fetch after @Modifying to get fresh stock values
             return productRepository.findAllByIdInAndCompanyId(sortedProductIds, companyId)
@@ -584,6 +605,13 @@ public class InventoryServiceImpl implements InventoryService {
             adjustment.setReason(request.getReason());
             adjustment.setNote(request.getNote());
             adjustmentRepository.save(adjustment);
+
+            if (delta < 0) {
+                stockAlertService.checkAndAlert(
+                        productId, product.getName(),
+                        variantId, variant.getSku(),
+                        previousStock + delta, variant.getLowStockThreshold());
+            }
 
             return toInventoryItemResponse(product);
 

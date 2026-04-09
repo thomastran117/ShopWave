@@ -58,4 +58,8 @@ public class OrderItem {
     /** Snapshot of the fulfillment location name at the time of order. */
     @Column(nullable = true, length = 255)
     private String fulfillmentLocationName;
+
+    /** True when this item was placed against zero stock (backorder). Cleared on fulfillment. */
+    @Column(nullable = false)
+    private boolean backorder = false;
 }

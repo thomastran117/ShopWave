@@ -48,6 +48,9 @@ public class ProductVariant {
     @Column(nullable = false)
     private boolean purchasable = true;
 
+    @Column(nullable = false)
+    private boolean backorderEnabled = false;
+
     @Column(nullable = true, length = 100)
     private String option1;
 

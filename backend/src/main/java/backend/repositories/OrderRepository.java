@@ -30,4 +30,10 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     @Query("SELECT o FROM Order o JOIN o.items oi WHERE o.id = :orderId AND oi.product.company.id = :companyId")
     Optional<Order> findByIdAndProductCompanyId(@Param("orderId") long orderId, @Param("companyId") long companyId);
+
+    @Query("SELECT DISTINCT o FROM Order o JOIN o.items i WHERE o.status = backend.models.enums.OrderStatus.BACKORDER AND i.product.id = :productId AND i.backorder = true ORDER BY o.createdAt ASC")
+    List<Order> findBackordersByProductId(@Param("productId") long productId);
+
+    @Query("SELECT DISTINCT o FROM Order o JOIN o.items i WHERE o.status = backend.models.enums.OrderStatus.BACKORDER AND i.variant.id = :variantId AND i.backorder = true ORDER BY o.createdAt ASC")
+    List<Order> findBackordersByVariantId(@Param("variantId") long variantId);
 }

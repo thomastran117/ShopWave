@@ -111,6 +111,9 @@ public class Product {
     private boolean purchasable = true;
 
     @Column(nullable = false)
+    private boolean backorderEnabled = false;
+
+    @Column(nullable = false)
     private boolean listed = true;
 
     @CreatedDate

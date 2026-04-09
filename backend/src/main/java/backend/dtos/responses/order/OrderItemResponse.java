@@ -18,4 +18,5 @@ public class OrderItemResponse {
     private BigDecimal unitPrice;
     private Long fulfillmentLocationId;
     private String fulfillmentLocationName;
+    private boolean backorder;
 }

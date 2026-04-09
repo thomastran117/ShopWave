@@ -33,6 +33,7 @@ import backend.models.enums.OrderStatus;
 import backend.models.enums.ProductStatus;
 import backend.repositories.CompanyRepository;
 import backend.repositories.InventoryAdjustmentRepository;
+import backend.repositories.InventoryLocationRepository;
 import backend.repositories.LocationStockRepository;
 import backend.repositories.OrderCompensationRepository;
 import backend.repositories.OrderRepository;
@@ -67,10 +68,12 @@ public class OrderServiceImpl implements OrderService {
     private final ProductVariantRepository variantRepository;
     private final LocationStockRepository locationStockRepository;
     private final InventoryAdjustmentRepository adjustmentRepository;
+    private final InventoryLocationRepository locationRepository;
     private final UserRepository userRepository;
     private final CompanyRepository companyRepository;
     private final PaymentService paymentService;
     private final CacheService cacheService;
+    private final StockAlertService stockAlertService;
 
     public OrderServiceImpl(
             OrderRepository orderRepository,
@@ -79,20 +82,24 @@ public class OrderServiceImpl implements OrderService {
             ProductVariantRepository variantRepository,
             LocationStockRepository locationStockRepository,
             InventoryAdjustmentRepository adjustmentRepository,
+            InventoryLocationRepository locationRepository,
             UserRepository userRepository,
             CompanyRepository companyRepository,
             PaymentService paymentService,
-            CacheService cacheService) {
+            CacheService cacheService,
+            StockAlertService stockAlertService) {
         this.orderRepository = orderRepository;
         this.compensationRepository = compensationRepository;
         this.productRepository = productRepository;
         this.variantRepository = variantRepository;
         this.locationStockRepository = locationStockRepository;
         this.adjustmentRepository = adjustmentRepository;
+        this.locationRepository = locationRepository;
         this.userRepository = userRepository;
         this.companyRepository = companyRepository;
         this.paymentService = paymentService;
         this.cacheService = cacheService;
+        this.stockAlertService = stockAlertService;
     }
 
     @Override
@@ -184,11 +191,16 @@ public class OrderServiceImpl implements OrderService {
                     int prevVariantStock = variant.getStock() != null ? variant.getStock() : 0;
                     int updated = variantRepository.decrementStock(variantId, qty);
                     if (updated == 0) {
-                        safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
-                        throw new ConflictException("Insufficient stock for variant of product '" + product.getName() + "'");
+                        if (variant.isBackorderEnabled()) {
+                            item.setBackorder(true);
+                        } else {
+                            safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
+                            throw new ConflictException("Insufficient stock for variant of product '" + product.getName() + "'");
+                        }
+                    } else {
+                        decrementedVariants.add(new long[]{variantId, qty});
+                        purchaseRecords.add(new PurchaseRecord(product, variant, prevVariantStock, prevVariantStock - qty));
                     }
-                    decrementedVariants.add(new long[]{variantId, qty});
-                    purchaseRecords.add(new PurchaseRecord(product, variant, prevVariantStock, prevVariantStock - qty));
 
                     item.setVariant(variant);
                     item.setVariantTitle(buildVariantTitle(variant));
@@ -199,35 +211,42 @@ public class OrderServiceImpl implements OrderService {
                     int prevProductStock = product.getStock() != null ? product.getStock() : 0;
                     int updated = productRepository.decrementStock(product.getId(), qty);
                     if (updated == 0) {
-                        safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
-                        throw new ConflictException("Insufficient stock for product '" + product.getName() + "'");
+                        if (product.isBackorderEnabled()) {
+                            item.setBackorder(true);
+                        } else {
+                            safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
+                            throw new ConflictException("Insufficient stock for product '" + product.getName() + "'");
+                        }
+                    } else {
+                        decrementedProducts.add(new long[]{product.getId(), qty});
+                        purchaseRecords.add(new PurchaseRecord(product, null, prevProductStock, prevProductStock - qty));
                     }
-                    decrementedProducts.add(new long[]{product.getId(), qty});
-                    purchaseRecords.add(new PurchaseRecord(product, null, prevProductStock, prevProductStock - qty));
 
                     item.setUnitPrice(product.getPrice());
                     totalAmount = totalAmount.add(product.getPrice().multiply(BigDecimal.valueOf(qty)));
                 }
 
-                // Location stock — pick best-stocked active location (if any exist for this product)
-                long variantRefForLoc = (variantId != null) ? variantId : 0L;
-                List<LocationStock> locCandidates = (variantId != null)
-                        ? locationStockRepository.findTopByVariantStockDesc(
-                                productId, variantRefForLoc, org.springframework.data.domain.PageRequest.of(0, 1))
-                        : locationStockRepository.findTopByProductStockDesc(
-                                productId, org.springframework.data.domain.PageRequest.of(0, 1));
+                // Location stock — skip for backorder items (no stock was reserved)
+                if (!item.isBackorder()) {
+                    long variantRefForLoc = (variantId != null) ? variantId : 0L;
+                    List<LocationStock> locCandidates = (variantId != null)
+                            ? locationStockRepository.findTopByVariantStockDesc(
+                                    productId, variantRefForLoc, org.springframework.data.domain.PageRequest.of(0, 1))
+                            : locationStockRepository.findTopByProductStockDesc(
+                                    productId, org.springframework.data.domain.PageRequest.of(0, 1));
 
-                if (!locCandidates.isEmpty()) {
-                    LocationStock ls = locCandidates.get(0);
-                    int lsUpdated = locationStockRepository.decrementStock(ls.getId(), qty);
-                    if (lsUpdated == 0) {
-                        safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
-                        throw new ConflictException("Insufficient stock at location '" +
-                                ls.getLocation().getName() + "' for product '" + product.getName() + "'");
+                    if (!locCandidates.isEmpty()) {
+                        LocationStock ls = locCandidates.get(0);
+                        int lsUpdated = locationStockRepository.decrementStock(ls.getId(), qty);
+                        if (lsUpdated == 0) {
+                            safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
+                            throw new ConflictException("Insufficient stock at location '" +
+                                    ls.getLocation().getName() + "' for product '" + product.getName() + "'");
+                        }
+                        decrementedLocationStocks.add(new long[]{ls.getId(), qty});
+                        item.setFulfillmentLocation(ls.getLocation());
+                        item.setFulfillmentLocationName(ls.getLocation().getName());
                     }
-                    decrementedLocationStocks.add(new long[]{ls.getId(), qty});
-                    item.setFulfillmentLocation(ls.getLocation());
-                    item.setFulfillmentLocationName(ls.getLocation().getName());
                 }
 
                 orderItems.add(item);
@@ -267,6 +286,18 @@ public class OrderServiceImpl implements OrderService {
                 purchaseAdjs.add(adj);
             }
             adjustmentRepository.saveAll(purchaseAdjs);
+
+            // Low stock alerts — uses data already captured in purchaseRecords (no extra queries)
+            for (PurchaseRecord pr : purchaseRecords) {
+                Integer threshold = pr.var() != null
+                        ? pr.var().getLowStockThreshold()
+                        : pr.prod().getLowStockThreshold();
+                stockAlertService.checkAndAlert(
+                        pr.prod().getId(), pr.prod().getName(),
+                        pr.var() != null ? pr.var().getId() : null,
+                        pr.var() != null ? pr.var().getSku() : null,
+                        pr.newStock(), threshold);
+            }
 
             PaymentIntentResult paymentIntent;
             try {
@@ -329,8 +360,8 @@ public class OrderServiceImpl implements OrderService {
         Order order = orderRepository.findByIdAndUserId(orderId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
 
-        if (order.getStatus() != OrderStatus.PENDING) {
-            throw new ConflictException("Only pending orders can be cancelled");
+        if (order.getStatus() != OrderStatus.PENDING && order.getStatus() != OrderStatus.BACKORDER) {
+            throw new ConflictException("Only pending or backorder orders can be cancelled");
         }
 
         order.setStatus(OrderStatus.CANCELLED);
@@ -379,7 +410,8 @@ public class OrderServiceImpl implements OrderService {
     @Transactional
     public void handlePaymentSuccess(String paymentIntentId) {
         orderRepository.findByPaymentIntentId(paymentIntentId).ifPresent(order -> {
-            order.setStatus(OrderStatus.PAID);
+            boolean hasBackorderItems = order.getItems().stream().anyMatch(OrderItem::isBackorder);
+            order.setStatus(hasBackorderItems ? OrderStatus.BACKORDER : OrderStatus.PAID);
             orderRepository.save(order);
         });
     }
@@ -597,6 +629,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     private void restoreItemStock(OrderItem item) {
+        if (item.isBackorder()) return;  // no stock was decremented for backorder items — nothing to restore
         if (item.getVariant() != null) {
             variantRepository.restoreStock(item.getVariant().getId(), item.getQuantity());
         } else {
@@ -764,6 +797,66 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
+    @Transactional
+    public void fulfillPendingBackorders(long productId, Long variantId, int availableQty, Long fulfillmentLocationId) {
+        List<Order> backorders = (variantId != null)
+                ? orderRepository.findBackordersByVariantId(variantId)
+                : orderRepository.findBackordersByProductId(productId);
+
+        int remaining = availableQty;
+
+        for (Order order : backorders) {
+            if (remaining <= 0) break;
+
+            for (OrderItem item : order.getItems()) {
+                if (!item.isBackorder()) continue;
+                if (item.getProduct().getId() != productId) continue;
+                if (variantId != null && (item.getVariant() == null || item.getVariant().getId() != variantId)) continue;
+
+                int qty = item.getQuantity();
+                if (qty > remaining) return; // FIFO: stop rather than skip to a younger order
+
+                int updated = (variantId != null)
+                        ? variantRepository.decrementStock(variantId, qty)
+                        : productRepository.decrementStock(productId, qty);
+
+                if (updated == 0) {
+                    log.warn("fulfillPendingBackorders: decrementStock returned 0 for product={} variant={} qty={} — stopping",
+                            productId, variantId, qty);
+                    return;
+                }
+
+                remaining -= qty;
+                item.setBackorder(false);
+
+                if (fulfillmentLocationId != null) {
+                    locationRepository.findById(fulfillmentLocationId).ifPresent(loc -> {
+                        item.setFulfillmentLocation(loc);
+                        item.setFulfillmentLocationName(loc.getName());
+                    });
+                }
+
+                InventoryAdjustment adj = new InventoryAdjustment();
+                adj.setProduct(item.getProduct());
+                adj.setVariant(item.getVariant());
+                adj.setDelta(-qty); // stock was decremented to fulfill this item
+                adj.setPreviousStock(0); // TOCTOU-safe: delta is authoritative
+                adj.setNewStock(0);
+                adj.setReason(AdjustmentReason.BACKORDER_FULFILLED);
+                adj.setNote("Backorder fulfilled for order #" + order.getId());
+                adj.setOrderId(order.getId());
+                adjustmentRepository.save(adj);
+            }
+
+            boolean allFulfilled = order.getItems().stream().noneMatch(OrderItem::isBackorder);
+            if (allFulfilled) {
+                order.setStatus(OrderStatus.PAID);
+            }
+            orderRepository.save(order);
+        }
+    }
+
+    @Override
     public PagedResponse<CompanyOrderResponse> getCompanyOrders(long companyId, long ownerId, OrderStatus status, int page, int size) {
         companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
@@ -812,7 +905,8 @@ public class OrderServiceImpl implements OrderService {
                         item.getQuantity(),
                         item.getUnitPrice(),
                         item.getFulfillmentLocation() != null ? item.getFulfillmentLocation().getId() : null,
-                        item.getFulfillmentLocationName()))
+                        item.getFulfillmentLocationName(),
+                        item.isBackorder()))
                 .toList();
 
         return new CompanyOrderResponse(
@@ -837,7 +931,8 @@ public class OrderServiceImpl implements OrderService {
                         item.getQuantity(),
                         item.getUnitPrice(),
                         item.getFulfillmentLocation() != null ? item.getFulfillmentLocation().getId() : null,
-                        item.getFulfillmentLocationName()
+                        item.getFulfillmentLocationName(),
+                        item.isBackorder()
                 ))
                 .toList();
 

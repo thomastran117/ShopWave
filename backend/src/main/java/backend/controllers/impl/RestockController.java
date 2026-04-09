@@ -1,0 +1,80 @@
+package backend.controllers.impl;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.bind.annotation.*;
+
+import backend.annotations.requireAuth.RequireAuth;
+import backend.dtos.requests.inventory.CreateRestockRequest;
+import backend.dtos.requests.inventory.UpdateRestockRequest;
+import backend.dtos.responses.general.PagedResponse;
+import backend.dtos.responses.inventory.RestockRequestResponse;
+import backend.models.enums.RestockStatus;
+import backend.services.intf.RestockService;
+
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+
+@RestController
+@RequestMapping("/companies/{companyId}/inventory/restock")
+@RequireAuth
+public class RestockController {
+
+    private final RestockService restockService;
+
+    public RestockController(RestockService restockService) {
+        this.restockService = restockService;
+    }
+
+    @GetMapping
+    public ResponseEntity<PagedResponse<RestockRequestResponse>> listRestockRequests(
+            @PathVariable long companyId,
+            @RequestParam(required = false) RestockStatus status,
+            @RequestParam(required = false) Long productId,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size) {
+        return ResponseEntity.ok(
+                restockService.listRestockRequests(companyId, resolveUserId(), status, productId, page, size));
+    }
+
+    @PostMapping
+    public ResponseEntity<RestockRequestResponse> createRestockRequest(
+            @PathVariable long companyId,
+            @Valid @RequestBody CreateRestockRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(restockService.createRestockRequest(companyId, resolveUserId(), request));
+    }
+
+    @GetMapping("/{restockId}")
+    public ResponseEntity<RestockRequestResponse> getRestockRequest(
+            @PathVariable long companyId,
+            @PathVariable long restockId) {
+        return ResponseEntity.ok(
+                restockService.getRestockRequest(companyId, restockId, resolveUserId()));
+    }
+
+    @PatchMapping("/{restockId}")
+    public ResponseEntity<RestockRequestResponse> updateRestockRequest(
+            @PathVariable long companyId,
+            @PathVariable long restockId,
+            @RequestBody UpdateRestockRequest request) {
+        return ResponseEntity.ok(
+                restockService.updateRestockRequest(companyId, restockId, resolveUserId(), request));
+    }
+
+    @DeleteMapping("/{restockId}")
+    public ResponseEntity<Void> deleteRestockRequest(
+            @PathVariable long companyId,
+            @PathVariable long restockId) {
+        restockService.deleteRestockRequest(companyId, restockId, resolveUserId());
+        return ResponseEntity.noContent().build();
+    }
+
+    private long resolveUserId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return ((Number) auth.getPrincipal()).longValue();
+    }
+}
