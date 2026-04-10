@@ -100,6 +100,10 @@ public class InventoryServiceImpl implements InventoryService {
 
         assertCompanyOwnership(companyId, ownerId);
 
+        if (minStock != null && maxStock != null && minStock > maxStock) {
+            throw new BadRequestException("minStock cannot be greater than maxStock");
+        }
+
         if (size > 50) size = 50;
 
         Instant cursorUpdatedAt = null;
@@ -345,21 +349,23 @@ public class InventoryServiceImpl implements InventoryService {
 
             adjustmentRepository.saveAll(adjustments);
 
-            // Low stock alerts for decremented items
-            for (BulkAdjustItem item : items) {
-                int delta = item.getDelta();
-                if (delta < 0) {
-                    Product p = productMap.get(item.getProductId());
-                    int newStock = p.getStock() + delta;
+            // Re-fetch after @Modifying to get fresh stock values
+            List<Product> refreshed = productRepository.findAllByIdInAndCompanyId(sortedProductIds, companyId);
+
+            // Low stock alerts using fresh (post-adjustment) stock values
+            for (Product p : refreshed) {
+                BulkAdjustItem matchingItem = items.stream()
+                        .filter(i -> i.getProductId().equals(p.getId()))
+                        .findFirst().orElse(null);
+                if (matchingItem != null && matchingItem.getDelta() < 0) {
                     stockAlertService.checkAndAlert(
-                            item.getProductId(), p.getName(), null, null,
-                            newStock, p.getLowStockThreshold());
+                            p.getId(), p.getName(), null, null,
+                            p.getStock() != null ? p.getStock() : 0,
+                            p.getLowStockThreshold());
                 }
             }
 
-            // Re-fetch after @Modifying to get fresh stock values
-            return productRepository.findAllByIdInAndCompanyId(sortedProductIds, companyId)
-                    .stream()
+            return refreshed.stream()
                     .map(this::toInventoryItemResponse)
                     .toList();
 
@@ -414,7 +420,10 @@ public class InventoryServiceImpl implements InventoryService {
     // --- Cursor helpers ---
 
     private static String encodeCursor(Product p) {
-        String raw = p.getUpdatedAt().toEpochMilli() + ":" + p.getId();
+        long ts = p.getUpdatedAt() != null
+                ? p.getUpdatedAt().toEpochMilli()
+                : (p.getCreatedAt() != null ? p.getCreatedAt().toEpochMilli() : 0L);
+        String raw = ts + ":" + p.getId();
         return Base64.getEncoder().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 

@@ -12,4 +12,5 @@ public interface BundleRepository extends JpaRepository<ProductBundle, Long> {
     Optional<ProductBundle> findByIdAndCompanyId(long id, long companyId);
     Page<ProductBundle> findAllByCompanyId(long companyId, Pageable pageable);
     Page<ProductBundle> findAllByCompanyIdAndStatus(long companyId, ProductStatus status, Pageable pageable);
+    boolean existsByItemsProductId(long productId);
 }

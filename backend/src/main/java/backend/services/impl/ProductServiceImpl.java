@@ -34,6 +34,7 @@ import backend.models.core.ProductImage;
 import backend.models.core.ProductOption;
 import backend.models.core.ProductVariant;
 import backend.models.enums.ProductStatus;
+import backend.repositories.BundleRepository;
 import backend.repositories.CompanyRepository;
 import backend.repositories.ProductAttributeRepository;
 import backend.repositories.ProductImageRepository;
@@ -62,6 +63,7 @@ public class ProductServiceImpl implements ProductService {
     private final ProductOptionRepository productOptionRepository;
     private final ProductVariantRepository productVariantRepository;
     private final ProductAttributeRepository productAttributeRepository;
+    private final BundleRepository bundleRepository;
 
     public ProductServiceImpl(
             ProductRepository productRepository,
@@ -69,13 +71,15 @@ public class ProductServiceImpl implements ProductService {
             ProductImageRepository productImageRepository,
             ProductOptionRepository productOptionRepository,
             ProductVariantRepository productVariantRepository,
-            ProductAttributeRepository productAttributeRepository) {
+            ProductAttributeRepository productAttributeRepository,
+            BundleRepository bundleRepository) {
         this.productRepository = productRepository;
         this.companyRepository = companyRepository;
         this.productImageRepository = productImageRepository;
         this.productOptionRepository = productOptionRepository;
         this.productVariantRepository = productVariantRepository;
         this.productAttributeRepository = productAttributeRepository;
+        this.bundleRepository = bundleRepository;
     }
 
     @Override
@@ -211,6 +215,10 @@ public class ProductServiceImpl implements ProductService {
 
         Product product = productRepository.findByIdAndCompanyId(productId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
+
+        if (bundleRepository.existsByItemsProductId(productId)) {
+            throw new ConflictException("Product is part of one or more bundles. Remove it from all bundles before deleting.");
+        }
 
         productRepository.delete(product);
     }

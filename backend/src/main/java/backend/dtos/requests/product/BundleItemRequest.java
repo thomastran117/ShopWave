@@ -1,5 +1,6 @@
 package backend.dtos.requests.product;
 
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
@@ -15,6 +16,7 @@ public class BundleItemRequest {
     private Long variantId;
 
     @Min(1)
+    @Max(999)
     private int quantity = 1;
 
     private int displayOrder = 0;

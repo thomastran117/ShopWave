@@ -112,6 +112,9 @@ public class BundleServiceImpl implements BundleService {
         if (request.getListed() != null) bundle.setListed(request.getListed());
 
         if (request.getItems() != null) {
+            if (request.getItems().isEmpty()) {
+                throw new BadRequestException("Bundle must contain at least one item");
+            }
             validateNoDuplicates(request.getItems());
             bundle.getItems().clear();
             List<BundleItem> newItems = buildItems(bundle, request.getItems(), companyId);

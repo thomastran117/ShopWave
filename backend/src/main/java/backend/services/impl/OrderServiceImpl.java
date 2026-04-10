@@ -49,6 +49,7 @@ import backend.services.intf.PaymentService;
 import backend.services.intf.PaymentService.PaymentIntentResult;
 
 import java.math.BigDecimal;
+import java.util.Objects;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.*;
@@ -158,6 +159,17 @@ public class OrderServiceImpl implements OrderService {
             }
         }
         List<Long> allProductIds = new ArrayList<>(allProductIdSet);
+
+        // Reject same productId with different variantIds — ambiguous, can't be safely merged
+        Map<Long, Long> seenProductVariant = new HashMap<>();
+        for (CreateOrderRequest.OrderItemRequest item : productItemRequests) {
+            if (item.getProductId() == null) continue;
+            Long existingVariant = seenProductVariant.put(item.getProductId(), item.getVariantId());
+            if (existingVariant != null && !Objects.equals(existingVariant, item.getVariantId())) {
+                throw new BadRequestException(
+                    "Product id " + item.getProductId() + " appears with multiple variants in the same order — submit as separate orders");
+            }
+        }
 
         Map<Long, Integer> quantityMap = new HashMap<>();
         Map<Long, Long> variantMap = new HashMap<>();  // productId -> variantId
@@ -311,6 +323,16 @@ public class OrderServiceImpl implements OrderService {
                 totalAmount = totalAmount.add(bundle.getPrice().multiply(BigDecimal.valueOf(bundleQty)));
 
                 for (BundleItem bi : bundle.getItems()) {
+                    if (bi.getProduct().getStatus() != ProductStatus.ACTIVE || !bi.getProduct().isPurchasable()) {
+                        safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
+                        throw new BadRequestException("Bundle '" + bundle.getName() +
+                            "' contains unavailable product '" + bi.getProduct().getName() + "'");
+                    }
+                    if (bi.getVariant() != null && !bi.getVariant().isPurchasable()) {
+                        safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
+                        throw new BadRequestException("Bundle '" + bundle.getName() +
+                            "' contains an unavailable variant of '" + bi.getProduct().getName() + "'");
+                    }
                     int totalQty = bundleQty * bi.getQuantity();
 
                     int prevStock, updated;

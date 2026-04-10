@@ -210,6 +210,10 @@ public class RestockServiceImpl implements RestockService {
                     if (request.getReceivedQty() == null || request.getReceivedQty() < 1) {
                         throw new BadRequestException("receivedQty must be >= 1 when transitioning to RECEIVED");
                     }
+                    if (request.getReceivedQty() > rr.getRequestedQty()) {
+                        throw new BadRequestException(
+                            "receivedQty (" + request.getReceivedQty() + ") cannot exceed requestedQty (" + rr.getRequestedQty() + ")");
+                    }
                     handleReceivedTransition(rr, request.getReceivedQty(), ownerId);
                 } else if (target == RestockStatus.CANCELLED) {
                     rr.setStatus(RestockStatus.CANCELLED);
@@ -253,6 +257,16 @@ public class RestockServiceImpl implements RestockService {
                 }
             }
 
+            // Capture stock before increment (lock is held — safe from TOCTOU)
+            int previousStock;
+            if (variantId != null) {
+                previousStock = variantRepository.findById(variantId)
+                        .map(v -> v.getStock() != null ? v.getStock() : 0).orElse(0);
+            } else {
+                previousStock = productRepository.findById(productId)
+                        .map(p -> p.getStock() != null ? p.getStock() : 0).orElse(0);
+            }
+
             // Increment product or variant stock
             int updated = (variantId != null)
                     ? variantRepository.adjustStock(variantId, receivedQty)
@@ -290,8 +304,8 @@ public class RestockServiceImpl implements RestockService {
             adj.setVariant(rr.getVariant());
             adj.setAdjustedBy(userRepository.getReferenceById(ownerId));
             adj.setDelta(receivedQty);
-            adj.setPreviousStock(0); // TOCTOU-safe: delta is authoritative
-            adj.setNewStock(0);
+            adj.setPreviousStock(previousStock);
+            adj.setNewStock(previousStock + receivedQty);
             adj.setReason(AdjustmentReason.RESTOCK);
             adj.setNote("Restock received — request #" + rr.getId());
             adjustmentRepository.save(adj);
