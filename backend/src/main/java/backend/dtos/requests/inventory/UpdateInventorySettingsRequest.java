@@ -18,4 +18,9 @@ public class UpdateInventorySettingsRequest {
 
     @Min(value = 1, message = "Max stock must be at least 1")
     private Integer maxStock;
+
+    private Boolean autoRestockEnabled;
+
+    @Min(value = 1, message = "Auto restock quantity must be at least 1")
+    private Integer autoRestockQty;
 }

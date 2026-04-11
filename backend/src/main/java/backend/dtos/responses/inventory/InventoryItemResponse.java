@@ -16,6 +16,8 @@ public class InventoryItemResponse {
     private Integer lowStockThreshold;
     private Integer lowStockThresholdPercent;
     private Integer maxStock;
+    private boolean autoRestockEnabled;
+    private Integer autoRestockQty;
     private boolean lowStock;
     private boolean outOfStock;
     private String stockStatus;

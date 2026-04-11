@@ -6,14 +6,24 @@ import org.springframework.stereotype.Component;
 
 import backend.models.core.Product;
 import backend.models.core.ProductVariant;
+import backend.models.core.RestockRequest;
+import backend.models.enums.RestockStatus;
 import backend.repositories.ProductRepository;
 import backend.repositories.ProductVariantRepository;
+import backend.repositories.RestockRequestRepository;
 import backend.services.intf.EmailService;
 
+import java.util.List;
+
 /**
- * Evaluates low-stock and out-of-stock conditions and notifies the company owner
- * via terminal log and email. Supports both fixed-quantity and percent-of-max thresholds.
+ * Evaluates low-stock and out-of-stock conditions after any stock decrement.
+ * When a threshold is breached, it:
+ *  1. Logs a warning to the terminal.
+ *  2. Emails the company owner asynchronously.
+ *  3. Auto-creates a PENDING RestockRequest if the product has autoRestockEnabled=true
+ *     and no active (PENDING/IN_TRANSIT) request already exists.
  *
+ * Supports both fixed-quantity thresholds and percent-of-maxStock thresholds.
  * Inject into any service that decrements stock.
  */
 @Component
@@ -21,21 +31,28 @@ public class StockAlertService {
 
     private static final Logger log = LoggerFactory.getLogger(StockAlertService.class);
 
+    private static final List<RestockStatus> ACTIVE_RESTOCK_STATUSES =
+            List.of(RestockStatus.PENDING, RestockStatus.IN_TRANSIT);
+
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
+    private final RestockRequestRepository restockRequestRepository;
     private final EmailService emailService;
 
     public StockAlertService(ProductRepository productRepository,
                              ProductVariantRepository variantRepository,
+                             RestockRequestRepository restockRequestRepository,
                              EmailService emailService) {
         this.productRepository = productRepository;
         this.variantRepository = variantRepository;
+        this.restockRequestRepository = restockRequestRepository;
         this.emailService = emailService;
     }
 
     /**
      * Checks product or variant stock after a decrement and alerts if any configured
      * threshold (fixed quantity OR percent of maxStock) is breached.
+     * Also auto-creates a restock request if the product is configured for it.
      *
      * @param productId   product ID (always present)
      * @param productName product name for readable output
@@ -52,23 +69,35 @@ public class StockAlertService {
             int newStock,
             Integer threshold) {
 
-        // --- Resolve percent threshold from the entity (variant overrides product) ---
-        Integer thresholdPercent = null;
-        Integer maxStock = null;
+        // Resolve percent threshold + auto-restock settings from the stored entity.
+        // We keep a reference to the loaded variant (if any) to use when creating the restock request.
+        Integer resolvedThresholdPercent = null;
+        Integer resolvedMaxStock = null;
+        boolean resolvedAutoRestockEnabled = false;
+        Integer resolvedAutoRestockQty = null;
+        ProductVariant loadedVariant = null;
 
         if (variantId != null) {
-            ProductVariant variant = variantRepository.findById(variantId).orElse(null);
-            if (variant != null) {
-                thresholdPercent = variant.getLowStockThresholdPercent();
-                maxStock = variant.getMaxStock();
+            loadedVariant = variantRepository.findById(variantId).orElse(null);
+            if (loadedVariant != null) {
+                resolvedThresholdPercent = loadedVariant.getLowStockThresholdPercent();
+                resolvedMaxStock = loadedVariant.getMaxStock();
+                resolvedAutoRestockEnabled = loadedVariant.isAutoRestockEnabled();
+                resolvedAutoRestockQty = loadedVariant.getAutoRestockQty();
             }
         } else {
-            Product product = productRepository.findById(productId).orElse(null);
-            if (product != null) {
-                thresholdPercent = product.getLowStockThresholdPercent();
-                maxStock = product.getMaxStock();
+            Product p = productRepository.findById(productId).orElse(null);
+            if (p != null) {
+                resolvedThresholdPercent = p.getLowStockThresholdPercent();
+                resolvedMaxStock = p.getMaxStock();
+                resolvedAutoRestockEnabled = p.isAutoRestockEnabled();
+                resolvedAutoRestockQty = p.getAutoRestockQty();
             }
         }
+
+        final Integer thresholdPercent = resolvedThresholdPercent;
+        final Integer maxStock = resolvedMaxStock;
+        final Integer autoRestockQty = resolvedAutoRestockQty;
 
         boolean quantityBreached = threshold != null && newStock <= threshold;
         boolean percentBreached = thresholdPercent != null && maxStock != null
@@ -78,7 +107,7 @@ public class StockAlertService {
 
         boolean outOfStock = newStock == 0;
 
-        // --- Terminal log ---
+        // 1. Terminal log
         if (variantId != null) {
             if (outOfStock) {
                 log.warn("[STOCK ALERT] OUT OF STOCK — product: '{}' (id={}) | variant SKU: '{}' (id={})",
@@ -97,8 +126,13 @@ public class StockAlertService {
             }
         }
 
-        // --- Email owner (one-shot fetch to resolve owner email) ---
+        // Load product with company + owner for email and restock request creation
+        final ProductVariant finalVariant = loadedVariant;
+        final boolean doAutoRestock = resolvedAutoRestockEnabled && autoRestockQty != null && autoRestockQty >= 1;
+
         productRepository.findByIdWithCompanyOwner(productId).ifPresent(product -> {
+
+            // 2. Email the company owner (async, with retry)
             String ownerEmail = product.getCompany().getOwner().getEmail();
             String ownerFirstName = product.getCompany().getOwner().getFirstName();
             emailService.sendLowStockAlertEmail(
@@ -107,6 +141,34 @@ public class StockAlertService {
                     variantId, variantSku,
                     newStock, threshold,
                     outOfStock);
+
+            // 3. Auto-restock: create a PENDING RestockRequest if none already active
+            if (doAutoRestock) {
+                boolean activeExists = variantId != null
+                        ? restockRequestRepository.existsByProductIdAndVariantIdAndStatusIn(
+                                productId, variantId, ACTIVE_RESTOCK_STATUSES)
+                        : restockRequestRepository.existsByProductIdAndVariantIsNullAndStatusIn(
+                                productId, ACTIVE_RESTOCK_STATUSES);
+
+                if (!activeExists) {
+                    RestockRequest rr = new RestockRequest();
+                    rr.setCompany(product.getCompany());
+                    rr.setProduct(product);
+                    rr.setVariant(finalVariant);
+                    rr.setRequestedQty(autoRestockQty != null ? autoRestockQty : 0);
+                    rr.setStatus(RestockStatus.PENDING);
+                    rr.setCreatedBy(product.getCompany().getOwner());
+                    rr.setSupplierNote("Auto-generated — stock reached " + newStock
+                            + " unit" + (newStock == 1 ? "" : "s") + " for " + productName
+                            + (variantSku != null ? " (SKU: " + variantSku + ")" : ""));
+                    restockRequestRepository.save(rr);
+                    log.info("[AUTO RESTOCK] Created PENDING restock request for product '{}' (id={}) qty={}",
+                            productName, productId, rr.getRequestedQty());
+                } else {
+                    log.debug("[AUTO RESTOCK] Skipped — active restock request already exists for product '{}' (id={})",
+                            productName, productId);
+                }
+            }
         });
     }
 

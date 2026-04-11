@@ -387,6 +387,8 @@ public class InventoryServiceImpl implements InventoryService {
         if (request.getLowStockThreshold() != null) product.setLowStockThreshold(request.getLowStockThreshold());
         if (request.getLowStockThresholdPercent() != null) product.setLowStockThresholdPercent(request.getLowStockThresholdPercent());
         if (request.getMaxStock() != null) product.setMaxStock(request.getMaxStock());
+        if (request.getAutoRestockEnabled() != null) product.setAutoRestockEnabled(request.getAutoRestockEnabled());
+        if (request.getAutoRestockQty() != null) product.setAutoRestockQty(request.getAutoRestockQty());
         productRepository.save(product);
 
         return toInventoryItemResponse(product);
@@ -483,11 +485,17 @@ public class InventoryServiceImpl implements InventoryService {
         Integer maxStock = product.getMaxStock();
 
         boolean untracked = stock == null;
-        boolean outOfStock = !untracked && stock.equals(0);
+        boolean outOfStock = !untracked && stock == 0;
 
-        boolean quantityLow = !untracked && !outOfStock && threshold != null && stock <= threshold;
-        boolean percentLow = !untracked && !outOfStock && thresholdPercent != null && maxStock != null
-                && maxStock > 0 && (stock * 100.0 / maxStock) <= thresholdPercent;
+        boolean quantityLow = false;
+        boolean percentLow = false;
+        if (!untracked && !outOfStock && stock != null) {
+            int s = stock;
+            if (threshold != null && s <= threshold) quantityLow = true;
+            if (thresholdPercent != null && maxStock != null && maxStock > 0) {
+                percentLow = (s * 100.0 / maxStock) <= thresholdPercent;
+            }
+        }
         boolean lowStock = quantityLow || percentLow;
 
         String stockStatus;
@@ -504,6 +512,8 @@ public class InventoryServiceImpl implements InventoryService {
                 threshold,
                 thresholdPercent,
                 maxStock,
+                product.isAutoRestockEnabled(),
+                product.getAutoRestockQty(),
                 lowStock,
                 outOfStock,
                 stockStatus,

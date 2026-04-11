@@ -102,6 +102,14 @@ public class Product {
     @Column(nullable = true)
     private Integer maxStock;
 
+    /** When true, a PENDING RestockRequest is automatically created when stock breaches a threshold. */
+    @Column(nullable = false)
+    private boolean autoRestockEnabled = false;
+
+    /** Units to request in the auto-generated RestockRequest. Required when autoRestockEnabled is true. */
+    @Column(nullable = true)
+    private Integer autoRestockQty;
+
     @Column(nullable = true, precision = 10, scale = 3)
     private BigDecimal weight;
 

@@ -22,4 +22,10 @@ public interface RestockRequestRepository extends JpaRepository<RestockRequest, 
     Page<RestockRequest> findAllByCompanyIdAndStatusAndProductId(long companyId, RestockStatus status, long productId, Pageable pageable);
 
     Optional<RestockRequest> findByIdAndCompanyId(long id, long companyId);
+
+    /** Guards against creating duplicate auto-restock requests for a product (no variant). */
+    boolean existsByProductIdAndVariantIsNullAndStatusIn(long productId, java.util.Collection<RestockStatus> statuses);
+
+    /** Guards against creating duplicate auto-restock requests for a specific variant. */
+    boolean existsByProductIdAndVariantIdAndStatusIn(long productId, long variantId, java.util.Collection<RestockStatus> statuses);
 }

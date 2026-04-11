@@ -53,6 +53,14 @@ public class ProductVariant {
     @Column(nullable = true)
     private Integer maxStock;
 
+    /** When true, a PENDING RestockRequest is automatically created when stock breaches a threshold. */
+    @Column(nullable = false)
+    private boolean autoRestockEnabled = false;
+
+    /** Units to request in the auto-generated RestockRequest. Required when autoRestockEnabled is true. */
+    @Column(nullable = true)
+    private Integer autoRestockQty;
+
     @Column(nullable = false)
     private boolean purchasable = true;
 
