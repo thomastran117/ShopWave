@@ -44,12 +44,12 @@ import backend.repositories.ProductRepository;
 import backend.repositories.ProductVariantRepository;
 import backend.repositories.UserRepository;
 import backend.services.intf.CacheService;
+import backend.services.intf.EmailService;
 import backend.services.intf.OrderService;
 import backend.services.intf.PaymentService;
 import backend.services.intf.PaymentService.PaymentIntentResult;
 
 import java.math.BigDecimal;
-import java.util.Objects;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.*;
@@ -79,6 +79,7 @@ public class OrderServiceImpl implements OrderService {
     private final PaymentService paymentService;
     private final CacheService cacheService;
     private final StockAlertService stockAlertService;
+    private final EmailService emailService;
 
     public OrderServiceImpl(
             OrderRepository orderRepository,
@@ -93,7 +94,8 @@ public class OrderServiceImpl implements OrderService {
             CompanyRepository companyRepository,
             PaymentService paymentService,
             CacheService cacheService,
-            StockAlertService stockAlertService) {
+            StockAlertService stockAlertService,
+            EmailService emailService) {
         this.orderRepository = orderRepository;
         this.compensationRepository = compensationRepository;
         this.productRepository = productRepository;
@@ -107,6 +109,7 @@ public class OrderServiceImpl implements OrderService {
         this.paymentService = paymentService;
         this.cacheService = cacheService;
         this.stockAlertService = stockAlertService;
+        this.emailService = emailService;
     }
 
     @Override
@@ -428,7 +431,9 @@ public class OrderServiceImpl implements OrderService {
             order.setPaymentIntentId(paymentIntent.id());
             order.setPaymentClientSecret(paymentIntent.clientSecret());
 
-            return toResponse(orderRepository.save(order));
+            OrderResponse response = toResponse(orderRepository.save(order));
+            emailService.sendOrderReceiptEmail(user.getEmail(), user.getFirstName(), response);
+            return response;
         } catch (ConflictException | ResourceNotFoundException | BadRequestException e) {
             throw e;
         } catch (Exception e) {

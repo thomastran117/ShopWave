@@ -1,5 +1,7 @@
 package backend.services.intf;
 
+import backend.dtos.responses.order.OrderResponse;
+
 public interface EmailService {
 
     /**
@@ -23,4 +25,14 @@ public interface EmailService {
      * @param ip       IP address of the login attempt
      */
     void sendDeviceVerificationEmail(String toEmail, String token, String browser, String os, String ip);
+
+    /**
+     * Sends an order receipt email to the customer after a successful order is placed.
+     * The send is executed asynchronously with exponential backoff retries.
+     *
+     * @param toEmail   the customer's email address
+     * @param firstName the customer's first name (used for personalised greeting; may be null)
+     * @param order     the completed order response to render in the receipt
+     */
+    void sendOrderReceiptEmail(String toEmail, String firstName, OrderResponse order);
 }
