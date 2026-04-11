@@ -35,4 +35,24 @@ public interface EmailService {
      * @param order     the completed order response to render in the receipt
      */
     void sendOrderReceiptEmail(String toEmail, String firstName, OrderResponse order);
+
+    /**
+     * Sends a low-stock or out-of-stock alert email to the company owner.
+     * The send is executed asynchronously with exponential backoff retries.
+     *
+     * @param toEmail      the owner's email address
+     * @param firstName    the owner's first name (used for greeting; may be null)
+     * @param productId    the product ID
+     * @param productName  the product name
+     * @param variantId    null for product-level stock; variant ID for variant-level
+     * @param variantSku   null for product-level; variant SKU for variant-level
+     * @param currentStock the stock level that triggered the alert
+     * @param threshold    the quantity threshold that was breached (may be null if only percent threshold breached)
+     * @param outOfStock   true if stock has reached zero
+     */
+    void sendLowStockAlertEmail(String toEmail, String firstName,
+                                long productId, String productName,
+                                Long variantId, String variantSku,
+                                int currentStock, Integer threshold,
+                                boolean outOfStock);
 }

@@ -19,6 +19,10 @@ import java.util.Optional;
 @Repository
 public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpecificationExecutor<Product> {
     Optional<Product> findByIdAndCompanyId(long id, long companyId);
+
+    /** Fetches a product with its company and the company's owner in one query — used by stock alert notifications. */
+    @Query("SELECT p FROM Product p JOIN FETCH p.company c JOIN FETCH c.owner WHERE p.id = :id")
+    Optional<Product> findByIdWithCompanyOwner(@Param("id") long id);
     List<Product> findAllByIdInAndCompanyId(Collection<Long> ids, long companyId);
     boolean existsBySkuAndCompanyId(String sku, long companyId);
 

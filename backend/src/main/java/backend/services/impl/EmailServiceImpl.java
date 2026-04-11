@@ -259,6 +259,108 @@ public class EmailServiceImpl implements EmailService {
         return wrapInShell("Security Alert", body);
     }
 
+    @Async("emailExecutor")
+    @Override
+    public void sendLowStockAlertEmail(String toEmail, String firstName,
+                                       long productId, String productName,
+                                       Long variantId, String variantSku,
+                                       int currentStock, Integer threshold,
+                                       boolean outOfStock) {
+        String htmlBody = buildLowStockAlertHtml(firstName, productId, productName,
+                variantId, variantSku, currentStock, threshold, outOfStock);
+        String subject = outOfStock
+                ? "Out of stock: " + productName + " — ShopWave"
+                : "Low stock alert: " + productName + " — ShopWave";
+
+        retryTemplate.execute(context -> {
+            MimeMessage message = mailSender.createMimeMessage();
+            try {
+                MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
+                helper.setFrom(env.getEmail().getFrom());
+                helper.setTo(toEmail);
+                helper.setSubject(subject);
+                helper.setText(htmlBody, true);
+            } catch (MessagingException e) {
+                throw new RuntimeException(e);
+            }
+            mailSender.send(message);
+            return null;
+        });
+    }
+
+    private String buildLowStockAlertHtml(String firstName,
+                                           long productId, String productName,
+                                           Long variantId, String variantSku,
+                                           int currentStock, Integer threshold,
+                                           boolean outOfStock) {
+        String greeting = (firstName != null && !firstName.isBlank()) ? firstName : "there";
+        String badgeColor = outOfStock ? "#dc2626" : "#d97706";
+        String badgeText = outOfStock ? "Out of Stock" : "Low Stock";
+        String itemLine = variantSku != null
+                ? productName + " &mdash; <span style=\"color:#555555;\">SKU: " + variantSku + "</span>"
+                : productName;
+        String stockLine = outOfStock
+                ? "<strong style=\"color:#dc2626;\">0 units remaining</strong>"
+                : "<strong style=\"color:#d97706;\">" + currentStock + " unit" + (currentStock == 1 ? "" : "s") + " remaining</strong>"
+                  + (threshold != null ? " (threshold: " + threshold + ")" : "");
+
+        return """
+            <!DOCTYPE html>
+            <html lang="en">
+            <body style="font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0;">
+              <table width="100%%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center" style="padding: 40px 0;">
+                    <table width="600" cellpadding="0" cellspacing="0"
+                           style="background-color: #ffffff; border-radius: 8px;
+                                  box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 40px;">
+                      <tr>
+                        <td>
+                          <span style="display:inline-block; background-color:%s; color:#ffffff;
+                                       font-size:12px; font-weight:bold; padding:4px 10px;
+                                       border-radius:4px; letter-spacing:.05em; text-transform:uppercase;">
+                            %s
+                          </span>
+                          <h1 style="color:#333333; font-size:22px; margin:16px 0 4px;">
+                            Inventory Alert
+                          </h1>
+                          <p style="color:#666666; font-size:15px; line-height:1.5; margin-top:0;">
+                            Hi <strong>%s</strong>, one of your products needs attention.
+                          </p>
+                          <table style="width:100%%; border-collapse:collapse; margin:20px 0;
+                                        background-color:#f9f9f9; border-radius:6px; padding:16px;">
+                            <tr>
+                              <td style="padding:10px 16px; color:#999999; font-size:13px; font-weight:bold; width:130px;">Product</td>
+                              <td style="padding:10px 16px; color:#333333; font-size:14px;">%s</td>
+                            </tr>
+                            <tr>
+                              <td style="padding:10px 16px; color:#999999; font-size:13px; font-weight:bold;">Product ID</td>
+                              <td style="padding:10px 16px; color:#333333; font-size:14px;">%d</td>
+                            </tr>
+                            <tr>
+                              <td style="padding:10px 16px; color:#999999; font-size:13px; font-weight:bold;">Stock</td>
+                              <td style="padding:10px 16px; font-size:14px;">%s</td>
+                            </tr>
+                          </table>
+                          <p style="color:#666666; font-size:14px; line-height:1.5;">
+                            Please restock this product or review your inventory settings to
+                            avoid order fulfilment issues.
+                          </p>
+                          <hr style="border:none; border-top:1px solid #eeeeee; margin:24px 0;">
+                          <p style="color:#cccccc; font-size:12px; margin:0;">
+                            ShopWave &mdash; You are receiving this because a low-stock threshold was reached.
+                          </p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </body>
+            </html>
+            """.formatted(badgeColor, badgeText, greeting, itemLine, productId, stockLine);
+    }
+
     private String buildOrderReceiptHtml(String email, String firstName, OrderResponse order) {
         String greeting = (firstName != null && !firstName.isBlank()) ? firstName : email;
         String dateStr = order.getCreatedAt() != null

@@ -384,7 +384,9 @@ public class InventoryServiceImpl implements InventoryService {
         Product product = productRepository.findByIdAndCompanyId(productId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
 
-        product.setLowStockThreshold(request.getLowStockThreshold());
+        if (request.getLowStockThreshold() != null) product.setLowStockThreshold(request.getLowStockThreshold());
+        if (request.getLowStockThresholdPercent() != null) product.setLowStockThresholdPercent(request.getLowStockThresholdPercent());
+        if (request.getMaxStock() != null) product.setMaxStock(request.getMaxStock());
         productRepository.save(product);
 
         return toInventoryItemResponse(product);
@@ -477,10 +479,16 @@ public class InventoryServiceImpl implements InventoryService {
     private InventoryItemResponse toInventoryItemResponse(Product product) {
         Integer stock = product.getStock();
         Integer threshold = product.getLowStockThreshold();
+        Integer thresholdPercent = product.getLowStockThresholdPercent();
+        Integer maxStock = product.getMaxStock();
 
         boolean untracked = stock == null;
         boolean outOfStock = !untracked && stock.equals(0);
-        boolean lowStock = !untracked && !outOfStock && threshold != null && stock.compareTo(threshold) <= 0;
+
+        boolean quantityLow = !untracked && !outOfStock && threshold != null && stock <= threshold;
+        boolean percentLow = !untracked && !outOfStock && thresholdPercent != null && maxStock != null
+                && maxStock > 0 && (stock * 100.0 / maxStock) <= thresholdPercent;
+        boolean lowStock = quantityLow || percentLow;
 
         String stockStatus;
         if (untracked)       stockStatus = "UNTRACKED";
@@ -494,6 +502,8 @@ public class InventoryServiceImpl implements InventoryService {
                 product.getSku(),
                 stock,
                 threshold,
+                thresholdPercent,
+                maxStock,
                 lowStock,
                 outOfStock,
                 stockStatus,

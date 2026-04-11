@@ -94,6 +94,14 @@ public class Product {
     @Column(nullable = true)
     private Integer lowStockThreshold;
 
+    /** Alert when stock falls to this percentage of maxStock (0–100). Null = no percent threshold. */
+    @Column(nullable = true)
+    private Integer lowStockThresholdPercent;
+
+    /** Maximum / initial stock capacity. Used as denominator for percent threshold calculation. */
+    @Column(nullable = true)
+    private Integer maxStock;
+
     @Column(nullable = true, precision = 10, scale = 3)
     private BigDecimal weight;
 
