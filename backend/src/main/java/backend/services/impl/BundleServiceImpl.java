@@ -25,6 +25,7 @@ import backend.repositories.CompanyRepository;
 import backend.repositories.ProductRepository;
 import backend.repositories.ProductVariantRepository;
 import backend.services.intf.BundleService;
+import backend.services.impl.ProductIndexingService;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -40,16 +41,19 @@ public class BundleServiceImpl implements BundleService {
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
     private final CompanyRepository companyRepository;
+    private final ProductIndexingService productIndexingService;
 
     public BundleServiceImpl(
             BundleRepository bundleRepository,
             ProductRepository productRepository,
             ProductVariantRepository variantRepository,
-            CompanyRepository companyRepository) {
+            CompanyRepository companyRepository,
+            ProductIndexingService productIndexingService) {
         this.bundleRepository = bundleRepository;
         this.productRepository = productRepository;
         this.variantRepository = variantRepository;
         this.companyRepository = companyRepository;
+        this.productIndexingService = productIndexingService;
     }
 
     // --- Owner-authenticated CRUD ---
@@ -87,7 +91,9 @@ public class BundleServiceImpl implements BundleService {
 
         if (request.getCompareAtPrice() != null) bundle.setCompareAtPrice(request.getCompareAtPrice());
 
-        return toResponse(bundleRepository.save(bundle));
+        ProductBundle saved = bundleRepository.save(bundle);
+        productIndexingService.indexBundle(saved);
+        return toResponse(saved);
     }
 
     @Override
@@ -129,7 +135,9 @@ public class BundleServiceImpl implements BundleService {
             bundle.setPrice(request.getPrice());
         }
 
-        return toResponse(bundleRepository.save(bundle));
+        ProductBundle saved = bundleRepository.save(bundle);
+        productIndexingService.indexBundle(saved);
+        return toResponse(saved);
     }
 
     @Override
@@ -141,6 +149,7 @@ public class BundleServiceImpl implements BundleService {
                 .orElseThrow(() -> new ResourceNotFoundException("Bundle not found with id: " + bundleId));
 
         bundleRepository.delete(bundle);
+        productIndexingService.removeBundle(bundleId);
     }
 
     // --- Public read ---

@@ -22,6 +22,7 @@ public class EnvironmentSetting {
     private final S3 s3 = new S3();
     private final Stripe stripe = new Stripe();
     private final Email email = new Email();
+    private final Elasticsearch elasticsearch = new Elasticsearch();
 
     public Cors getCors() {
         return cors;
@@ -65,6 +66,10 @@ public class EnvironmentSetting {
 
     public Email getEmail() {
         return email;
+    }
+
+    public Elasticsearch getElasticsearch() {
+        return elasticsearch;
     }
 
     public static class Cors {
@@ -889,6 +894,102 @@ public class EnvironmentSetting {
 
             public void setMaxIntervalMs(long maxIntervalMs) {
                 this.maxIntervalMs = Math.max(1_000, Math.min(300_000, maxIntervalMs));
+            }
+        }
+    }
+
+    /**
+     * Elasticsearch connection and async-indexing executor settings.
+     * Supports no-auth, API key, or username/password authentication.
+     */
+    public static class Elasticsearch {
+        private String host = "localhost";
+        private int port = 9200;
+        private String scheme = "http";
+        private String apiKey = "";
+        private String username = "";
+        private String password = "";
+        private final Executor executor = new Executor();
+
+        public String getHost() {
+            return host != null ? host : "localhost";
+        }
+
+        public void setHost(String host) {
+            this.host = host != null ? host : "localhost";
+        }
+
+        public int getPort() {
+            return port;
+        }
+
+        public void setPort(int port) {
+            this.port = port;
+        }
+
+        public String getScheme() {
+            return scheme != null ? scheme : "http";
+        }
+
+        public void setScheme(String scheme) {
+            this.scheme = scheme != null ? scheme : "http";
+        }
+
+        public String getApiKey() {
+            return apiKey != null ? apiKey : "";
+        }
+
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey != null ? apiKey : "";
+        }
+
+        public String getUsername() {
+            return username != null ? username : "";
+        }
+
+        public void setUsername(String username) {
+            this.username = username != null ? username : "";
+        }
+
+        public String getPassword() {
+            return password != null ? password : "";
+        }
+
+        public void setPassword(String password) {
+            this.password = password != null ? password : "";
+        }
+
+        public Executor getExecutor() {
+            return executor;
+        }
+
+        public static class Executor {
+            private int corePoolSize = 2;
+            private int maxPoolSize = 4;
+            private int queueCapacity = 200;
+
+            public int getCorePoolSize() {
+                return corePoolSize;
+            }
+
+            public void setCorePoolSize(int corePoolSize) {
+                this.corePoolSize = Math.max(1, Math.min(50, corePoolSize));
+            }
+
+            public int getMaxPoolSize() {
+                return maxPoolSize;
+            }
+
+            public void setMaxPoolSize(int maxPoolSize) {
+                this.maxPoolSize = Math.max(1, Math.min(50, maxPoolSize));
+            }
+
+            public int getQueueCapacity() {
+                return queueCapacity;
+            }
+
+            public void setQueueCapacity(int queueCapacity) {
+                this.queueCapacity = Math.max(1, Math.min(10_000, queueCapacity));
             }
         }
     }

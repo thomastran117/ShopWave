@@ -1,11 +1,21 @@
 package backend.services.impl;
 
+import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.MultiMatchQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.TermQuery;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.elasticsearch.client.elc.NativeQuery;
+import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
+import org.springframework.data.elasticsearch.core.SearchHits;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import backend.documents.ProductDocument;
 import backend.dtos.requests.product.AddProductImageRequest;
 import backend.dtos.requests.product.BatchCreateProductsRequest;
 import backend.dtos.requests.product.BatchDeleteProductsRequest;
@@ -47,6 +57,7 @@ import backend.services.intf.ProductService;
 import java.math.BigDecimal;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -55,6 +66,7 @@ import java.util.stream.Stream;
 @Service
 public class ProductServiceImpl implements ProductService {
 
+    private static final Logger log = LoggerFactory.getLogger(ProductServiceImpl.class);
     private static final Set<String> SORTABLE_FIELDS = Set.of("name", "price", "createdAt", "stock");
 
     private final ProductRepository productRepository;
@@ -64,6 +76,8 @@ public class ProductServiceImpl implements ProductService {
     private final ProductVariantRepository productVariantRepository;
     private final ProductAttributeRepository productAttributeRepository;
     private final BundleRepository bundleRepository;
+    private final ProductIndexingService productIndexingService;
+    private final ElasticsearchOperations elasticsearchOperations;
 
     public ProductServiceImpl(
             ProductRepository productRepository,
@@ -72,7 +86,9 @@ public class ProductServiceImpl implements ProductService {
             ProductOptionRepository productOptionRepository,
             ProductVariantRepository productVariantRepository,
             ProductAttributeRepository productAttributeRepository,
-            BundleRepository bundleRepository) {
+            BundleRepository bundleRepository,
+            ProductIndexingService productIndexingService,
+            ElasticsearchOperations elasticsearchOperations) {
         this.productRepository = productRepository;
         this.companyRepository = companyRepository;
         this.productImageRepository = productImageRepository;
@@ -80,6 +96,8 @@ public class ProductServiceImpl implements ProductService {
         this.productVariantRepository = productVariantRepository;
         this.productAttributeRepository = productAttributeRepository;
         this.bundleRepository = bundleRepository;
+        this.productIndexingService = productIndexingService;
+        this.elasticsearchOperations = elasticsearchOperations;
     }
 
     @Override
@@ -106,6 +124,57 @@ public class ProductServiceImpl implements ProductService {
         Sort.Direction sortDir = "asc".equalsIgnoreCase(direction) ? Sort.Direction.ASC : Sort.Direction.DESC;
         Pageable pageable = PageRequest.of(page, size, Sort.by(sortDir, sortField));
 
+        // --- Elasticsearch path ---
+        try {
+            BoolQuery.Builder bq = new BoolQuery.Builder()
+                    .filter(TermQuery.of(t -> t.field("companyId").value(companyId))._toQuery());
+
+            if (q != null && !q.isBlank()) {
+                bq.must(MultiMatchQuery.of(mm -> mm
+                        .fields("name^3", "description", "brand^2", "category", "tags")
+                        .query(q))._toQuery());
+            }
+            if (status   != null) bq.filter(TermQuery.of(t -> t.field("status").value(status.name()))._toQuery());
+            if (category != null) bq.filter(TermQuery.of(t -> t.field("category").value(category))._toQuery());
+            if (brand    != null) bq.filter(TermQuery.of(t -> t.field("brand").value(brand))._toQuery());
+            if (featured != null) bq.filter(TermQuery.of(t -> t.field("featured").value(featured))._toQuery());
+            if (listed   != null) bq.filter(TermQuery.of(t -> t.field("listed").value(listed))._toQuery());
+            if (minPrice != null || maxPrice != null) {
+                final Double minVal = minPrice != null ? minPrice.doubleValue() : null;
+                final Double maxVal = maxPrice != null ? maxPrice.doubleValue() : null;
+                bq.filter(co.elastic.clients.elasticsearch._types.query_dsl.RangeQuery.of(r -> r.number(n -> {
+                    n.field("price");
+                    if (minVal != null) n.gte(minVal);
+                    if (maxVal != null) n.lte(maxVal);
+                    return n;
+                }))._toQuery());
+            }
+
+            NativeQuery esQuery = NativeQuery.builder()
+                    .withQuery(bq.build()._toQuery())
+                    .withPageable(pageable)
+                    .build();
+
+            SearchHits<ProductDocument> hits = elasticsearchOperations.search(esQuery, ProductDocument.class);
+            List<Long> ids = hits.stream().map(h -> h.getContent().getId()).toList();
+
+            Map<Long, Product> productMap = productRepository
+                    .findAllByIdInAndCompanyId(ids, companyId)
+                    .stream()
+                    .collect(Collectors.toMap(Product::getId, p -> p));
+
+            List<ProductResponse> content = ids.stream()
+                    .filter(productMap::containsKey)
+                    .map(id -> toResponse(productMap.get(id)))
+                    .toList();
+
+            return new PagedResponse<>(new PageImpl<>(content, pageable, hits.getTotalHits()));
+
+        } catch (Exception e) {
+            log.warn("[SEARCH] Elasticsearch unavailable, falling back to database: {}", e.getMessage());
+        }
+
+        // --- JPA fallback ---
         return new PagedResponse<>(
                 productRepository
                         .findAll(ProductSpecification.withFilters(companyId, q, category, brand, minPrice, maxPrice, featured, status, listed), pageable)
@@ -160,7 +229,9 @@ public class ProductServiceImpl implements ProductService {
         product.setListed(request.isListed());
         product.setStatus(ProductStatus.DRAFT);
 
-        return toResponse(productRepository.save(product));
+        Product saved = productRepository.save(product);
+        productIndexingService.indexProduct(saved);
+        return toResponse(saved);
     }
 
     @Override
@@ -205,7 +276,9 @@ public class ProductServiceImpl implements ProductService {
             throw new BadRequestException("Product must have at least one image before it can be made active or listed");
         }
 
-        return toResponse(productRepository.save(product));
+        Product saved = productRepository.save(product);
+        productIndexingService.indexProduct(saved);
+        return toResponse(saved);
     }
 
     @Override
@@ -221,6 +294,7 @@ public class ProductServiceImpl implements ProductService {
         }
 
         productRepository.delete(product);
+        productIndexingService.removeProduct(productId);
     }
 
     @Override
@@ -257,7 +331,9 @@ public class ProductServiceImpl implements ProductService {
             product.setListed(req.isListed());
             product.setStatus(ProductStatus.DRAFT);
 
-            results.add(toResponse(productRepository.save(product)));
+            Product saved = productRepository.save(product);
+            productIndexingService.indexProduct(saved);
+            results.add(toResponse(saved));
         }
 
         return results;
@@ -276,6 +352,9 @@ public class ProductServiceImpl implements ProductService {
         }
 
         productRepository.deleteAll(products);
+        for (Long id : request.getIds()) {
+            productIndexingService.removeProduct(id);
+        }
     }
 
     // --- Images ---
