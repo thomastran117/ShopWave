@@ -9,15 +9,19 @@ import backend.dtos.requests.company.CreateCompanyRequest;
 import backend.dtos.requests.company.UpdateCompanyRequest;
 import backend.dtos.responses.company.CompanyResponse;
 import backend.dtos.responses.general.PagedResponse;
+import backend.dtos.responses.upload.PresignUploadResponse;
 import backend.exceptions.http.ConflictException;
+import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
 import backend.models.core.Company;
 import backend.models.core.User;
 import backend.models.enums.CompanyStatus;
+import backend.models.enums.UploadFolder;
 import backend.repositories.CompanyRepository;
 import backend.repositories.UserRepository;
 import backend.repositories.specifications.CompanySpecification;
 import backend.services.intf.CompanyService;
+import backend.services.intf.StorageService;
 
 import java.util.List;
 import java.util.Set;
@@ -27,10 +31,15 @@ public class CompanyServiceImpl implements CompanyService {
 
     private final CompanyRepository companyRepository;
     private final UserRepository userRepository;
+    private final StorageService storageService;
 
-    public CompanyServiceImpl(CompanyRepository companyRepository, UserRepository userRepository) {
+    public CompanyServiceImpl(
+            CompanyRepository companyRepository,
+            UserRepository userRepository,
+            StorageService storageService) {
         this.companyRepository = companyRepository;
         this.userRepository = userRepository;
+        this.storageService = storageService;
     }
 
     private static final Set<String> SORTABLE_FIELDS = Set.of("name", "createdAt", "foundedYear", "employeeCount");
@@ -139,6 +148,13 @@ public class CompanyServiceImpl implements CompanyService {
         Company company = companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Company not found with id: " + companyId));
         companyRepository.delete(company);
+    }
+
+    @Override
+    public PresignUploadResponse generateLogoUploadUrl(long companyId, long ownerId, String contentType) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+        return storageService.generatePresignedUrl(UploadFolder.COMPANY_LOGO, ownerId, contentType);
     }
 
     private CompanyResponse toResponse(Company company) {

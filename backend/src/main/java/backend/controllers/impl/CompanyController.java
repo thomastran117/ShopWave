@@ -12,6 +12,7 @@ import backend.dtos.requests.company.CreateCompanyRequest;
 import backend.dtos.requests.company.UpdateCompanyRequest;
 import backend.dtos.responses.company.CompanyResponse;
 import backend.dtos.responses.general.PagedResponse;
+import backend.dtos.responses.upload.PresignUploadResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.exceptions.http.InternalServerErrorException;
 import backend.models.enums.CompanyStatus;
@@ -100,6 +101,21 @@ public class CompanyController {
         try {
             long userId = resolveUserId();
             return ResponseEntity.ok(companyService.updateCompany(id, userId, request));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/{id}/logo/presign")
+    @RequireAuth
+    public ResponseEntity<PresignUploadResponse> presignLogoUpload(
+            @PathVariable long id,
+            @RequestParam String contentType) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(companyService.generateLogoUploadUrl(id, userId, contentType));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
