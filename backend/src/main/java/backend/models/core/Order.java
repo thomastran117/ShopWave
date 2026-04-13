@@ -42,6 +42,19 @@ public class Order {
     @Column(nullable = false, precision = 14, scale = 2)
     private BigDecimal totalAmount;
 
+    /** FK to the coupon applied at checkout. Null if no coupon was used. */
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "coupon_id", nullable = true)
+    private Coupon coupon;
+
+    /** Snapshot of the coupon code at order time. Null if no coupon was used. */
+    @Column(nullable = true, length = 50)
+    private String couponCode;
+
+    /** Amount deducted from the pre-coupon total. Zero if no coupon was applied. */
+    @Column(nullable = false, precision = 12, scale = 2)
+    private BigDecimal couponDiscountAmount = BigDecimal.ZERO;
+
     @Column(nullable = false, length = 3)
     private String currency = "USD";
 

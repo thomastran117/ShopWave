@@ -28,14 +28,19 @@ import backend.models.core.Product;
 import backend.models.core.ProductBundle;
 import backend.models.core.ProductVariant;
 import backend.models.core.User;
+import backend.models.core.Coupon;
+import backend.models.core.CouponRedemption;
 import backend.models.core.Discount;
 import backend.models.enums.AdjustmentReason;
 import backend.models.enums.CompensationStatus;
 import backend.models.enums.CompensationType;
+import backend.models.enums.DiscountStatus;
 import backend.models.enums.DiscountType;
 import backend.models.enums.OrderStatus;
 import backend.models.enums.ProductStatus;
 import backend.repositories.BundleRepository;
+import backend.repositories.CouponRepository;
+import backend.repositories.CouponRedemptionRepository;
 import backend.repositories.DiscountRepository;
 import backend.repositories.CompanyRepository;
 import backend.repositories.InventoryAdjustmentRepository;
@@ -80,6 +85,8 @@ public class OrderServiceImpl implements OrderService {
     private final UserRepository userRepository;
     private final CompanyRepository companyRepository;
     private final DiscountRepository discountRepository;
+    private final CouponRepository couponRepository;
+    private final CouponRedemptionRepository couponRedemptionRepository;
     private final PaymentService paymentService;
     private final CacheService cacheService;
     private final StockAlertService stockAlertService;
@@ -97,6 +104,8 @@ public class OrderServiceImpl implements OrderService {
             UserRepository userRepository,
             CompanyRepository companyRepository,
             DiscountRepository discountRepository,
+            CouponRepository couponRepository,
+            CouponRedemptionRepository couponRedemptionRepository,
             PaymentService paymentService,
             CacheService cacheService,
             StockAlertService stockAlertService,
@@ -112,6 +121,8 @@ public class OrderServiceImpl implements OrderService {
         this.userRepository = userRepository;
         this.companyRepository = companyRepository;
         this.discountRepository = discountRepository;
+        this.couponRepository = couponRepository;
+        this.couponRedemptionRepository = couponRedemptionRepository;
         this.paymentService = paymentService;
         this.cacheService = cacheService;
         this.stockAlertService = stockAlertService;
@@ -380,13 +391,58 @@ public class OrderServiceImpl implements OrderService {
             }
 
             String currency = request.getCurrency() != null ? request.getCurrency().toLowerCase() : "usd";
-            long amountInCents = totalAmount.multiply(BigDecimal.valueOf(100))
+
+            // --- Coupon validation and application ---
+            BigDecimal couponDiscountAmount = BigDecimal.ZERO;
+            String appliedCouponCode = null;
+            Coupon appliedCoupon = null;
+
+            if (request.getCouponCode() != null && !request.getCouponCode().isBlank()) {
+                String code = request.getCouponCode().trim().toUpperCase();
+                Coupon coupon = couponRepository.findByCodeIgnoreCase(code)
+                        .orElseThrow(() -> new BadRequestException("Coupon code '" + code + "' is not valid"));
+
+                Instant couponNow = Instant.now();
+                boolean expired   = coupon.getEndDate()   != null && coupon.getEndDate().isBefore(couponNow);
+                boolean notStarted = coupon.getStartDate() != null && coupon.getStartDate().isAfter(couponNow);
+                if (coupon.getStatus() == DiscountStatus.DISABLED || expired || notStarted) {
+                    throw new BadRequestException("Coupon '" + code + "' is not currently valid");
+                }
+
+                if (coupon.getMinOrderAmount() != null
+                        && totalAmount.compareTo(coupon.getMinOrderAmount()) < 0) {
+                    throw new BadRequestException("Order total must be at least "
+                            + coupon.getMinOrderAmount() + " " + currency.toUpperCase()
+                            + " to use coupon '" + code + "'");
+                }
+
+                if (coupon.getMaxUsesPerUser() != null) {
+                    long perUserCount = couponRedemptionRepository
+                            .countByCouponIdAndUserId(coupon.getId(), userId);
+                    if (perUserCount >= coupon.getMaxUsesPerUser()) {
+                        throw new BadRequestException("You have already used coupon '"
+                                + code + "' the maximum number of times");
+                    }
+                }
+
+                couponDiscountAmount = computeCouponSaving(coupon, totalAmount);
+                appliedCouponCode = code;
+                appliedCoupon = coupon;
+            }
+
+            BigDecimal finalTotal = totalAmount.subtract(couponDiscountAmount);
+            if (finalTotal.compareTo(BigDecimal.ZERO) < 0) finalTotal = BigDecimal.ZERO;
+
+            long amountInCents = finalTotal.multiply(BigDecimal.valueOf(100))
                     .setScale(0, RoundingMode.HALF_UP)
                     .longValueExact();
 
             Order order = new Order();
             order.setUser(user);
-            order.setTotalAmount(totalAmount);
+            order.setTotalAmount(finalTotal);
+            order.setCouponCode(appliedCouponCode);
+            order.setCouponDiscountAmount(couponDiscountAmount);
+            order.setCoupon(appliedCoupon);
             order.setCurrency(currency);
             order.setStatus(OrderStatus.PENDING);
 
@@ -396,6 +452,21 @@ public class OrderServiceImpl implements OrderService {
             order.setItems(orderItems);
 
             order = orderRepository.save(order);
+
+            // Atomically increment coupon usedCount and record redemption
+            if (appliedCoupon != null) {
+                int incremented = couponRepository.tryIncrementUsedCount(appliedCoupon.getId());
+                if (incremented == 0) {
+                    throw new ConflictException("Coupon '" + appliedCouponCode + "' has reached its usage limit. Please try another.");
+                }
+                CouponRedemption redemption = new CouponRedemption();
+                redemption.setCoupon(appliedCoupon);
+                redemption.setOrder(order);
+                redemption.setUser(user);
+                redemption.setDiscountAmount(couponDiscountAmount);
+                redemption.setRedeemedAt(Instant.now());
+                couponRedemptionRepository.save(redemption);
+            }
 
             // Record PURCHASE adjustments — order is now persisted so orderId is set.
             // previousStock is captured from the in-memory entity while the lock is held: no race condition.
@@ -724,6 +795,15 @@ public class OrderServiceImpl implements OrderService {
         }
         // FIXED_AMOUNT: cap at basePrice so unitPrice is never negative
         return discount.getValue().min(basePrice);
+    }
+
+    private BigDecimal computeCouponSaving(Coupon coupon, BigDecimal orderTotal) {
+        if (coupon.getType() == DiscountType.PERCENTAGE) {
+            return orderTotal.multiply(coupon.getValue())
+                    .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+        }
+        // FIXED_AMOUNT: cap at orderTotal — coupon can't make the total negative
+        return coupon.getValue().min(orderTotal);
     }
 
     private void safeRestoreAll(List<long[]> decrementedProducts, List<long[]> decrementedVariants,
@@ -1119,6 +1199,8 @@ public class OrderServiceImpl implements OrderService {
                 order.getStatus().name(),
                 order.getPaymentIntentId(),
                 order.getPaymentClientSecret(),
+                order.getCouponCode(),
+                order.getCouponDiscountAmount(),
                 order.getCreatedAt(),
                 order.getUpdatedAt()
         );

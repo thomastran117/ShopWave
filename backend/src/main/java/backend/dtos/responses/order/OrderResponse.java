@@ -18,6 +18,8 @@ public class OrderResponse {
     private String status;
     private String paymentIntentId;
     private String paymentClientSecret;
+    private String couponCode;
+    private BigDecimal couponDiscountAmount;
     private Instant createdAt;
     private Instant updatedAt;
 }

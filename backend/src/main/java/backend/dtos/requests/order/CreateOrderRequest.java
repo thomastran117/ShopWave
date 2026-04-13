@@ -19,6 +19,10 @@ public class CreateOrderRequest {
     @Size(min = 3, max = 3, message = "Currency must be a 3-letter ISO code")
     private String currency = "USD";
 
+    /** Optional coupon code to apply at checkout. Validated and applied in the order service. */
+    @Size(max = 50)
+    private String couponCode;
+
     @Getter
     @Setter
     public static class OrderItemRequest {
