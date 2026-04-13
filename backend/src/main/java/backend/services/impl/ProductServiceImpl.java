@@ -46,6 +46,7 @@ import backend.models.core.ProductVariant;
 import backend.models.enums.ProductStatus;
 import backend.repositories.BundleRepository;
 import backend.repositories.CompanyRepository;
+import backend.repositories.DiscountRepository;
 import backend.repositories.ProductAttributeRepository;
 import backend.repositories.ProductImageRepository;
 import backend.repositories.ProductOptionRepository;
@@ -76,6 +77,7 @@ public class ProductServiceImpl implements ProductService {
     private final ProductVariantRepository productVariantRepository;
     private final ProductAttributeRepository productAttributeRepository;
     private final BundleRepository bundleRepository;
+    private final DiscountRepository discountRepository;
     private final ProductIndexingService productIndexingService;
     private final ElasticsearchOperations elasticsearchOperations;
 
@@ -87,6 +89,7 @@ public class ProductServiceImpl implements ProductService {
             ProductVariantRepository productVariantRepository,
             ProductAttributeRepository productAttributeRepository,
             BundleRepository bundleRepository,
+            DiscountRepository discountRepository,
             ProductIndexingService productIndexingService,
             ElasticsearchOperations elasticsearchOperations) {
         this.productRepository = productRepository;
@@ -96,6 +99,7 @@ public class ProductServiceImpl implements ProductService {
         this.productVariantRepository = productVariantRepository;
         this.productAttributeRepository = productAttributeRepository;
         this.bundleRepository = bundleRepository;
+        this.discountRepository = discountRepository;
         this.productIndexingService = productIndexingService;
         this.elasticsearchOperations = elasticsearchOperations;
     }
@@ -293,6 +297,7 @@ public class ProductServiceImpl implements ProductService {
             throw new ConflictException("Product is part of one or more bundles. Remove it from all bundles before deleting.");
         }
 
+        discountRepository.removeProductFromAllDiscounts(productId);
         productRepository.delete(product);
         productIndexingService.removeProduct(productId);
     }
@@ -351,6 +356,7 @@ public class ProductServiceImpl implements ProductService {
             throw new ResourceNotFoundException("One or more products were not found in this company");
         }
 
+        discountRepository.removeProductsFromAllDiscounts(request.getIds());
         productRepository.deleteAll(products);
         for (Long id : request.getIds()) {
             productIndexingService.removeProduct(id);

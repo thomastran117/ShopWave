@@ -28,12 +28,15 @@ import backend.models.core.Product;
 import backend.models.core.ProductBundle;
 import backend.models.core.ProductVariant;
 import backend.models.core.User;
+import backend.models.core.Discount;
 import backend.models.enums.AdjustmentReason;
 import backend.models.enums.CompensationStatus;
 import backend.models.enums.CompensationType;
+import backend.models.enums.DiscountType;
 import backend.models.enums.OrderStatus;
 import backend.models.enums.ProductStatus;
 import backend.repositories.BundleRepository;
+import backend.repositories.DiscountRepository;
 import backend.repositories.CompanyRepository;
 import backend.repositories.InventoryAdjustmentRepository;
 import backend.repositories.InventoryLocationRepository;
@@ -76,6 +79,7 @@ public class OrderServiceImpl implements OrderService {
     private final BundleRepository bundleRepository;
     private final UserRepository userRepository;
     private final CompanyRepository companyRepository;
+    private final DiscountRepository discountRepository;
     private final PaymentService paymentService;
     private final CacheService cacheService;
     private final StockAlertService stockAlertService;
@@ -92,6 +96,7 @@ public class OrderServiceImpl implements OrderService {
             BundleRepository bundleRepository,
             UserRepository userRepository,
             CompanyRepository companyRepository,
+            DiscountRepository discountRepository,
             PaymentService paymentService,
             CacheService cacheService,
             StockAlertService stockAlertService,
@@ -106,6 +111,7 @@ public class OrderServiceImpl implements OrderService {
         this.bundleRepository = bundleRepository;
         this.userRepository = userRepository;
         this.companyRepository = companyRepository;
+        this.discountRepository = discountRepository;
         this.paymentService = paymentService;
         this.cacheService = cacheService;
         this.stockAlertService = stockAlertService;
@@ -264,8 +270,12 @@ public class OrderServiceImpl implements OrderService {
                     item.setVariant(variant);
                     item.setVariantTitle(buildVariantTitle(variant));
                     item.setVariantSku(variant.getSku());
-                    item.setUnitPrice(variant.getPrice());
-                    totalAmount = totalAmount.add(variant.getPrice().multiply(BigDecimal.valueOf(qty)));
+                    BigDecimal variantDiscountAmt = computeDiscountAmount(
+                            product.getCompany().getId(), product.getId(), variant.getPrice());
+                    item.setDiscountAmount(variantDiscountAmt);
+                    BigDecimal effectiveVariantPrice = variant.getPrice().subtract(variantDiscountAmt);
+                    item.setUnitPrice(effectiveVariantPrice);
+                    totalAmount = totalAmount.add(effectiveVariantPrice.multiply(BigDecimal.valueOf(qty)));
                 } else {
                     int prevProductStock = product.getStock() != null ? product.getStock() : 0;
                     int updated = productRepository.decrementStock(product.getId(), qty);
@@ -281,8 +291,12 @@ public class OrderServiceImpl implements OrderService {
                         purchaseRecords.add(new PurchaseRecord(product, null, prevProductStock, prevProductStock - qty));
                     }
 
-                    item.setUnitPrice(product.getPrice());
-                    totalAmount = totalAmount.add(product.getPrice().multiply(BigDecimal.valueOf(qty)));
+                    BigDecimal productDiscountAmt = computeDiscountAmount(
+                            product.getCompany().getId(), product.getId(), product.getPrice());
+                    item.setDiscountAmount(productDiscountAmt);
+                    BigDecimal effectiveProductPrice = product.getPrice().subtract(productDiscountAmt);
+                    item.setUnitPrice(effectiveProductPrice);
+                    totalAmount = totalAmount.add(effectiveProductPrice.multiply(BigDecimal.valueOf(qty)));
                 }
 
                 // Location stock — skip for backorder items (no stock was reserved)
@@ -688,6 +702,30 @@ public class OrderServiceImpl implements OrderService {
         }
     }
 
+    /**
+     * Returns the largest per-unit saving from any active discount for this product.
+     * Returns ZERO if no discount applies. Called while the product lock is held.
+     */
+    private BigDecimal computeDiscountAmount(long companyId, long productId, BigDecimal basePrice) {
+        List<Discount> candidates =
+                discountRepository.findActiveDiscountsForProduct(companyId, productId, Instant.now());
+        if (candidates.isEmpty()) return BigDecimal.ZERO;
+        return candidates.stream()
+                .map(d -> effectiveSaving(d, basePrice))
+                .max(BigDecimal::compareTo)
+                .filter(s -> s.compareTo(BigDecimal.ZERO) > 0)
+                .orElse(BigDecimal.ZERO);
+    }
+
+    private BigDecimal effectiveSaving(Discount discount, BigDecimal basePrice) {
+        if (discount.getType() == DiscountType.PERCENTAGE) {
+            return basePrice.multiply(discount.getValue())
+                    .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+        }
+        // FIXED_AMOUNT: cap at basePrice so unitPrice is never negative
+        return discount.getValue().min(basePrice);
+    }
+
     private void safeRestoreAll(List<long[]> decrementedProducts, List<long[]> decrementedVariants,
                                 List<long[]> decrementedLocationStocks) {
         for (long[] entry : decrementedProducts) {
@@ -1038,7 +1076,8 @@ public class OrderServiceImpl implements OrderService {
                         item.getFulfillmentLocationName(),
                         item.isBackorder(),
                         item.getBundle() != null ? item.getBundle().getId() : null,
-                        item.getBundleName()))
+                        item.getBundleName(),
+                        item.getDiscountAmount()))
                 .toList();
 
         return new CompanyOrderResponse(
@@ -1066,7 +1105,8 @@ public class OrderServiceImpl implements OrderService {
                         item.getFulfillmentLocationName(),
                         item.isBackorder(),
                         item.getBundle() != null ? item.getBundle().getId() : null,
-                        item.getBundleName()
+                        item.getBundleName(),
+                        item.getDiscountAmount()
                 ))
                 .toList();
 

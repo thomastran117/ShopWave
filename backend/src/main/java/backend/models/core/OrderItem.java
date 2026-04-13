@@ -48,6 +48,10 @@ public class OrderItem {
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal unitPrice;
 
+    /** Per-unit discount applied at order time. Zero if no discount was active. */
+    @Column(nullable = false, precision = 12, scale = 2)
+    private BigDecimal discountAmount = BigDecimal.ZERO;
+
     @Column(nullable = false, length = 255)
     private String productName;
 

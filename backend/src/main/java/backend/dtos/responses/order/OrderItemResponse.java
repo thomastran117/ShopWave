@@ -21,4 +21,5 @@ public class OrderItemResponse {
     private boolean backorder;
     private Long bundleId;
     private String bundleName;
+    private BigDecimal discountAmount;
 }
