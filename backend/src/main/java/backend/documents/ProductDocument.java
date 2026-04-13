@@ -10,6 +10,7 @@ import org.springframework.data.elasticsearch.annotations.Field;
 import org.springframework.data.elasticsearch.annotations.FieldType;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 @Document(indexName = "products")
 @Getter
@@ -50,4 +51,13 @@ public class ProductDocument {
 
     @Field(type = FieldType.Double)
     private BigDecimal price;
+
+    /**
+     * Thematic discount categories currently active for this product
+     * (e.g. "summer", "school", "weekly"). Populated from the discountCategory
+     * field of all ACTIVE, in-window discounts that include this product.
+     * Supports exact-match keyword filtering in product search.
+     */
+    @Field(type = FieldType.Keyword)
+    private List<String> discountCategories;
 }

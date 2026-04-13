@@ -1,8 +1,11 @@
 package backend.repositories.specifications;
 
 import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import org.springframework.data.jpa.domain.Specification;
 
+import backend.models.core.Discount;
 import backend.models.core.Product;
 import backend.models.enums.ProductStatus;
 
@@ -23,8 +26,9 @@ public class ProductSpecification {
      * @param brand      exact match on brand
      * @param minPrice   inclusive lower bound on price
      * @param maxPrice   inclusive upper bound on price
-     * @param featured   when non-null, filters by featured flag
-     * @param status     defaults to ACTIVE when null
+     * @param featured          when non-null, filters by featured flag
+     * @param status            defaults to ACTIVE when null
+     * @param discountCategory  when non-null, restricts to products linked to a discount with this category
      */
     public static Specification<Product> withFilters(
             long companyId,
@@ -35,7 +39,8 @@ public class ProductSpecification {
             BigDecimal maxPrice,
             Boolean featured,
             ProductStatus status,
-            Boolean listed) {
+            Boolean listed,
+            String discountCategory) {
 
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
@@ -77,6 +82,17 @@ public class ProductSpecification {
 
             if (listed != null) {
                 predicates.add(cb.equal(root.get("listed"), listed));
+            }
+
+            if (discountCategory != null && !discountCategory.isBlank()) {
+                // Subquery: products whose id appears in any discount with this category
+                Subquery<Long> subq = query.subquery(Long.class);
+                Root<Discount> discountRoot = subq.from(Discount.class);
+                subq.select(discountRoot.join("products").get("id"))
+                        .where(cb.equal(
+                                cb.lower(discountRoot.get("discountCategory")),
+                                discountCategory.trim().toLowerCase()));
+                predicates.add(root.get("id").in(subq));
             }
 
             return cb.and(predicates.toArray(new Predicate[0]));

@@ -115,6 +115,7 @@ public class ProductServiceImpl implements ProductService {
             Boolean featured,
             ProductStatus status,
             Boolean listed,
+            String discountCategory,
             int page,
             int size,
             String sort,
@@ -138,11 +139,12 @@ public class ProductServiceImpl implements ProductService {
                         .fields("name^3", "description", "brand^2", "category", "tags")
                         .query(q))._toQuery());
             }
-            if (status   != null) bq.filter(TermQuery.of(t -> t.field("status").value(status.name()))._toQuery());
-            if (category != null) bq.filter(TermQuery.of(t -> t.field("category").value(category))._toQuery());
-            if (brand    != null) bq.filter(TermQuery.of(t -> t.field("brand").value(brand))._toQuery());
-            if (featured != null) bq.filter(TermQuery.of(t -> t.field("featured").value(featured))._toQuery());
-            if (listed   != null) bq.filter(TermQuery.of(t -> t.field("listed").value(listed))._toQuery());
+            if (status           != null) bq.filter(TermQuery.of(t -> t.field("status").value(status.name()))._toQuery());
+            if (category         != null) bq.filter(TermQuery.of(t -> t.field("category").value(category))._toQuery());
+            if (brand            != null) bq.filter(TermQuery.of(t -> t.field("brand").value(brand))._toQuery());
+            if (featured         != null) bq.filter(TermQuery.of(t -> t.field("featured").value(featured))._toQuery());
+            if (listed           != null) bq.filter(TermQuery.of(t -> t.field("listed").value(listed))._toQuery());
+            if (discountCategory != null) bq.filter(TermQuery.of(t -> t.field("discountCategories").value(discountCategory.trim().toLowerCase()))._toQuery());
             if (minPrice != null || maxPrice != null) {
                 final Double minVal = minPrice != null ? minPrice.doubleValue() : null;
                 final Double maxVal = maxPrice != null ? maxPrice.doubleValue() : null;
@@ -181,7 +183,7 @@ public class ProductServiceImpl implements ProductService {
         // --- JPA fallback ---
         return new PagedResponse<>(
                 productRepository
-                        .findAll(ProductSpecification.withFilters(companyId, q, category, brand, minPrice, maxPrice, featured, status, listed), pageable)
+                        .findAll(ProductSpecification.withFilters(companyId, q, category, brand, minPrice, maxPrice, featured, status, listed, discountCategory), pageable)
                         .map(this::toResponse)
         );
     }

@@ -40,6 +40,23 @@ public interface DiscountRepository extends JpaRepository<Discount, Long> {
             @Param("now") Instant now);
 
     /**
+     * Returns the distinct non-null discountCategory values of all ACTIVE, in-window discounts
+     * that include the given product. Used by ProductIndexingService to populate the
+     * discountCategories field in Elasticsearch.
+     */
+    @Query("""
+            SELECT DISTINCT d.discountCategory FROM Discount d JOIN d.products p
+            WHERE p.id = :productId
+              AND d.discountCategory IS NOT NULL
+              AND d.status = backend.models.enums.DiscountStatus.ACTIVE
+              AND (:now >= d.startDate OR d.startDate IS NULL)
+              AND (:now <  d.endDate   OR d.endDate   IS NULL)
+            """)
+    List<String> findActiveDiscountCategoriesByProductId(
+            @Param("productId") long productId,
+            @Param("now") Instant now);
+
+    /**
      * Bulk-deletes all discounts whose endDate has passed.
      * Called by DiscountExpiryScheduler on a fixed interval.
      * Returns the number of deleted rows for logging.

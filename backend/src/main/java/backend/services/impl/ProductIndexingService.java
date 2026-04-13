@@ -5,6 +5,7 @@ import backend.documents.ProductDocument;
 import backend.models.core.Product;
 import backend.models.core.ProductBundle;
 import backend.repositories.BundleRepository;
+import backend.repositories.DiscountRepository;
 import backend.repositories.ProductRepository;
 import backend.repositories.search.BundleSearchRepository;
 import backend.repositories.search.ProductSearchRepository;
@@ -15,6 +16,9 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
+import java.util.List;
+
 @Component
 public class ProductIndexingService implements ApplicationRunner {
 
@@ -24,16 +28,19 @@ public class ProductIndexingService implements ApplicationRunner {
     private final BundleSearchRepository bundleSearchRepository;
     private final ProductRepository productRepository;
     private final BundleRepository bundleRepository;
+    private final DiscountRepository discountRepository;
 
     public ProductIndexingService(
             ProductSearchRepository productSearchRepository,
             BundleSearchRepository bundleSearchRepository,
             ProductRepository productRepository,
-            BundleRepository bundleRepository) {
+            BundleRepository bundleRepository,
+            DiscountRepository discountRepository) {
         this.productSearchRepository = productSearchRepository;
         this.bundleSearchRepository = bundleSearchRepository;
         this.productRepository = productRepository;
         this.bundleRepository = bundleRepository;
+        this.discountRepository = discountRepository;
     }
 
     @Async("searchExecutor")
@@ -106,6 +113,9 @@ public class ProductIndexingService implements ApplicationRunner {
     }
 
     private ProductDocument toProductDocument(Product p) {
+        List<String> discountCategories = discountRepository
+                .findActiveDiscountCategoriesByProductId(p.getId(), Instant.now());
+
         return new ProductDocument(
                 p.getId(),
                 p.getCompany().getId(),
@@ -118,7 +128,8 @@ public class ProductIndexingService implements ApplicationRunner {
                 p.getStatus() != null ? p.getStatus().name() : null,
                 p.isFeatured(),
                 p.isListed(),
-                p.getPrice()
+                p.getPrice(),
+                discountCategories.isEmpty() ? null : discountCategories
         );
     }
 

@@ -17,6 +17,10 @@ public class UpdateDiscountRequest {
     @Size(max = 255)
     private String name;
 
+    /** Optional thematic label for grouping discounts. Null = no change. */
+    @Size(max = 100)
+    private String discountCategory;
+
     /** "PERCENTAGE" or "FIXED_AMOUNT" — parsed to enum in service. Null = no change. */
     private String type;
 

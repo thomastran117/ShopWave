@@ -20,6 +20,10 @@ public class CreateDiscountRequest {
     @Size(max = 255)
     private String name;
 
+    /** Optional thematic label for grouping discounts (e.g. "summer", "school", "weekly"). */
+    @Size(max = 100)
+    private String discountCategory;
+
     /** "PERCENTAGE" or "FIXED_AMOUNT" — parsed to enum in service with a controlled error message. */
     @NotBlank
     private String type;

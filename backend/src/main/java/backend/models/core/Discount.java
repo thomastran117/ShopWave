@@ -40,6 +40,13 @@ public class Discount {
     @Column(nullable = false, length = 255)
     private String name;
 
+    /**
+     * Optional thematic label for the discount (e.g. "summer", "school", "weekly").
+     * Used to group and filter discounts and their associated products in search.
+     */
+    @Column(nullable = true, length = 100)
+    private String discountCategory;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private DiscountType type;

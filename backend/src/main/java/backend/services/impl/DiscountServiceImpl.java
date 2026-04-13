@@ -1,5 +1,7 @@
 package backend.services.impl;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -11,6 +13,7 @@ import backend.dtos.requests.discount.UpdateDiscountRequest;
 import backend.dtos.responses.discount.DiscountResponse;
 import backend.dtos.responses.general.PagedResponse;
 import backend.exceptions.http.BadRequestException;
+import backend.exceptions.http.ConflictException;
 import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
 import backend.models.core.Discount;
@@ -20,29 +23,47 @@ import backend.models.enums.DiscountType;
 import backend.repositories.CompanyRepository;
 import backend.repositories.DiscountRepository;
 import backend.repositories.ProductRepository;
+import backend.services.intf.CacheService;
 import backend.services.intf.DiscountService;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class DiscountServiceImpl implements DiscountService {
 
+    private static final Logger log = LoggerFactory.getLogger(DiscountServiceImpl.class);
+
+    // Must match the constants in OrderServiceImpl so the same lock keys are used.
+    private static final String LOCK_PREFIX = "lock:product:";
+    private static final long LOCK_TTL_SECONDS = 10;
+    private static final int LOCK_RETRY_ATTEMPTS = 5;
+    private static final long LOCK_RETRY_DELAY_MS = 100;
+
     private final DiscountRepository discountRepository;
     private final CompanyRepository companyRepository;
     private final ProductRepository productRepository;
+    private final CacheService cacheService;
+    private final ProductIndexingService productIndexingService;
 
     public DiscountServiceImpl(
             DiscountRepository discountRepository,
             CompanyRepository companyRepository,
-            ProductRepository productRepository) {
+            ProductRepository productRepository,
+            CacheService cacheService,
+            ProductIndexingService productIndexingService) {
         this.discountRepository = discountRepository;
         this.companyRepository = companyRepository;
         this.productRepository = productRepository;
+        this.cacheService = cacheService;
+        this.productIndexingService = productIndexingService;
     }
 
     @Override
@@ -80,13 +101,22 @@ public class DiscountServiceImpl implements DiscountService {
         Discount discount = new Discount();
         discount.setCompany(companyRepository.getReferenceById(companyId));
         discount.setName(request.getName());
+        discount.setDiscountCategory(request.getDiscountCategory() != null
+                ? request.getDiscountCategory().trim().toLowerCase() : null);
         discount.setType(type);
         discount.setValue(request.getValue());
         discount.setStartDate(request.getStartDate());
         discount.setEndDate(request.getEndDate());
         discount.setProducts(products);
 
-        return toResponse(discountRepository.save(discount));
+        Discount saved = discountRepository.save(discount);
+
+        // Re-index all products so their discountCategories field is updated in Elasticsearch.
+        for (Product p : products) {
+            productIndexingService.indexProduct(p);
+        }
+
+        return toResponse(saved);
     }
 
     @Override
@@ -98,7 +128,68 @@ public class DiscountServiceImpl implements DiscountService {
         Discount discount = discountRepository.findByIdAndCompanyId(discountId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Discount not found with id: " + discountId));
 
+        // Collect all product IDs that are or will be associated — must lock all of them
+        // to prevent order processing from applying stale discount data.
+        Set<Long> productIdsToLock = discount.getProducts().stream()
+                .map(Product::getId)
+                .collect(Collectors.toCollection(HashSet::new));
+        if (request.getProductIds() != null) {
+            productIdsToLock.addAll(request.getProductIds());
+        }
+
+        List<Long> sortedIds = new ArrayList<>(productIdsToLock);
+        Collections.sort(sortedIds); // sorted order prevents deadlock with OrderServiceImpl
+
+        String lockToken = UUID.randomUUID().toString();
+        List<String> acquiredLocks = new ArrayList<>();
+
+        try {
+            acquireProductLocks(sortedIds, lockToken, acquiredLocks);
+            applyUpdate(discount, request, companyId);
+            Discount saved = discountRepository.save(discount);
+
+            // Re-index all affected products so their discountCategories field reflects the update.
+            for (Product p : saved.getProducts()) {
+                productIndexingService.indexProduct(p);
+            }
+
+            return toResponse(saved);
+        } finally {
+            releaseProductLocks(acquiredLocks, lockToken);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void deleteDiscount(long companyId, long discountId, long ownerId) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Discount discount = discountRepository.findByIdAndCompanyId(discountId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Discount not found with id: " + discountId));
+
+        // Capture before clearing so we can re-index afterward.
+        List<Product> affectedProducts = new ArrayList<>(discount.getProducts());
+
+        // Clear join-table rows first so Hibernate removes them cleanly.
+        discount.getProducts().clear();
+        discountRepository.delete(discount);
+
+        // Re-index all previously associated products so their discountCategories field is cleared.
+        for (Product p : affectedProducts) {
+            productIndexingService.indexProduct(p);
+        }
+    }
+
+    // --- Private helpers ---
+
+    /** Applies non-null fields from the update request onto the discount entity. */
+    private void applyUpdate(Discount discount, UpdateDiscountRequest request, long companyId) {
         if (request.getName() != null) discount.setName(request.getName());
+
+        if (request.getDiscountCategory() != null) {
+            discount.setDiscountCategory(request.getDiscountCategory().trim().toLowerCase());
+        }
 
         DiscountType effectiveType = discount.getType();
         BigDecimal effectiveValue = discount.getValue();
@@ -112,7 +203,7 @@ public class DiscountServiceImpl implements DiscountService {
             discount.setValue(effectiveValue);
         }
 
-        // Re-validate if either type or value changed
+        // Re-validate if either type or value changed.
         if (request.getType() != null || request.getValue() != null) {
             validateValue(effectiveType, effectiveValue);
         }
@@ -141,25 +232,7 @@ public class DiscountServiceImpl implements DiscountService {
         if (request.getProductIds() != null) {
             discount.setProducts(resolveAndValidateProducts(request.getProductIds(), companyId));
         }
-
-        return toResponse(discountRepository.save(discount));
     }
-
-    @Override
-    @Transactional
-    public void deleteDiscount(long companyId, long discountId, long ownerId) {
-        companyRepository.findByIdAndOwnerId(companyId, ownerId)
-                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
-
-        Discount discount = discountRepository.findByIdAndCompanyId(discountId, companyId)
-                .orElseThrow(() -> new ResourceNotFoundException("Discount not found with id: " + discountId));
-
-        // Clear join-table rows first so Hibernate removes them cleanly
-        discount.getProducts().clear();
-        discountRepository.delete(discount);
-    }
-
-    // --- Private helpers ---
 
     private DiscountResponse toResponse(Discount d) {
         Instant now = Instant.now();
@@ -176,6 +249,7 @@ public class DiscountServiceImpl implements DiscountService {
                 d.getId(),
                 d.getCompany().getId(),
                 d.getName(),
+                d.getDiscountCategory(),
                 d.getType(),
                 d.getValue(),
                 effectiveStatus,
@@ -213,5 +287,45 @@ public class DiscountServiceImpl implements DiscountService {
             throw new BadRequestException("One or more product IDs are invalid or do not belong to this company");
         }
         return new HashSet<>(found);
+    }
+
+    // --- Lock helpers (mirror of OrderServiceImpl — same keys, same TTL) ---
+
+    private void acquireProductLocks(List<Long> sortedProductIds, String lockToken, List<String> acquiredLocks) {
+        for (Long productId : sortedProductIds) {
+            String lockKey = LOCK_PREFIX + productId;
+            boolean acquired = false;
+
+            for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
+                if (cacheService.tryLock(lockKey, lockToken, LOCK_TTL_SECONDS)) {
+                    acquiredLocks.add(lockKey);
+                    acquired = true;
+                    break;
+                }
+                try {
+                    Thread.sleep(LOCK_RETRY_DELAY_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    releaseProductLocks(acquiredLocks, lockToken);
+                    throw new ConflictException("Discount update interrupted, please try again");
+                }
+            }
+
+            if (!acquired) {
+                releaseProductLocks(acquiredLocks, lockToken);
+                throw new ConflictException(
+                        "One or more products are currently being ordered. Please try again shortly.");
+            }
+        }
+    }
+
+    private void releaseProductLocks(List<String> lockKeys, String lockToken) {
+        for (String lockKey : lockKeys) {
+            try {
+                cacheService.unlock(lockKey, lockToken);
+            } catch (Exception e) {
+                log.error("Failed to release discount update lock {}: {}", lockKey, e.getMessage());
+            }
+        }
     }
 }

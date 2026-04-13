@@ -11,6 +11,7 @@ public record DiscountResponse(
         Long id,
         Long companyId,
         String name,
+        String discountCategory,
         DiscountType type,
         BigDecimal value,
         DiscountStatus status,
