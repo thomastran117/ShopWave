@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import backend.models.core.Product;
+import backend.repositories.projections.ProductDemandProjection;
 import backend.repositories.projections.ProductSalesProjection;
 
 import java.math.BigDecimal;
@@ -152,4 +153,48 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
     List<ProductSalesProjection> findNeverSold(
             @Param("companyId") long companyId,
             @Param("limit") int limit);
+
+    /**
+     * Returns the top products by units sold in PAID orders placed on or after :since,
+     * scoped to :companyId. Bundle-only items (oi.product_id IS NULL) are excluded.
+     * Used by DemandServiceImpl to compute 1-hour and 24-hour hot-product windows.
+     */
+    @Query(nativeQuery = true, value = """
+            SELECT
+                p.id                             AS productId,
+                p.name                           AS productName,
+                p.sku                            AS sku,
+                p.price                          AS price,
+                p.currency                       AS currency,
+                SUM(oi.quantity)                 AS totalUnitsSold,
+                SUM(oi.quantity * oi.unit_price) AS totalRevenue
+            FROM products p
+            JOIN order_items oi ON oi.product_id = p.id
+            JOIN orders o       ON oi.order_id   = o.id
+            WHERE p.company_id    = :companyId
+              AND o.status        = 'PAID'
+              AND o.created_at   >= :since
+              AND oi.product_id  IS NOT NULL
+            GROUP BY p.id, p.name, p.sku, p.price, p.currency
+            ORDER BY totalUnitsSold DESC
+            LIMIT :limit
+            """)
+    List<ProductDemandProjection> findTopByDemandSince(
+            @Param("companyId") long companyId,
+            @Param("since") Instant since,
+            @Param("limit") int limit);
+
+    /**
+     * Returns distinct company IDs that have at least one PAID product order since :since.
+     * Used by DemandTrackingScheduler to identify companies needing cache pre-warming.
+     */
+    @Query(nativeQuery = true, value = """
+            SELECT DISTINCT p.company_id
+            FROM products p
+            JOIN order_items oi ON oi.product_id = p.id
+            JOIN orders o       ON oi.order_id   = o.id
+            WHERE o.status     = 'PAID'
+              AND o.created_at >= :since
+            """)
+    List<Long> findDistinctCompanyIdsWithPaidOrdersSince(@Param("since") Instant since);
 }

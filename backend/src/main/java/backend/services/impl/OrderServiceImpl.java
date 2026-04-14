@@ -468,6 +468,14 @@ public class OrderServiceImpl implements OrderService {
                 couponRedemptionRepository.save(redemption);
             }
 
+            // Invalidate 1h hot-product demand cache for all companies in this order.
+            // The next API call within the TTL will recompute from the DB (now including this order).
+            orderItems.stream()
+                    .filter(item -> item.getProduct() != null)
+                    .map(item -> item.getProduct().getCompany().getId())
+                    .distinct()
+                    .forEach(cid -> cacheService.delete("demand:hot:1h:" + cid));
+
             // Record PURCHASE adjustments — order is now persisted so orderId is set.
             // previousStock is captured from the in-memory entity while the lock is held: no race condition.
             List<InventoryAdjustment> purchaseAdjs = new ArrayList<>();
