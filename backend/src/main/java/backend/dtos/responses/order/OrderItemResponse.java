@@ -1,5 +1,6 @@
 package backend.dtos.responses.order;
 
+import backend.models.enums.FulfillmentStatus;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
@@ -18,7 +19,7 @@ public class OrderItemResponse {
     private BigDecimal unitPrice;
     private Long fulfillmentLocationId;
     private String fulfillmentLocationName;
-    private boolean backorder;
+    private FulfillmentStatus fulfillmentStatus;
     private Long bundleId;
     private String bundleName;
     private BigDecimal discountAmount;

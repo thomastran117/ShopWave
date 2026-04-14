@@ -20,6 +20,13 @@ public class OrderResponse {
     private String paymentClientSecret;
     private String couponCode;
     private BigDecimal couponDiscountAmount;
+    // Fulfillment fields
+    private String trackingNumber;
+    private String carrier;
+    private Instant shippedAt;
+    private Instant deliveredAt;
+    private Instant returnedAt;
+    private String fulfillmentNote;
     private Instant createdAt;
     private Instant updatedAt;
 }

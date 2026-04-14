@@ -32,11 +32,14 @@ import backend.models.core.User;
 import backend.models.core.Coupon;
 import backend.models.core.CouponRedemption;
 import backend.models.core.Discount;
+import backend.dtos.requests.order.ReturnOrderRequest;
+import backend.dtos.requests.order.ShipOrderRequest;
 import backend.models.enums.AdjustmentReason;
 import backend.models.enums.CompensationStatus;
 import backend.models.enums.CompensationType;
 import backend.models.enums.DiscountStatus;
 import backend.models.enums.DiscountType;
+import backend.models.enums.FulfillmentStatus;
 import backend.models.enums.OrderStatus;
 import backend.models.enums.ProductStatus;
 import backend.repositories.BundleRepository;
@@ -272,7 +275,7 @@ public class OrderServiceImpl implements OrderService {
                     int updated = variantRepository.decrementStock(variantId, qty);
                     if (updated == 0) {
                         if (variant.isBackorderEnabled()) {
-                            item.setBackorder(true);
+                            item.setFulfillmentStatus(FulfillmentStatus.BACKORDERED);
                         } else {
                             safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
                             throw new ConflictException("Insufficient stock for variant of product '" + product.getName() + "'");
@@ -296,7 +299,7 @@ public class OrderServiceImpl implements OrderService {
                     int updated = productRepository.decrementStock(product.getId(), qty);
                     if (updated == 0) {
                         if (product.isBackorderEnabled()) {
-                            item.setBackorder(true);
+                            item.setFulfillmentStatus(FulfillmentStatus.BACKORDERED);
                         } else {
                             safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
                             throw new ConflictException("Insufficient stock for product '" + product.getName() + "'");
@@ -314,8 +317,8 @@ public class OrderServiceImpl implements OrderService {
                     totalAmount = totalAmount.add(effectiveProductPrice.multiply(BigDecimal.valueOf(qty)));
                 }
 
-                // Location stock — skip for backorder items (no stock was reserved)
-                if (!item.isBackorder()) {
+                // Location stock — skip for backordered items (no stock was reserved)
+                if (item.getFulfillmentStatus() != FulfillmentStatus.BACKORDERED) {
                     long variantRefForLoc = (variantId != null) ? variantId : 0L;
                     List<LocationStock> locCandidates = (variantId != null)
                             ? locationStockRepository.findTopByVariantStockDesc(
@@ -448,7 +451,7 @@ public class OrderServiceImpl implements OrderService {
             order.setCouponDiscountAmount(couponDiscountAmount);
             order.setCoupon(appliedCoupon);
             order.setCurrency(currency);
-            order.setStatus(OrderStatus.PENDING);
+            order.setStatus(OrderStatus.RESERVED);
 
             for (OrderItem item : orderItems) {
                 item.setOrder(order);
@@ -577,8 +580,10 @@ public class OrderServiceImpl implements OrderService {
         Order order = orderRepository.findByIdAndUserId(orderId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
 
-        if (order.getStatus() != OrderStatus.PENDING && order.getStatus() != OrderStatus.BACKORDER) {
-            throw new ConflictException("Only pending or backorder orders can be cancelled");
+        if (order.getStatus() != OrderStatus.RESERVED
+                && order.getStatus() != OrderStatus.PAID
+                && order.getStatus() != OrderStatus.PACKED) {
+            throw new ConflictException("Orders can only be cancelled before they are shipped");
         }
 
         order.setStatus(OrderStatus.CANCELLED);
@@ -607,6 +612,7 @@ public class OrderServiceImpl implements OrderService {
                 recordCompensation(order, CompensationType.STOCK_RESTORE,
                         buildRestoreDetail(item) + " failed to restore", CompensationStatus.FAILED, e.getMessage());
             }
+            item.setFulfillmentStatus(FulfillmentStatus.CANCELLED);
         }
 
         order.setCompensated(true);
@@ -617,8 +623,8 @@ public class OrderServiceImpl implements OrderService {
     @Transactional
     public void handlePaymentSuccess(String paymentIntentId) {
         orderRepository.findByPaymentIntentId(paymentIntentId).ifPresent(order -> {
-            boolean hasBackorderItems = order.getItems().stream().anyMatch(OrderItem::isBackorder);
-            order.setStatus(hasBackorderItems ? OrderStatus.BACKORDER : OrderStatus.PAID);
+            // Always PAID — backordered items are tracked via FulfillmentStatus.BACKORDERED per item.
+            order.setStatus(OrderStatus.PAID);
             orderRepository.save(order);
             releaseReservation(order.getId());
         });
@@ -690,9 +696,9 @@ public class OrderServiceImpl implements OrderService {
             }
         }
 
-        if (order.getStatus() == OrderStatus.PENDING) {
+        if (order.getStatus() == OrderStatus.RESERVED) {
             order.setStatus(OrderStatus.FAILED);
-            order.setFailureReason("Compensated by scheduler — stale pending order");
+            order.setFailureReason("Compensated by scheduler — stale reserved order");
         }
         order.setCompensated(true);
         orderRepository.save(order);
@@ -896,7 +902,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     private void restoreItemStock(OrderItem item) {
-        if (item.isBackorder()) return;  // no stock was decremented for backorder items — nothing to restore
+        if (item.getFulfillmentStatus() == FulfillmentStatus.BACKORDERED) return;  // no stock was decremented — nothing to restore
 
         if (item.getBundle() != null) {
             // Restore each constituent product's stock (no location stock for bundle items)
@@ -1110,8 +1116,8 @@ public class OrderServiceImpl implements OrderService {
     @Transactional
     public void fulfillPendingBackorders(long productId, Long variantId, int availableQty, Long fulfillmentLocationId) {
         List<Order> backorders = (variantId != null)
-                ? orderRepository.findBackordersByVariantId(variantId)
-                : orderRepository.findBackordersByProductId(productId);
+                ? orderRepository.findPaidOrdersWithBackorderedVariant(variantId, FulfillmentStatus.BACKORDERED)
+                : orderRepository.findPaidOrdersWithBackorderedProduct(productId, FulfillmentStatus.BACKORDERED);
 
         int remaining = availableQty;
 
@@ -1119,7 +1125,7 @@ public class OrderServiceImpl implements OrderService {
             if (remaining <= 0) break;
 
             for (OrderItem item : order.getItems()) {
-                if (!item.isBackorder()) continue;
+                if (item.getFulfillmentStatus() != FulfillmentStatus.BACKORDERED) continue;
                 if (item.getProduct().getId() != productId) continue;
                 if (variantId != null && (item.getVariant() == null || item.getVariant().getId() != variantId)) continue;
 
@@ -1137,7 +1143,7 @@ public class OrderServiceImpl implements OrderService {
                 }
 
                 remaining -= qty;
-                item.setBackorder(false);
+                item.setFulfillmentStatus(FulfillmentStatus.PENDING); // ready for warehouse packing
 
                 if (fulfillmentLocationId != null) {
                     locationRepository.findById(fulfillmentLocationId).ifPresent(loc -> {
@@ -1158,10 +1164,7 @@ public class OrderServiceImpl implements OrderService {
                 adjustmentRepository.save(adj);
             }
 
-            boolean allFulfilled = order.getItems().stream().noneMatch(OrderItem::isBackorder);
-            if (allFulfilled) {
-                order.setStatus(OrderStatus.PAID);
-            }
+            // Order remains PAID — the merchant will advance it to PACKED once all items are ready.
             orderRepository.save(order);
         }
     }
@@ -1207,21 +1210,7 @@ public class OrderServiceImpl implements OrderService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         List<OrderItemResponse> itemResponses = companyItems.stream()
-                .map(item -> new OrderItemResponse(
-                        item.getId(),
-                        item.getProduct() != null ? item.getProduct().getId() : null,
-                        item.getProductName(),
-                        item.getVariant() != null ? item.getVariant().getId() : null,
-                        item.getVariantTitle(),
-                        item.getVariantSku(),
-                        item.getQuantity(),
-                        item.getUnitPrice(),
-                        item.getFulfillmentLocation() != null ? item.getFulfillmentLocation().getId() : null,
-                        item.getFulfillmentLocationName(),
-                        item.isBackorder(),
-                        item.getBundle() != null ? item.getBundle().getId() : null,
-                        item.getBundleName(),
-                        item.getDiscountAmount()))
+                .map(this::toItemResponse)
                 .toList();
 
         return new CompanyOrderResponse(
@@ -1231,27 +1220,18 @@ public class OrderServiceImpl implements OrderService {
                 order.getCurrency(),
                 total,
                 itemResponses,
+                order.getTrackingNumber(),
+                order.getCarrier(),
+                order.getShippedAt(),
+                order.getDeliveredAt(),
+                order.getReturnedAt(),
+                order.getFulfillmentNote(),
                 order.getCreatedAt());
     }
 
     private OrderResponse toResponse(Order order) {
         List<OrderItemResponse> items = order.getItems().stream()
-                .map(item -> new OrderItemResponse(
-                        item.getId(),
-                        item.getProduct() != null ? item.getProduct().getId() : null,
-                        item.getProductName(),
-                        item.getVariant() != null ? item.getVariant().getId() : null,
-                        item.getVariantTitle(),
-                        item.getVariantSku(),
-                        item.getQuantity(),
-                        item.getUnitPrice(),
-                        item.getFulfillmentLocation() != null ? item.getFulfillmentLocation().getId() : null,
-                        item.getFulfillmentLocationName(),
-                        item.isBackorder(),
-                        item.getBundle() != null ? item.getBundle().getId() : null,
-                        item.getBundleName(),
-                        item.getDiscountAmount()
-                ))
+                .map(this::toItemResponse)
                 .toList();
 
         return new OrderResponse(
@@ -1265,8 +1245,189 @@ public class OrderServiceImpl implements OrderService {
                 order.getPaymentClientSecret(),
                 order.getCouponCode(),
                 order.getCouponDiscountAmount(),
+                order.getTrackingNumber(),
+                order.getCarrier(),
+                order.getShippedAt(),
+                order.getDeliveredAt(),
+                order.getReturnedAt(),
+                order.getFulfillmentNote(),
                 order.getCreatedAt(),
                 order.getUpdatedAt()
         );
+    }
+
+    private OrderItemResponse toItemResponse(OrderItem item) {
+        return new OrderItemResponse(
+                item.getId(),
+                item.getProduct() != null ? item.getProduct().getId() : null,
+                item.getProductName(),
+                item.getVariant() != null ? item.getVariant().getId() : null,
+                item.getVariantTitle(),
+                item.getVariantSku(),
+                item.getQuantity(),
+                item.getUnitPrice(),
+                item.getFulfillmentLocation() != null ? item.getFulfillmentLocation().getId() : null,
+                item.getFulfillmentLocationName(),
+                item.getFulfillmentStatus(),
+                item.getBundle() != null ? item.getBundle().getId() : null,
+                item.getBundleName(),
+                item.getDiscountAmount()
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Fulfillment transitions (merchant-facing)
+    // -------------------------------------------------------------------------
+
+    private void validateTransition(Order order, OrderStatus target, OrderStatus... allowed) {
+        if (!Set.of(allowed).contains(order.getStatus())) {
+            throw new ConflictException("Cannot transition order " + order.getId()
+                    + " to " + target + ": current status is " + order.getStatus());
+        }
+    }
+
+    @Override
+    @Transactional
+    public CompanyOrderResponse markAsPacked(long companyId, long orderId, long ownerId) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+
+        validateTransition(order, OrderStatus.PACKED, OrderStatus.PAID);
+
+        for (OrderItem item : order.getItems()) {
+            if (item.getFulfillmentStatus() == FulfillmentStatus.PENDING) {
+                item.setFulfillmentStatus(FulfillmentStatus.PACKED);
+            }
+        }
+        order.setStatus(OrderStatus.PACKED);
+        return toCompanyOrderResponse(orderRepository.save(order), companyId);
+    }
+
+    @Override
+    @Transactional
+    public CompanyOrderResponse markAsShipped(long companyId, long orderId, long ownerId, ShipOrderRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+
+        validateTransition(order, OrderStatus.SHIPPED, OrderStatus.PACKED, OrderStatus.PARTIALLY_FULFILLED);
+
+        Set<Long> targetItemIds = (request.itemIds() != null && !request.itemIds().isEmpty())
+                ? new java.util.HashSet<>(request.itemIds())
+                : null;
+
+        for (OrderItem item : order.getItems()) {
+            if (item.getFulfillmentStatus() != FulfillmentStatus.PACKED) continue;
+            if (targetItemIds != null && !targetItemIds.contains(item.getId())) continue;
+            item.setFulfillmentStatus(FulfillmentStatus.SHIPPED);
+        }
+
+        order.setTrackingNumber(request.trackingNumber());
+        if (request.carrier() != null) order.setCarrier(request.carrier());
+        if (request.note() != null) order.setFulfillmentNote(request.note());
+        order.setShippedAt(Instant.now());
+
+        // Compute order-level status from item statuses
+        boolean anyPacked = order.getItems().stream()
+                .anyMatch(i -> i.getFulfillmentStatus() == FulfillmentStatus.PACKED
+                            || i.getFulfillmentStatus() == FulfillmentStatus.PENDING);
+        boolean allDoneOrShipped = order.getItems().stream()
+                .allMatch(i -> i.getFulfillmentStatus() == FulfillmentStatus.SHIPPED
+                            || i.getFulfillmentStatus() == FulfillmentStatus.CANCELLED
+                            || i.getFulfillmentStatus() == FulfillmentStatus.BACKORDERED);
+
+        if (allDoneOrShipped) {
+            order.setStatus(OrderStatus.SHIPPED);
+        } else if (anyPacked) {
+            order.setStatus(OrderStatus.PARTIALLY_FULFILLED);
+        }
+        // else: remains PARTIALLY_FULFILLED if called again for remaining items
+
+        return toCompanyOrderResponse(orderRepository.save(order), companyId);
+    }
+
+    @Override
+    @Transactional
+    public CompanyOrderResponse markAsDelivered(long companyId, long orderId, long ownerId) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+
+        validateTransition(order, OrderStatus.DELIVERED, OrderStatus.SHIPPED, OrderStatus.PARTIALLY_FULFILLED);
+
+        for (OrderItem item : order.getItems()) {
+            if (item.getFulfillmentStatus() == FulfillmentStatus.SHIPPED) {
+                item.setFulfillmentStatus(FulfillmentStatus.DELIVERED);
+            }
+        }
+        order.setDeliveredAt(Instant.now());
+        order.setStatus(OrderStatus.DELIVERED);
+        return toCompanyOrderResponse(orderRepository.save(order), companyId);
+    }
+
+    @Override
+    @Transactional
+    public CompanyOrderResponse initiateReturn(long companyId, long orderId, long ownerId, ReturnOrderRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+
+        validateTransition(order, OrderStatus.RETURNED, OrderStatus.DELIVERED, OrderStatus.SHIPPED);
+
+        Set<Long> targetItemIds = (request.itemIds() != null && !request.itemIds().isEmpty())
+                ? new java.util.HashSet<>(request.itemIds())
+                : null;
+
+        for (OrderItem item : order.getItems()) {
+            if (item.getFulfillmentStatus() != FulfillmentStatus.DELIVERED
+                    && item.getFulfillmentStatus() != FulfillmentStatus.SHIPPED) continue;
+            if (targetItemIds != null && !targetItemIds.contains(item.getId())) continue;
+
+            item.setFulfillmentStatus(FulfillmentStatus.RETURNED);
+
+            if (request.restockItems() && item.getProduct() != null) {
+                try {
+                    if (item.getVariant() != null) {
+                        variantRepository.restoreStock(item.getVariant().getId(), item.getQuantity());
+                    } else {
+                        productRepository.restoreStock(item.getProduct().getId(), item.getQuantity());
+                    }
+                    InventoryAdjustment adj = new InventoryAdjustment();
+                    adj.setProduct(item.getProduct());
+                    adj.setVariant(item.getVariant());
+                    adj.setDelta(item.getQuantity());
+                    adj.setPreviousStock(0);
+                    adj.setNewStock(0);
+                    adj.setReason(AdjustmentReason.FULFILLMENT_RETURN);
+                    adj.setNote("Return for order #" + order.getId());
+                    adj.setOrderId(order.getId());
+                    adjustmentRepository.save(adj);
+                } catch (Exception e) {
+                    log.error("Failed to restock returned item {} on order {}: {}", item.getId(), orderId, e.getMessage());
+                }
+            }
+        }
+
+        if (request.issueRefund() && order.getPaymentIntentId() != null) {
+            try {
+                paymentService.refundPayment(order.getPaymentIntentId(), null);
+            } catch (Exception e) {
+                log.error("Failed to issue refund for order {}: {}", orderId, e.getMessage());
+            }
+        }
+
+        if (request.note() != null) order.setFulfillmentNote(request.note());
+        order.setReturnedAt(Instant.now());
+        order.setStatus(OrderStatus.RETURNED);
+        return toCompanyOrderResponse(orderRepository.save(order), companyId);
     }
 }

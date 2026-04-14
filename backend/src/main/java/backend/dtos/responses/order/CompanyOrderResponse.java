@@ -11,5 +11,11 @@ public record CompanyOrderResponse(
         String currency,
         BigDecimal companyItemsTotal,
         List<OrderItemResponse> items,
+        String trackingNumber,
+        String carrier,
+        Instant shippedAt,
+        Instant deliveredAt,
+        Instant returnedAt,
+        String fulfillmentNote,
         Instant createdAt
 ) {}

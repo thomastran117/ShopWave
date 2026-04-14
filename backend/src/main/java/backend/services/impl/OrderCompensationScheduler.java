@@ -21,7 +21,7 @@ import java.util.List;
  * Periodically compensates stale orders and retries failed compensation records.
  *
  * <ul>
- *   <li><b>Stale orders</b>: PENDING orders older than {@code app.order.stale-minutes} (default 20)
+ *   <li><b>Stale orders</b>: RESERVED orders older than {@code app.order.stale-minutes} (default 20)
  *       that were never compensated — their stock is restored and payment intent cancelled.</li>
  *   <li><b>Failed compensations</b>: individual compensation records that failed on first
  *       attempt are retried up to 5 times with each scheduled run.</li>
@@ -54,7 +54,7 @@ public class OrderCompensationScheduler {
     public void compensateStaleOrders() {
         Instant cutoff = Instant.now().minus(staleOrderMinutes, ChronoUnit.MINUTES);
         List<Order> staleOrders = orderRepository.findAllByStatusAndCompensatedFalseAndCreatedAtBefore(
-                OrderStatus.PENDING, cutoff);
+                OrderStatus.RESERVED, cutoff);
 
         if (!staleOrders.isEmpty()) {
             log.info("Found {} stale pending orders to compensate", staleOrders.size());

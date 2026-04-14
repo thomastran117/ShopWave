@@ -6,6 +6,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import backend.models.enums.FulfillmentStatus;
+
 import java.math.BigDecimal;
 
 @Entity
@@ -63,9 +65,14 @@ public class OrderItem {
     @Column(nullable = true, length = 255)
     private String fulfillmentLocationName;
 
-    /** True when this item was placed against zero stock (backorder). Cleared on fulfillment. */
-    @Column(nullable = false)
-    private boolean backorder = false;
+    /**
+     * Per-item fulfillment lifecycle status. Starts as PENDING (stock available at order time)
+     * or BACKORDERED (zero stock; waiting for restock). Advances through PACKED → SHIPPED →
+     * DELIVERED, or RETURNED / CANCELLED on terminal paths.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private FulfillmentStatus fulfillmentStatus = FulfillmentStatus.PENDING;
 
     /** Non-null for bundle order items; null for regular product items. */
     @ManyToOne(fetch = FetchType.LAZY, optional = true)

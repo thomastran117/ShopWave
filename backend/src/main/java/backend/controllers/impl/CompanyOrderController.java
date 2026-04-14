@@ -6,6 +6,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import backend.annotations.requireAuth.RequireAuth;
+import backend.dtos.requests.order.ReturnOrderRequest;
+import backend.dtos.requests.order.ShipOrderRequest;
 import backend.dtos.responses.general.PagedResponse;
 import backend.dtos.responses.order.CompanyOrderResponse;
 import backend.exceptions.http.AppHttpException;
@@ -13,6 +15,7 @@ import backend.exceptions.http.InternalServerErrorException;
 import backend.models.enums.OrderStatus;
 import backend.services.intf.OrderService;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 
@@ -50,6 +53,64 @@ public class CompanyOrderController {
         try {
             long userId = resolveUserId();
             return ResponseEntity.ok(orderService.getCompanyOrder(companyId, orderId, userId));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/{orderId}/pack")
+    public ResponseEntity<CompanyOrderResponse> markAsPacked(
+            @PathVariable long companyId,
+            @PathVariable long orderId) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(orderService.markAsPacked(companyId, orderId, userId));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/{orderId}/ship")
+    public ResponseEntity<CompanyOrderResponse> markAsShipped(
+            @PathVariable long companyId,
+            @PathVariable long orderId,
+            @RequestBody @Valid ShipOrderRequest request) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(orderService.markAsShipped(companyId, orderId, userId, request));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/{orderId}/deliver")
+    public ResponseEntity<CompanyOrderResponse> markAsDelivered(
+            @PathVariable long companyId,
+            @PathVariable long orderId) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(orderService.markAsDelivered(companyId, orderId, userId));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/{orderId}/return")
+    public ResponseEntity<CompanyOrderResponse> initiateReturn(
+            @PathVariable long companyId,
+            @PathVariable long orderId,
+            @RequestBody @Valid ReturnOrderRequest request) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(orderService.initiateReturn(companyId, orderId, userId, request));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {

@@ -59,8 +59,8 @@ public class Order {
     private String currency = "USD";
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
-    private OrderStatus status = OrderStatus.PENDING;
+    @Column(nullable = false, length = 25)
+    private OrderStatus status = OrderStatus.RESERVED;
 
     @Column(nullable = true, length = 255)
     private String paymentIntentId;
@@ -73,6 +73,38 @@ public class Order {
 
     @Column(nullable = false)
     private boolean compensated = false;
+
+    // -------------------------------------------------------------------------
+    // Fulfillment tracking
+    // -------------------------------------------------------------------------
+
+    /** Carrier tracking number (set when order transitions to SHIPPED). */
+    @Column(nullable = true, length = 100)
+    private String trackingNumber;
+
+    /** Carrier name (e.g. "UPS", "FedEx"). Set alongside trackingNumber. */
+    @Column(nullable = true, length = 60)
+    private String carrier;
+
+    /** Timestamp when all items were handed to the carrier. */
+    @Column(nullable = true)
+    private Instant shippedAt;
+
+    /** Timestamp when delivery was confirmed. */
+    @Column(nullable = true)
+    private Instant deliveredAt;
+
+    /** Timestamp when items were returned by the customer. */
+    @Column(nullable = true)
+    private Instant returnedAt;
+
+    /** Optional note added by the merchant during fulfillment actions. */
+    @Column(nullable = true, length = 500)
+    private String fulfillmentNote;
+
+    // -------------------------------------------------------------------------
+    // Audit
+    // -------------------------------------------------------------------------
 
     @CreatedDate
     @Column(nullable = false, updatable = false)

@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import backend.models.core.Order;
+import backend.models.enums.FulfillmentStatus;
 import backend.models.enums.OrderStatus;
 
 import java.time.Instant;
@@ -31,9 +32,29 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     @Query("SELECT o FROM Order o JOIN o.items oi WHERE o.id = :orderId AND oi.product.company.id = :companyId")
     Optional<Order> findByIdAndProductCompanyId(@Param("orderId") long orderId, @Param("companyId") long companyId);
 
-    @Query("SELECT DISTINCT o FROM Order o JOIN o.items i WHERE o.status = backend.models.enums.OrderStatus.BACKORDER AND i.product.id = :productId AND i.backorder = true ORDER BY o.createdAt ASC")
-    List<Order> findBackordersByProductId(@Param("productId") long productId);
+    /**
+     * FIFO: PAID orders that contain at least one BACKORDERED item for the given product.
+     * Replaces the retired findBackordersByProductId (which queried BACKORDER-status orders).
+     */
+    @Query("SELECT DISTINCT o FROM Order o JOIN o.items i " +
+           "WHERE o.status = backend.models.enums.OrderStatus.PAID " +
+           "AND i.product.id = :productId " +
+           "AND i.fulfillmentStatus = :backordered " +
+           "ORDER BY o.createdAt ASC")
+    List<Order> findPaidOrdersWithBackorderedProduct(
+            @Param("productId") long productId,
+            @Param("backordered") FulfillmentStatus backordered);
 
-    @Query("SELECT DISTINCT o FROM Order o JOIN o.items i WHERE o.status = backend.models.enums.OrderStatus.BACKORDER AND i.variant.id = :variantId AND i.backorder = true ORDER BY o.createdAt ASC")
-    List<Order> findBackordersByVariantId(@Param("variantId") long variantId);
+    /**
+     * FIFO: PAID orders that contain at least one BACKORDERED item for the given variant.
+     * Replaces the retired findBackordersByVariantId.
+     */
+    @Query("SELECT DISTINCT o FROM Order o JOIN o.items i " +
+           "WHERE o.status = backend.models.enums.OrderStatus.PAID " +
+           "AND i.variant.id = :variantId " +
+           "AND i.fulfillmentStatus = :backordered " +
+           "ORDER BY o.createdAt ASC")
+    List<Order> findPaidOrdersWithBackorderedVariant(
+            @Param("variantId") long variantId,
+            @Param("backordered") FulfillmentStatus backordered);
 }
