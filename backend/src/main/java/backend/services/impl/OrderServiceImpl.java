@@ -2,6 +2,7 @@ package backend.services.impl;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -73,6 +74,9 @@ public class OrderServiceImpl implements OrderService {
     private static final int LOCK_RETRY_ATTEMPTS = 5;
     private static final long LOCK_RETRY_DELAY_MS = 100;
     private static final Set<String> SORTABLE_FIELDS = Set.of("createdAt", "totalAmount");
+
+    @Value("${app.order.reservation.ttl-seconds:900}")
+    private int reservationTtlSeconds;
 
     private final OrderRepository orderRepository;
     private final OrderCompensationRepository compensationRepository;
@@ -476,6 +480,10 @@ public class OrderServiceImpl implements OrderService {
                     .distinct()
                     .forEach(cid -> cacheService.delete("demand:hot:1h:" + cid));
 
+            // Write reservation manifest — holds stock in Redis for reservationTtlSeconds (default 15 min).
+            // Released on all terminal paths: payment success, payment failure, stale-order compensation.
+            writeReservation(order.getId(), decrementedProducts, decrementedVariants, decrementedLocationStocks);
+
             // Record PURCHASE adjustments — order is now persisted so orderId is set.
             // previousStock is captured from the in-memory entity while the lock is held: no race condition.
             List<InventoryAdjustment> purchaseAdjs = new ArrayList<>();
@@ -517,6 +525,7 @@ public class OrderServiceImpl implements OrderService {
                 order.setStatus(OrderStatus.FAILED);
                 order.setFailureReason("Payment intent creation failed: " + e.getMessage());
                 orderRepository.save(order);
+                releaseReservation(order.getId());
                 scheduleStockCompensation(order, decrementedProducts, decrementedVariants, decrementedLocationStocks);
                 throw e;
             }
@@ -611,6 +620,7 @@ public class OrderServiceImpl implements OrderService {
             boolean hasBackorderItems = order.getItems().stream().anyMatch(OrderItem::isBackorder);
             order.setStatus(hasBackorderItems ? OrderStatus.BACKORDER : OrderStatus.PAID);
             orderRepository.save(order);
+            releaseReservation(order.getId());
         });
     }
 
@@ -619,6 +629,7 @@ public class OrderServiceImpl implements OrderService {
     public void handlePaymentFailure(String paymentIntentId) {
         orderRepository.findByPaymentIntentId(paymentIntentId).ifPresent(order -> {
             if (order.isCompensated()) return;
+            releaseReservation(order.getId());
 
             order.setStatus(OrderStatus.FAILED);
             order.setFailureReason("Payment failed via webhook");
@@ -649,6 +660,7 @@ public class OrderServiceImpl implements OrderService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void compensateOrder(Order order) {
         if (order.isCompensated()) return;
+        releaseReservation(order.getId());
 
         log.info("Compensating order {} (status={})", order.getId(), order.getStatus());
 
@@ -803,6 +815,50 @@ public class OrderServiceImpl implements OrderService {
         }
         // FIXED_AMOUNT: cap at basePrice so unitPrice is never negative
         return discount.getValue().min(basePrice);
+    }
+
+    /**
+     * Writes a Redis reservation manifest for the given order.
+     * Key: "reserve:order:{orderId}", TTL = reservationTtlSeconds.
+     * Non-critical: failures are logged and swallowed so checkout is not blocked.
+     */
+    private void writeReservation(long orderId,
+                                   List<long[]> products,
+                                   List<long[]> variants,
+                                   List<long[]> locationStocks) {
+        try {
+            StringBuilder sb = new StringBuilder("{\"p\":{");
+            appendReservationEntries(sb, products);
+            sb.append("},\"v\":{");
+            appendReservationEntries(sb, variants);
+            sb.append("},\"ls\":{");
+            appendReservationEntries(sb, locationStocks);
+            sb.append("}}");
+            cacheService.set("reserve:order:" + orderId, sb.toString(), reservationTtlSeconds);
+        } catch (Exception e) {
+            log.warn("[RESERVE] Failed to write reservation for order {}: {}", orderId, e.getMessage());
+        }
+    }
+
+    private static void appendReservationEntries(StringBuilder sb, List<long[]> entries) {
+        boolean first = true;
+        for (long[] e : entries) {
+            if (!first) sb.append(',');
+            sb.append('"').append(e[0]).append("\":").append(e[1]);
+            first = false;
+        }
+    }
+
+    /**
+     * Deletes the Redis reservation manifest for this order.
+     * Idempotent: safe to call even if the key has already expired or was never written.
+     */
+    private void releaseReservation(long orderId) {
+        try {
+            cacheService.delete("reserve:order:" + orderId);
+        } catch (Exception e) {
+            log.warn("[RESERVE] Failed to release reservation for order {}: {}", orderId, e.getMessage());
+        }
     }
 
     private BigDecimal computeCouponSaving(Coupon coupon, BigDecimal orderTotal) {

@@ -2,6 +2,7 @@ package backend.services.impl;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -20,8 +21,8 @@ import java.util.List;
  * Periodically compensates stale orders and retries failed compensation records.
  *
  * <ul>
- *   <li><b>Stale orders</b>: PENDING orders older than 30 minutes that were never compensated
- *       — their stock is restored and payment intent cancelled.</li>
+ *   <li><b>Stale orders</b>: PENDING orders older than {@code app.order.stale-minutes} (default 20)
+ *       that were never compensated — their stock is restored and payment intent cancelled.</li>
  *   <li><b>Failed compensations</b>: individual compensation records that failed on first
  *       attempt are retried up to 5 times with each scheduled run.</li>
  * </ul>
@@ -32,7 +33,9 @@ public class OrderCompensationScheduler {
     private static final Logger log = LoggerFactory.getLogger(OrderCompensationScheduler.class);
 
     private static final int MAX_COMPENSATION_ATTEMPTS = 5;
-    private static final int STALE_ORDER_MINUTES = 30;
+
+    @Value("${app.order.stale-minutes:20}")
+    private int staleOrderMinutes;
 
     private final OrderRepository orderRepository;
     private final OrderCompensationRepository compensationRepository;
@@ -49,7 +52,7 @@ public class OrderCompensationScheduler {
 
     @Scheduled(fixedDelayString = "${app.order.compensation.interval-ms:300000}")
     public void compensateStaleOrders() {
-        Instant cutoff = Instant.now().minus(STALE_ORDER_MINUTES, ChronoUnit.MINUTES);
+        Instant cutoff = Instant.now().minus(staleOrderMinutes, ChronoUnit.MINUTES);
         List<Order> staleOrders = orderRepository.findAllByStatusAndCompensatedFalseAndCreatedAtBefore(
                 OrderStatus.PENDING, cutoff);
 
