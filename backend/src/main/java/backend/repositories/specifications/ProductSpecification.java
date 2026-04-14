@@ -7,6 +7,7 @@ import org.springframework.data.jpa.domain.Specification;
 
 import backend.models.core.Discount;
 import backend.models.core.Product;
+import backend.models.enums.DiscountStatus;
 import backend.models.enums.ProductStatus;
 
 import java.math.BigDecimal;
@@ -29,6 +30,8 @@ public class ProductSpecification {
      * @param featured          when non-null, filters by featured flag
      * @param status            defaults to ACTIVE when null
      * @param discountCategory  when non-null, restricts to products linked to a discount with this category
+     * @param hasDiscount       when true, restricts to products with at least one active discount;
+     *                          when false, restricts to products with no active discount (JPA path: skip false)
      */
     public static Specification<Product> withFilters(
             long companyId,
@@ -40,7 +43,8 @@ public class ProductSpecification {
             Boolean featured,
             ProductStatus status,
             Boolean listed,
-            String discountCategory) {
+            String discountCategory,
+            Boolean hasDiscount) {
 
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
@@ -92,6 +96,22 @@ public class ProductSpecification {
                         .where(cb.equal(
                                 cb.lower(discountRoot.get("discountCategory")),
                                 discountCategory.trim().toLowerCase()));
+                predicates.add(root.get("id").in(subq));
+            }
+
+            if (Boolean.TRUE.equals(hasDiscount)) {
+                // Subquery: products covered by at least one ACTIVE, in-window discount
+                Subquery<Long> subq = query.subquery(Long.class);
+                Root<Discount> dr = subq.from(Discount.class);
+                subq.select(dr.join("products").get("id"))
+                        .where(
+                            cb.equal(dr.get("company").get("id"), companyId),
+                            cb.equal(dr.get("status"), DiscountStatus.ACTIVE),
+                            cb.or(cb.isNull(dr.get("startDate")),
+                                  cb.lessThanOrEqualTo(dr.get("startDate"), cb.currentTimestamp())),
+                            cb.or(cb.isNull(dr.get("endDate")),
+                                  cb.greaterThan(dr.get("endDate"), cb.currentTimestamp()))
+                        );
                 predicates.add(root.get("id").in(subq));
             }
 

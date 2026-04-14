@@ -116,6 +116,7 @@ public class ProductServiceImpl implements ProductService {
             ProductStatus status,
             Boolean listed,
             String discountCategory,
+            Boolean hasDiscount,
             int page,
             int size,
             String sort,
@@ -145,6 +146,7 @@ public class ProductServiceImpl implements ProductService {
             if (featured         != null) bq.filter(TermQuery.of(t -> t.field("featured").value(featured))._toQuery());
             if (listed           != null) bq.filter(TermQuery.of(t -> t.field("listed").value(listed))._toQuery());
             if (discountCategory != null) bq.filter(TermQuery.of(t -> t.field("discountCategories").value(discountCategory.trim().toLowerCase()))._toQuery());
+            if (hasDiscount      != null) bq.filter(TermQuery.of(t -> t.field("hasActiveDiscount").value(hasDiscount))._toQuery());
             if (minPrice != null || maxPrice != null) {
                 final Double minVal = minPrice != null ? minPrice.doubleValue() : null;
                 final Double maxVal = maxPrice != null ? maxPrice.doubleValue() : null;
@@ -183,7 +185,7 @@ public class ProductServiceImpl implements ProductService {
         // --- JPA fallback ---
         return new PagedResponse<>(
                 productRepository
-                        .findAll(ProductSpecification.withFilters(companyId, q, category, brand, minPrice, maxPrice, featured, status, listed, discountCategory), pageable)
+                        .findAll(ProductSpecification.withFilters(companyId, q, category, brand, minPrice, maxPrice, featured, status, listed, discountCategory, hasDiscount), pageable)
                         .map(this::toResponse)
         );
     }
@@ -236,7 +238,7 @@ public class ProductServiceImpl implements ProductService {
         product.setStatus(ProductStatus.DRAFT);
 
         Product saved = productRepository.save(product);
-        productIndexingService.indexProduct(saved);
+        productIndexingService.indexProduct(saved, saved.getCompany().getId());
         return toResponse(saved);
     }
 
@@ -283,7 +285,7 @@ public class ProductServiceImpl implements ProductService {
         }
 
         Product saved = productRepository.save(product);
-        productIndexingService.indexProduct(saved);
+        productIndexingService.indexProduct(saved, saved.getCompany().getId());
         return toResponse(saved);
     }
 
@@ -339,7 +341,7 @@ public class ProductServiceImpl implements ProductService {
             product.setStatus(ProductStatus.DRAFT);
 
             Product saved = productRepository.save(product);
-            productIndexingService.indexProduct(saved);
+            productIndexingService.indexProduct(saved, companyId);
             results.add(toResponse(saved));
         }
 

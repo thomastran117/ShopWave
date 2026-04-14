@@ -1,23 +1,36 @@
 package backend.services.impl;
 
+import backend.configurations.environment.EnvironmentSetting;
 import backend.documents.BundleDocument;
 import backend.documents.ProductDocument;
+import backend.models.core.Discount;
 import backend.models.core.Product;
 import backend.models.core.ProductBundle;
+import backend.models.enums.DiscountType;
 import backend.repositories.BundleRepository;
 import backend.repositories.DiscountRepository;
 import backend.repositories.ProductRepository;
 import backend.repositories.search.BundleSearchRepository;
 import backend.repositories.search.ProductSearchRepository;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
 public class ProductIndexingService implements ApplicationRunner {
@@ -29,96 +42,204 @@ public class ProductIndexingService implements ApplicationRunner {
     private final ProductRepository productRepository;
     private final BundleRepository bundleRepository;
     private final DiscountRepository discountRepository;
+    private final EnvironmentSetting env;
+
+    private volatile LinkedBlockingQueue<IndexingTask> taskQueue;
+    private volatile ExecutorService workerPool;
 
     public ProductIndexingService(
             ProductSearchRepository productSearchRepository,
             BundleSearchRepository bundleSearchRepository,
             ProductRepository productRepository,
             BundleRepository bundleRepository,
-            DiscountRepository discountRepository) {
+            DiscountRepository discountRepository,
+            EnvironmentSetting env) {
         this.productSearchRepository = productSearchRepository;
         this.bundleSearchRepository = bundleSearchRepository;
         this.productRepository = productRepository;
         this.bundleRepository = bundleRepository;
         this.discountRepository = discountRepository;
+        this.env = env;
     }
 
-    @Async("searchExecutor")
-    public void indexProduct(Product product) {
+    @PostConstruct
+    void startWorkers() {
+        EnvironmentSetting.Elasticsearch.Indexing cfg = env.getElasticsearch().getIndexing();
+        taskQueue = new LinkedBlockingQueue<>(cfg.getQueueCapacity());
+        AtomicInteger idx = new AtomicInteger(0);
+        workerPool = Executors.newFixedThreadPool(cfg.getWorkerCount(), r -> {
+            Thread t = new Thread(r, "search-worker-" + idx.getAndIncrement());
+            t.setDaemon(true);
+            return t;
+        });
+        for (int i = 0; i < cfg.getWorkerCount(); i++) {
+            workerPool.submit(this::workerLoop);
+        }
+        log.info("[SEARCH INDEX] Started {} worker(s), queue={}, batch={}",
+                cfg.getWorkerCount(), cfg.getQueueCapacity(), cfg.getBatchSize());
+    }
+
+    @PreDestroy
+    void shutdown() {
+        log.info("[SEARCH INDEX] Shutting down — pending tasks: {}", taskQueue.size());
+        workerPool.shutdownNow();
         try {
-            productSearchRepository.save(toProductDocument(product));
-        } catch (Exception e) {
-            log.warn("[SEARCH INDEX] Failed to index product id={}: {}", product.getId(), e.getMessage());
+            if (!workerPool.awaitTermination(5, TimeUnit.SECONDS)) {
+                log.warn("[SEARCH INDEX] Workers did not terminate within 5s");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
-    @Async("searchExecutor")
-    public void removeProduct(long productId) {
-        try {
-            productSearchRepository.deleteById(productId);
-        } catch (Exception e) {
-            log.warn("[SEARCH INDEX] Failed to remove product id={} from index: {}", productId, e.getMessage());
-        }
-    }
-
-    @Async("searchExecutor")
-    public void indexBundle(ProductBundle bundle) {
-        try {
-            bundleSearchRepository.save(toBundleDocument(bundle));
-        } catch (Exception e) {
-            log.warn("[SEARCH INDEX] Failed to index bundle id={}: {}", bundle.getId(), e.getMessage());
-        }
-    }
-
-    @Async("searchExecutor")
-    public void removeBundle(long bundleId) {
-        try {
-            bundleSearchRepository.deleteById(bundleId);
-        } catch (Exception e) {
-            log.warn("[SEARCH INDEX] Failed to remove bundle id={} from index: {}", bundleId, e.getMessage());
-        }
-    }
+    // -------------------------------------------------------------------------
+    // Public API — called by ProductServiceImpl, BundleServiceImpl, DiscountServiceImpl
+    // -------------------------------------------------------------------------
 
     /**
-     * On startup: bulk-index all existing products and bundles into Elasticsearch
-     * if the index is empty. Skips silently if Elasticsearch is unavailable.
+     * @param companyId must be passed explicitly — product.getCompany().getId() resolved
+     *                  while the entity is still in a JPA session (prevents lazy-load in workers)
      */
+    public void indexProduct(Product product, long companyId) {
+        submit(new IndexingTask.IndexProduct(product, companyId));
+    }
+
+    public void removeProduct(long productId) {
+        submit(new IndexingTask.RemoveProduct(productId));
+    }
+
+    public void indexBundle(ProductBundle bundle) {
+        submit(new IndexingTask.IndexBundle(bundle));
+    }
+
+    public void removeBundle(long bundleId) {
+        submit(new IndexingTask.RemoveBundle(bundleId));
+    }
+
+    private void submit(IndexingTask task) {
+        if (!taskQueue.offer(task)) {
+            log.warn("[SEARCH INDEX] Queue full — dropping task: {}", task);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Startup reindex — non-blocking: queues all entities, workers drain async
+    // -------------------------------------------------------------------------
+
     @Override
     public void run(ApplicationArguments args) {
         try {
             if (productSearchRepository.count() == 0) {
-                for (Product p : productRepository.findAll()) {
-                    try {
-                        productSearchRepository.save(toProductDocument(p));
-                    } catch (Exception ignored) {}
-                }
-                log.info("[SEARCH INDEX] Initial product index populated");
+                productRepository.findAll()
+                        .forEach(p -> submit(new IndexingTask.IndexProduct(p, p.getCompany().getId())));
+                log.info("[SEARCH INDEX] Queued existing products for initial indexing");
             }
         } catch (Exception e) {
-            log.warn("[SEARCH INDEX] Product startup reindex skipped — Elasticsearch may be unavailable: {}", e.getMessage());
+            log.warn("[SEARCH INDEX] Product startup reindex skipped: {}", e.getMessage());
         }
 
         try {
             if (bundleSearchRepository.count() == 0) {
-                for (ProductBundle b : bundleRepository.findAll()) {
-                    try {
-                        bundleSearchRepository.save(toBundleDocument(b));
-                    } catch (Exception ignored) {}
-                }
-                log.info("[SEARCH INDEX] Initial bundle index populated");
+                bundleRepository.findAll()
+                        .forEach(b -> submit(new IndexingTask.IndexBundle(b)));
+                log.info("[SEARCH INDEX] Queued existing bundles for initial indexing");
             }
         } catch (Exception e) {
-            log.warn("[SEARCH INDEX] Bundle startup reindex skipped — Elasticsearch may be unavailable: {}", e.getMessage());
+            log.warn("[SEARCH INDEX] Bundle startup reindex skipped: {}", e.getMessage());
         }
     }
 
-    private ProductDocument toProductDocument(Product p) {
-        List<String> discountCategories = discountRepository
-                .findActiveDiscountCategoriesByProductId(p.getId(), Instant.now());
+    // -------------------------------------------------------------------------
+    // Worker internals
+    // -------------------------------------------------------------------------
+
+    private void workerLoop() {
+        int batchSize = env.getElasticsearch().getIndexing().getBatchSize();
+        while (!Thread.currentThread().isInterrupted()) {
+            try {
+                IndexingTask first = taskQueue.poll(200, TimeUnit.MILLISECONDS);
+                if (first == null) continue;
+                List<IndexingTask> batch = new ArrayList<>(batchSize);
+                batch.add(first);
+                taskQueue.drainTo(batch, batchSize - 1);
+                processBatch(batch);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (Exception e) {
+                log.warn("[SEARCH INDEX] Worker error: {}", e.getMessage());
+            }
+        }
+        // Drain remaining tasks on shutdown
+        List<IndexingTask> remaining = new ArrayList<>();
+        taskQueue.drainTo(remaining);
+        if (!remaining.isEmpty()) {
+            try {
+                processBatch(remaining);
+            } catch (Exception e) {
+                log.warn("[SEARCH INDEX] Shutdown drain error: {}", e.getMessage());
+            }
+        }
+    }
+
+    private void processBatch(List<IndexingTask> batch) {
+        List<ProductDocument> toIndex         = new ArrayList<>();
+        List<Long>            toRemove        = new ArrayList<>();
+        List<BundleDocument>  bundlesToIndex  = new ArrayList<>();
+        List<Long>            bundlesToRemove = new ArrayList<>();
+
+        for (IndexingTask task : batch) {
+            switch (task) {
+                case IndexingTask.IndexProduct  t -> toIndex.add(toProductDocument(t.product(), t.companyId()));
+                case IndexingTask.RemoveProduct t -> toRemove.add(t.productId());
+                case IndexingTask.IndexBundle   t -> bundlesToIndex.add(toBundleDocument(t.bundle()));
+                case IndexingTask.RemoveBundle  t -> bundlesToRemove.add(t.bundleId());
+            }
+        }
+
+        if (!toIndex.isEmpty()) {
+            try { productSearchRepository.saveAll(toIndex); }
+            catch (Exception e) { log.warn("[SEARCH INDEX] saveAll products failed: {}", e.getMessage()); }
+        }
+        if (!toRemove.isEmpty()) {
+            try { productSearchRepository.deleteAllById(toRemove); }
+            catch (Exception e) { log.warn("[SEARCH INDEX] deleteAll products failed: {}", e.getMessage()); }
+        }
+        if (!bundlesToIndex.isEmpty()) {
+            try { bundleSearchRepository.saveAll(bundlesToIndex); }
+            catch (Exception e) { log.warn("[SEARCH INDEX] saveAll bundles failed: {}", e.getMessage()); }
+        }
+        if (!bundlesToRemove.isEmpty()) {
+            try { bundleSearchRepository.deleteAllById(bundlesToRemove); }
+            catch (Exception e) { log.warn("[SEARCH INDEX] deleteAll bundles failed: {}", e.getMessage()); }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Document builders
+    // -------------------------------------------------------------------------
+
+    private ProductDocument toProductDocument(Product p, long companyId) {
+        Instant now = Instant.now();
+        List<Discount> discounts = discountRepository.findActiveDiscountsForProduct(companyId, p.getId(), now);
+
+        List<String> discountCategories = discounts.stream()
+                .map(Discount::getDiscountCategory)
+                .filter(Objects::nonNull)
+                .map(String::toLowerCase)
+                .distinct()
+                .toList();
+
+        BigDecimal bestSaving = discounts.stream()
+                .map(d -> computeSaving(d, p.getPrice()))
+                .max(BigDecimal::compareTo)
+                .orElse(BigDecimal.ZERO);
+
+        boolean hasActiveDiscount = bestSaving.compareTo(BigDecimal.ZERO) > 0;
+        BigDecimal discountedPrice = hasActiveDiscount ? p.getPrice().subtract(bestSaving) : null;
 
         return new ProductDocument(
                 p.getId(),
-                p.getCompany().getId(),
+                companyId,
                 p.getName(),
                 p.getDescription(),
                 p.getSku(),
@@ -129,8 +250,19 @@ public class ProductIndexingService implements ApplicationRunner {
                 p.isFeatured(),
                 p.isListed(),
                 p.getPrice(),
-                discountCategories.isEmpty() ? null : discountCategories
+                discountCategories.isEmpty() ? null : discountCategories,
+                hasActiveDiscount,
+                discountedPrice
         );
+    }
+
+    private BigDecimal computeSaving(Discount discount, BigDecimal price) {
+        if (discount.getType() == DiscountType.PERCENTAGE) {
+            return price.multiply(discount.getValue())
+                    .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+        }
+        // FIXED_AMOUNT: cap at base price — discount can't make price negative
+        return discount.getValue().min(price);
     }
 
     private BundleDocument toBundleDocument(ProductBundle b) {

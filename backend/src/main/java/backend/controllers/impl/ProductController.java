@@ -62,12 +62,13 @@ public class ProductController {
             @RequestParam(required = false) ProductStatus status,
             @RequestParam(required = false) Boolean listed,
             @RequestParam(required = false) String discountCategory,
+            @RequestParam(required = false) Boolean hasDiscount,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size,
             @RequestParam(defaultValue = "createdAt") String sort,
             @RequestParam(defaultValue = "desc") String direction) {
         try {
-            return ResponseEntity.ok(productService.searchProducts(companyId, q, category, brand, minPrice, maxPrice, featured, status, listed, discountCategory, page, size, sort, direction));
+            return ResponseEntity.ok(productService.searchProducts(companyId, q, category, brand, minPrice, maxPrice, featured, status, listed, discountCategory, hasDiscount, page, size, sort, direction));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {

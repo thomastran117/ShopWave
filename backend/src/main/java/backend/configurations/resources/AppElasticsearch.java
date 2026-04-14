@@ -13,9 +13,6 @@ import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
-
-import java.util.concurrent.Executor;
 
 @Configuration
 public class AppElasticsearch {
@@ -47,17 +44,5 @@ public class AppElasticsearch {
 
         RestClientTransport transport = new RestClientTransport(builder.build(), new JacksonJsonpMapper());
         return new ElasticsearchClient(transport);
-    }
-
-    @Bean("searchExecutor")
-    public Executor searchExecutor() {
-        EnvironmentSetting.Elasticsearch.Executor cfg = env.getElasticsearch().getExecutor();
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(cfg.getCorePoolSize());
-        executor.setMaxPoolSize(cfg.getMaxPoolSize());
-        executor.setQueueCapacity(cfg.getQueueCapacity());
-        executor.setThreadNamePrefix("search-async-");
-        executor.initialize();
-        return executor;
     }
 }

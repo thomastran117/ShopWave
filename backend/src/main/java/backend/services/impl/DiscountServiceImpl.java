@@ -111,9 +111,9 @@ public class DiscountServiceImpl implements DiscountService {
 
         Discount saved = discountRepository.save(discount);
 
-        // Re-index all products so their discountCategories field is updated in Elasticsearch.
+        // Re-index all products so their discount fields are updated in Elasticsearch.
         for (Product p : products) {
-            productIndexingService.indexProduct(p);
+            productIndexingService.indexProduct(p, companyId);
         }
 
         return toResponse(saved);
@@ -148,9 +148,9 @@ public class DiscountServiceImpl implements DiscountService {
             applyUpdate(discount, request, companyId);
             Discount saved = discountRepository.save(discount);
 
-            // Re-index all affected products so their discountCategories field reflects the update.
+            // Re-index all affected products so their discount fields reflect the update.
             for (Product p : saved.getProducts()) {
-                productIndexingService.indexProduct(p);
+                productIndexingService.indexProduct(p, companyId);
             }
 
             return toResponse(saved);
@@ -175,9 +175,9 @@ public class DiscountServiceImpl implements DiscountService {
         discount.getProducts().clear();
         discountRepository.delete(discount);
 
-        // Re-index all previously associated products so their discountCategories field is cleared.
+        // Re-index all previously associated products so their discount fields are cleared.
         for (Product p : affectedProducts) {
-            productIndexingService.indexProduct(p);
+            productIndexingService.indexProduct(p, companyId);
         }
     }
 

@@ -909,7 +909,7 @@ public class EnvironmentSetting {
         private String apiKey = "";
         private String username = "";
         private String password = "";
-        private final Executor executor = new Executor();
+        private final Indexing indexing = new Indexing();
 
         public String getHost() {
             return host != null ? host : "localhost";
@@ -959,29 +959,21 @@ public class EnvironmentSetting {
             this.password = password != null ? password : "";
         }
 
-        public Executor getExecutor() {
-            return executor;
+        public Indexing getIndexing() {
+            return indexing;
         }
 
-        public static class Executor {
-            private int corePoolSize = 2;
-            private int maxPoolSize = 4;
-            private int queueCapacity = 200;
+        public static class Indexing {
+            private int workerCount   = 2;
+            private int queueCapacity = 500;
+            private int batchSize     = 25;
 
-            public int getCorePoolSize() {
-                return corePoolSize;
+            public int getWorkerCount() {
+                return workerCount;
             }
 
-            public void setCorePoolSize(int corePoolSize) {
-                this.corePoolSize = Math.max(1, Math.min(50, corePoolSize));
-            }
-
-            public int getMaxPoolSize() {
-                return maxPoolSize;
-            }
-
-            public void setMaxPoolSize(int maxPoolSize) {
-                this.maxPoolSize = Math.max(1, Math.min(50, maxPoolSize));
+            public void setWorkerCount(int workerCount) {
+                this.workerCount = Math.max(1, Math.min(32, workerCount));
             }
 
             public int getQueueCapacity() {
@@ -989,7 +981,15 @@ public class EnvironmentSetting {
             }
 
             public void setQueueCapacity(int queueCapacity) {
-                this.queueCapacity = Math.max(1, Math.min(10_000, queueCapacity));
+                this.queueCapacity = Math.max(10, Math.min(10_000, queueCapacity));
+            }
+
+            public int getBatchSize() {
+                return batchSize;
+            }
+
+            public void setBatchSize(int batchSize) {
+                this.batchSize = Math.max(1, Math.min(500, batchSize));
             }
         }
     }

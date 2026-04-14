@@ -60,4 +60,14 @@ public class ProductDocument {
      */
     @Field(type = FieldType.Keyword)
     private List<String> discountCategories;
+
+    /** True when at least one ACTIVE, in-window discount covers this product. */
+    private boolean hasActiveDiscount;
+
+    /**
+     * The product's effective price after the largest active discount.
+     * Null when hasActiveDiscount is false (base price is authoritative).
+     */
+    @Field(type = FieldType.Double)
+    private BigDecimal discountedPrice;
 }
