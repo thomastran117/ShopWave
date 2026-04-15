@@ -19,6 +19,8 @@ import backend.exceptions.http.ConflictException;
 import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
 import backend.models.core.BundleItem;
+import backend.models.core.Company;
+import backend.models.core.CompanyReturnLocation;
 import backend.models.core.InventoryAdjustment;
 import backend.models.core.Order;
 import backend.models.core.OrderCompensation;
@@ -35,6 +37,7 @@ import backend.models.enums.RefundStatus;
 import backend.models.enums.ReturnReason;
 import backend.models.enums.ReturnStatus;
 import backend.repositories.CompanyRepository;
+import backend.repositories.CompanyReturnLocationRepository;
 import backend.repositories.InventoryAdjustmentRepository;
 import backend.repositories.LocationStockRepository;
 import backend.repositories.OrderCompensationRepository;
@@ -51,11 +54,19 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 @Service
 public class ReturnServiceImpl implements ReturnService {
 
     private static final Logger log = LoggerFactory.getLogger(ReturnServiceImpl.class);
+
+    private static final Set<ReturnReason> EVIDENCE_REQUIRED_REASONS = Set.of(
+            ReturnReason.DEFECTIVE,
+            ReturnReason.WRONG_ITEM,
+            ReturnReason.NOT_AS_DESCRIBED,
+            ReturnReason.DAMAGED_IN_SHIPPING
+    );
 
     private final ReturnRepository returnRepository;
     private final ReturnItemRepository returnItemRepository;
@@ -66,6 +77,7 @@ public class ReturnServiceImpl implements ReturnService {
     private final LocationStockRepository locationStockRepository;
     private final InventoryAdjustmentRepository adjustmentRepository;
     private final CompanyRepository companyRepository;
+    private final CompanyReturnLocationRepository returnLocationRepository;
     private final UserRepository userRepository;
     private final PaymentService paymentService;
 
@@ -79,6 +91,7 @@ public class ReturnServiceImpl implements ReturnService {
             LocationStockRepository locationStockRepository,
             InventoryAdjustmentRepository adjustmentRepository,
             CompanyRepository companyRepository,
+            CompanyReturnLocationRepository returnLocationRepository,
             UserRepository userRepository,
             PaymentService paymentService) {
         this.returnRepository = returnRepository;
@@ -90,6 +103,7 @@ public class ReturnServiceImpl implements ReturnService {
         this.locationStockRepository = locationStockRepository;
         this.adjustmentRepository = adjustmentRepository;
         this.companyRepository = companyRepository;
+        this.returnLocationRepository = returnLocationRepository;
         this.userRepository = userRepository;
         this.paymentService = paymentService;
     }
@@ -108,12 +122,19 @@ public class ReturnServiceImpl implements ReturnService {
             throw new ConflictException("Return requests can only be submitted for DELIVERED orders");
         }
 
+        if (EVIDENCE_REQUIRED_REASONS.contains(request.reason()) &&
+                (request.evidenceUrls() == null || request.evidenceUrls().isEmpty())) {
+            throw new BadRequestException(
+                    "At least one evidence image is required for reason " + request.reason());
+        }
+
         Return ret = new Return();
         ret.setOrder(order);
         ret.setRequestedBy(userRepository.getReferenceById(buyerUserId));
         ret.setStatus(ReturnStatus.REQUESTED);
         ret.setReason(request.reason());
         ret.setBuyerNote(request.buyerNote());
+        ret.setEvidenceUrls(request.evidenceUrls() != null ? new ArrayList<>(request.evidenceUrls()) : new ArrayList<>());
 
         List<ReturnItem> returnItems = buildReturnItems(ret, request.items(), order);
         ret.setItems(returnItems);
@@ -158,7 +179,7 @@ public class ReturnServiceImpl implements ReturnService {
     @Override
     @Transactional
     public ReturnResponse approveReturn(long returnId, long companyId, long ownerId, MerchantApproveReturnRequest request) {
-        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+        Company company = companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
 
         Return ret = returnRepository.findByIdAndCompanyId(returnId, companyId)
@@ -167,6 +188,9 @@ public class ReturnServiceImpl implements ReturnService {
         if (ret.getStatus() != ReturnStatus.REQUESTED) {
             throw new ConflictException("Return " + returnId + " is not in REQUESTED status (current: " + ret.getStatus() + ")");
         }
+
+        CompanyReturnLocation location = resolveReturnLocation(company, request.returnLocationId());
+        snapshotReturnAddress(ret, location);
 
         ret.setApprovedAt(Instant.now());
         ret.setMerchantNote(request.merchantNote());
@@ -247,7 +271,7 @@ public class ReturnServiceImpl implements ReturnService {
     @Override
     @Transactional
     public ReturnResponse merchantInitiateReturn(long orderId, long companyId, long ownerId, MerchantInitiateReturnRequest request) {
-        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+        Company company = companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
 
         Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
@@ -266,6 +290,9 @@ public class ReturnServiceImpl implements ReturnService {
         ret.setMerchantNote(request.merchantNote());
         ret.setRestockItems(request.restockItems());
         ret.setApprovedAt(Instant.now());
+
+        CompanyReturnLocation location = resolveReturnLocation(company, request.returnLocationId());
+        snapshotReturnAddress(ret, location);
 
         List<ReturnItem> returnItems = buildReturnItems(ret, request.items(), order);
         ret.setItems(returnItems);
@@ -555,6 +582,33 @@ public class ReturnServiceImpl implements ReturnService {
         compensationRepository.save(comp);
     }
 
+    /**
+     * Resolves which CompanyReturnLocation to use for a return.
+     * If locationId is provided, it must belong to the company.
+     * Otherwise the primary location is used, falling back to the first available.
+     * Throws ConflictException if the company has no return locations at all.
+     */
+    private CompanyReturnLocation resolveReturnLocation(Company company, Long locationId) {
+        if (locationId != null) {
+            return returnLocationRepository.findByIdAndCompanyId(locationId, company.getId())
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Return location " + locationId + " not found for company " + company.getId()));
+        }
+        return returnLocationRepository.findFirstByCompanyIdAndPrimaryTrue(company.getId())
+                .or(() -> returnLocationRepository.findAllByCompanyId(company.getId()).stream().findFirst())
+                .orElseThrow(() -> new ConflictException(
+                        "Company has no return locations configured. "
+                        + "Add one at POST /companies/" + company.getId() + "/return-locations"));
+    }
+
+    /** Snapshots the return location's address onto the Return entity at approval time. */
+    private void snapshotReturnAddress(Return ret, CompanyReturnLocation loc) {
+        ret.setReturnShipToAddress(loc.getAddress());
+        ret.setReturnShipToCity(loc.getCity());
+        ret.setReturnShipToCountry(loc.getCountry());
+        ret.setReturnShipToPostalCode(loc.getPostalCode());
+    }
+
     // -------------------------------------------------------------------------
     // Response mapping
     // -------------------------------------------------------------------------
@@ -574,6 +628,11 @@ public class ReturnServiceImpl implements ReturnService {
                 ret.getMerchantNote(),
                 ret.isRestockItems(),
                 itemResponses,
+                ret.getEvidenceUrls(),
+                ret.getReturnShipToAddress(),
+                ret.getReturnShipToCity(),
+                ret.getReturnShipToCountry(),
+                ret.getReturnShipToPostalCode(),
                 ret.getRefundedAmountCents(),
                 ret.getRefundStatus().name(),
                 ret.getCreatedAt(),

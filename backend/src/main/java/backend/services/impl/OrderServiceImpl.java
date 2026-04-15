@@ -1422,7 +1422,8 @@ public class OrderServiceImpl implements OrderService {
                 null,                           // no reason in legacy request
                 request.note(),
                 request.restockItems(),
-                request.issueRefund() ? null : 0L  // null=auto-calc, 0=waive
+                request.issueRefund() ? null : 0L,  // null=auto-calc, 0=waive
+                null                            // auto-select primary return location
         );
 
         returnService.merchantInitiateReturn(orderId, companyId, ownerId, translated);

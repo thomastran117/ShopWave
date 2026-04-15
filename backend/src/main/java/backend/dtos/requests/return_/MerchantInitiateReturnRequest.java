@@ -17,5 +17,10 @@ public record MerchantInitiateReturnRequest(
          * 0     = intentionally waive the refund.
          * other = merchant-specified amount (supports restocking-fee deductions).
          */
-        Long refundAmountOverrideCents
+        Long refundAmountOverrideCents,
+        /**
+         * ID of the CompanyReturnLocation the buyer should ship items to.
+         * null = auto-select the primary location, or the first available if no primary is set.
+         */
+        Long returnLocationId
 ) {}

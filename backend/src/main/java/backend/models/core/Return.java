@@ -55,6 +55,22 @@ public class Return {
     @Column(nullable = true, length = 1000)
     private String buyerNote;
 
+    /** S3 public URLs for buyer-supplied evidence images submitted with the return request. */
+    @ElementCollection
+    @CollectionTable(name = "return_evidence_urls", joinColumns = @JoinColumn(name = "return_id"))
+    @Column(name = "url", nullable = false, length = 500)
+    private List<String> evidenceUrls = new ArrayList<>();
+
+    /**
+     * Snapshot of the merchant's return shipping address captured at approval time.
+     * Null until approveReturn() or merchantInitiateReturn() is called. Stored as a snapshot
+     * so future changes to the company's return locations don't affect in-flight returns.
+     */
+    @Column(nullable = true, length = 255) private String returnShipToAddress;
+    @Column(nullable = true, length = 100) private String returnShipToCity;
+    @Column(nullable = true, length = 100) private String returnShipToCountry;
+    @Column(nullable = true, length = 20)  private String returnShipToPostalCode;
+
     /** Merchant note recorded at approval or rejection time. */
     @Column(nullable = true, length = 500)
     private String merchantNote;

@@ -3,7 +3,8 @@ package backend.models.enums;
 public enum UploadFolder {
     COMPANY_LOGO("company-logos"),
     PRODUCT_THUMBNAIL("product-thumbnails"),
-    PRODUCT_IMAGE("product-images");
+    PRODUCT_IMAGE("product-images"),
+    RETURN_EVIDENCE("return-evidence");
 
     private final String path;
 
