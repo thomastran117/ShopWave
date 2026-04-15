@@ -15,6 +15,7 @@ import backend.exceptions.http.InternalServerErrorException;
 import backend.models.enums.OrderStatus;
 import backend.services.intf.OrderService;
 import backend.services.intf.PaymentService;
+import backend.services.intf.ReturnService;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -26,10 +27,12 @@ public class OrderController {
 
     private final OrderService orderService;
     private final PaymentService paymentService;
+    private final ReturnService returnService;
 
-    public OrderController(OrderService orderService, PaymentService paymentService) {
+    public OrderController(OrderService orderService, PaymentService paymentService, ReturnService returnService) {
         this.orderService = orderService;
         this.paymentService = paymentService;
+        this.returnService = returnService;
     }
 
     @PostMapping
@@ -97,8 +100,25 @@ public class OrderController {
             PaymentService.WebhookEvent event = paymentService.constructWebhookEvent(payload, sigHeader);
 
             switch (event.type()) {
-                case "payment_intent.succeeded" -> orderService.handlePaymentSuccess(event.objectId());
+                case "payment_intent.succeeded"      -> orderService.handlePaymentSuccess(event.objectId());
                 case "payment_intent.payment_failed" -> orderService.handlePaymentFailure(event.objectId());
+                case "charge.refunded" -> {
+                    String refundId = event.metadata().get("refundId");
+                    if (refundId != null && !refundId.isBlank()) {
+                        returnService.handleRefundWebhookEvent(
+                                refundId,
+                                event.metadata().get("refundStatus"),
+                                Long.parseLong(event.metadata().getOrDefault("refundAmountCents", "0")));
+                    }
+                }
+                case "refund.updated" -> {
+                    if (event.objectId() != null) {
+                        returnService.handleRefundWebhookEvent(
+                                event.objectId(),
+                                event.metadata().getOrDefault("refundStatus", "pending"),
+                                Long.parseLong(event.metadata().getOrDefault("refundAmountCents", "0")));
+                    }
+                }
                 default -> { }
             }
 

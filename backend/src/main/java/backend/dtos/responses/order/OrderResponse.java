@@ -27,6 +27,8 @@ public class OrderResponse {
     private Instant deliveredAt;
     private Instant returnedAt;
     private String fulfillmentNote;
+    // Refund tracking
+    private long refundedAmountCents;
     private Instant createdAt;
     private Instant updatedAt;
 }

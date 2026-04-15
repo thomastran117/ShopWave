@@ -55,11 +55,14 @@ import backend.repositories.OrderRepository;
 import backend.repositories.ProductRepository;
 import backend.repositories.ProductVariantRepository;
 import backend.repositories.UserRepository;
+import backend.dtos.requests.return_.BuyerReturnItemRequest;
+import backend.dtos.requests.return_.MerchantInitiateReturnRequest;
 import backend.services.intf.CacheService;
 import backend.services.intf.EmailService;
 import backend.services.intf.OrderService;
 import backend.services.intf.PaymentService;
 import backend.services.intf.PaymentService.PaymentIntentResult;
+import backend.services.intf.ReturnService;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -98,6 +101,7 @@ public class OrderServiceImpl implements OrderService {
     private final CacheService cacheService;
     private final StockAlertService stockAlertService;
     private final EmailService emailService;
+    private ReturnService returnService;
 
     public OrderServiceImpl(
             OrderRepository orderRepository,
@@ -134,6 +138,12 @@ public class OrderServiceImpl implements OrderService {
         this.cacheService = cacheService;
         this.stockAlertService = stockAlertService;
         this.emailService = emailService;
+    }
+
+    /** Setter injection breaks the circular dependency: ReturnService → OrderServiceImpl → ReturnService. */
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setReturnService(ReturnService returnService) {
+        this.returnService = returnService;
     }
 
     @Override
@@ -741,9 +751,11 @@ public class OrderServiceImpl implements OrderService {
                     }
                 }
                 case PAYMENT_REFUND -> {
-                    String intentId = extractIntentIdFromDetail(compensation.getDetail());
+                    String detail = compensation.getDetail();
+                    String intentId = extractIntentIdFromDetail(detail);
+                    Long centsToRefund = extractRefundCentsFromDetail(detail);
                     if (intentId != null) {
-                        paymentService.refundPayment(intentId, null);
+                        paymentService.refundPayment(intentId, centsToRefund);
                     }
                 }
             }
@@ -1105,10 +1117,32 @@ public class OrderServiceImpl implements OrderService {
 
     private static String extractIntentIdFromDetail(String detail) {
         if (detail == null) return null;
+        // Structured partial-refund format: "REFUND_PARTIAL:{intentId}:CENTS:{amount}"
+        if (detail.startsWith("REFUND_PARTIAL:")) {
+            String[] parts = detail.split(":");
+            // parts[0]=REFUND_PARTIAL, parts[1]=intentId (may contain underscores), parts[2]=CENTS, parts[3]=amount
+            if (parts.length >= 4) return parts[1];
+        }
         int idx = detail.lastIndexOf(": ");
         if (idx >= 0) return detail.substring(idx + 2).trim();
         idx = detail.lastIndexOf("intent: ");
         if (idx >= 0) return detail.substring(idx + 8).trim();
+        return null;
+    }
+
+    /**
+     * Extracts the refund amount in cents from a structured PAYMENT_REFUND compensation detail.
+     * Returns null for legacy full-refund records (which should call refundPayment with null).
+     * Format: "REFUND_PARTIAL:{intentId}:CENTS:{amountCents}"
+     */
+    private static Long extractRefundCentsFromDetail(String detail) {
+        if (detail == null || !detail.startsWith("REFUND_PARTIAL:")) return null;
+        try {
+            int centsIdx = detail.lastIndexOf(":CENTS:");
+            if (centsIdx >= 0) {
+                return Long.parseLong(detail.substring(centsIdx + 7).trim());
+            }
+        } catch (NumberFormatException ignored) {}
         return null;
     }
 
@@ -1226,6 +1260,7 @@ public class OrderServiceImpl implements OrderService {
                 order.getDeliveredAt(),
                 order.getReturnedAt(),
                 order.getFulfillmentNote(),
+                order.getRefundedAmountCents(),
                 order.getCreatedAt());
     }
 
@@ -1251,6 +1286,7 @@ public class OrderServiceImpl implements OrderService {
                 order.getDeliveredAt(),
                 order.getReturnedAt(),
                 order.getFulfillmentNote(),
+                order.getRefundedAmountCents(),
                 order.getCreatedAt(),
                 order.getUpdatedAt()
         );
@@ -1375,59 +1411,48 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public CompanyOrderResponse initiateReturn(long companyId, long orderId, long ownerId, ReturnOrderRequest request) {
-        companyRepository.findByIdAndOwnerId(companyId, ownerId)
-                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
-
+        // Load order to translate legacy itemIds → BuyerReturnItemRequest list with full quantities
         Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
 
-        validateTransition(order, OrderStatus.RETURNED, OrderStatus.DELIVERED, OrderStatus.SHIPPED);
+        List<BuyerReturnItemRequest> itemRequests = buildLegacyItemRequests(request.itemIds(), order);
 
-        Set<Long> targetItemIds = (request.itemIds() != null && !request.itemIds().isEmpty())
-                ? new java.util.HashSet<>(request.itemIds())
-                : null;
+        MerchantInitiateReturnRequest translated = new MerchantInitiateReturnRequest(
+                itemRequests,
+                null,                           // no reason in legacy request
+                request.note(),
+                request.restockItems(),
+                request.issueRefund() ? null : 0L  // null=auto-calc, 0=waive
+        );
 
-        for (OrderItem item : order.getItems()) {
-            if (item.getFulfillmentStatus() != FulfillmentStatus.DELIVERED
-                    && item.getFulfillmentStatus() != FulfillmentStatus.SHIPPED) continue;
-            if (targetItemIds != null && !targetItemIds.contains(item.getId())) continue;
+        returnService.merchantInitiateReturn(orderId, companyId, ownerId, translated);
 
-            item.setFulfillmentStatus(FulfillmentStatus.RETURNED);
+        // Re-fetch to pick up all state changes made by ReturnService
+        Order updated = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        return toCompanyOrderResponse(updated, companyId);
+    }
 
-            if (request.restockItems() && item.getProduct() != null) {
-                try {
-                    if (item.getVariant() != null) {
-                        variantRepository.restoreStock(item.getVariant().getId(), item.getQuantity());
-                    } else {
-                        productRepository.restoreStock(item.getProduct().getId(), item.getQuantity());
-                    }
-                    InventoryAdjustment adj = new InventoryAdjustment();
-                    adj.setProduct(item.getProduct());
-                    adj.setVariant(item.getVariant());
-                    adj.setDelta(item.getQuantity());
-                    adj.setPreviousStock(0);
-                    adj.setNewStock(0);
-                    adj.setReason(AdjustmentReason.FULFILLMENT_RETURN);
-                    adj.setNote("Return for order #" + order.getId());
-                    adj.setOrderId(order.getId());
-                    adjustmentRepository.save(adj);
-                } catch (Exception e) {
-                    log.error("Failed to restock returned item {} on order {}: {}", item.getId(), orderId, e.getMessage());
-                }
-            }
+    /**
+     * Translates the legacy ReturnOrderRequest.itemIds (List&lt;Long&gt;) to the new request format.
+     * If itemIds is null/empty all returnable items are included. Quantity defaults to the full
+     * order-item quantity (the legacy API had no per-item quantity field).
+     */
+    private List<BuyerReturnItemRequest> buildLegacyItemRequests(List<Long> itemIds, Order order) {
+        List<OrderItem> targets;
+        if (itemIds == null || itemIds.isEmpty()) {
+            targets = order.getItems().stream()
+                    .filter(i -> i.getFulfillmentStatus() == FulfillmentStatus.DELIVERED
+                            || i.getFulfillmentStatus() == FulfillmentStatus.SHIPPED)
+                    .toList();
+        } else {
+            Set<Long> idSet = new java.util.HashSet<>(itemIds);
+            targets = order.getItems().stream()
+                    .filter(i -> idSet.contains(i.getId()))
+                    .toList();
         }
-
-        if (request.issueRefund() && order.getPaymentIntentId() != null) {
-            try {
-                paymentService.refundPayment(order.getPaymentIntentId(), null);
-            } catch (Exception e) {
-                log.error("Failed to issue refund for order {}: {}", orderId, e.getMessage());
-            }
-        }
-
-        if (request.note() != null) order.setFulfillmentNote(request.note());
-        order.setReturnedAt(Instant.now());
-        order.setStatus(OrderStatus.RETURNED);
-        return toCompanyOrderResponse(orderRepository.save(order), companyId);
+        return targets.stream()
+                .map(i -> new BuyerReturnItemRequest(i.getId(), i.getQuantity()))
+                .toList();
     }
 }

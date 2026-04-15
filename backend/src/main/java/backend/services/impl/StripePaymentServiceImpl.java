@@ -6,6 +6,7 @@ import com.stripe.exception.CardException;
 import com.stripe.exception.RateLimitException;
 import com.stripe.exception.SignatureVerificationException;
 import com.stripe.exception.StripeException;
+import com.stripe.model.Charge;
 import com.stripe.model.Customer;
 import com.stripe.model.Event;
 import com.stripe.model.PaymentIntent;
@@ -146,7 +147,9 @@ public class StripePaymentServiceImpl implements PaymentService {
                     ? eventType.substring(0, eventType.indexOf('.'))
                     : eventType;
 
-            return new WebhookEvent(event.getType(), objectId, objectType);
+            Map<String, String> metadata = extractRefundMetadata(eventType, stripeObject);
+
+            return new WebhookEvent(event.getType(), objectId, objectType, metadata);
         } catch (SignatureVerificationException e) {
             throw new BadRequestException("Invalid webhook signature");
         } catch (Exception e) {
@@ -191,6 +194,37 @@ public class StripePaymentServiceImpl implements PaymentService {
                 intent.getStatus(),
                 intent.getCustomer()
         );
+    }
+
+    /**
+     * Extracts refund-specific metadata from a webhook event for charge.refunded and refund.updated events.
+     * Returns an empty map for all other event types.
+     */
+    private Map<String, String> extractRefundMetadata(String eventType, StripeObject stripeObject) {
+        if (stripeObject == null || eventType == null) return Map.of();
+
+        try {
+            if ("charge.refunded".equals(eventType) && stripeObject instanceof Charge charge) {
+                var refunds = charge.getRefunds();
+                if (refunds != null && !refunds.getData().isEmpty()) {
+                    Refund r = refunds.getData().get(0);
+                    return Map.of(
+                            "refundId",         r.getId() != null ? r.getId() : "",
+                            "refundStatus",     r.getStatus() != null ? r.getStatus() : "",
+                            "refundAmountCents", r.getAmount() != null ? String.valueOf(r.getAmount()) : "0"
+                    );
+                }
+            } else if ("refund.updated".equals(eventType) && stripeObject instanceof Refund r) {
+                return Map.of(
+                        "refundId",         r.getId() != null ? r.getId() : "",
+                        "refundStatus",     r.getStatus() != null ? r.getStatus() : "",
+                        "refundAmountCents", r.getAmount() != null ? String.valueOf(r.getAmount()) : "0"
+                );
+            }
+        } catch (Exception e) {
+            // Non-critical: metadata extraction failure should not break webhook processing
+        }
+        return Map.of();
     }
 
     private String extractId(StripeObject obj) {

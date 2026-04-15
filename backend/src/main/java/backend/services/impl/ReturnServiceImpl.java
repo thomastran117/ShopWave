@@ -1,0 +1,600 @@
+package backend.services.impl;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import backend.dtos.requests.return_.BuyerInitiateReturnRequest;
+import backend.dtos.requests.return_.BuyerReturnItemRequest;
+import backend.dtos.requests.return_.InspectReturnItemRequest;
+import backend.dtos.requests.return_.InspectReturnRequest;
+import backend.dtos.requests.return_.MerchantApproveReturnRequest;
+import backend.dtos.requests.return_.MerchantInitiateReturnRequest;
+import backend.dtos.requests.return_.MerchantRejectReturnRequest;
+import backend.dtos.responses.return_.ReturnItemResponse;
+import backend.dtos.responses.return_.ReturnResponse;
+import backend.exceptions.http.BadRequestException;
+import backend.exceptions.http.ConflictException;
+import backend.exceptions.http.ForbiddenException;
+import backend.exceptions.http.ResourceNotFoundException;
+import backend.models.core.BundleItem;
+import backend.models.core.InventoryAdjustment;
+import backend.models.core.Order;
+import backend.models.core.OrderCompensation;
+import backend.models.core.OrderItem;
+import backend.models.core.Return;
+import backend.models.core.ReturnItem;
+import backend.models.core.User;
+import backend.models.enums.AdjustmentReason;
+import backend.models.enums.CompensationStatus;
+import backend.models.enums.CompensationType;
+import backend.models.enums.FulfillmentStatus;
+import backend.models.enums.OrderStatus;
+import backend.models.enums.RefundStatus;
+import backend.models.enums.ReturnReason;
+import backend.models.enums.ReturnStatus;
+import backend.repositories.CompanyRepository;
+import backend.repositories.InventoryAdjustmentRepository;
+import backend.repositories.LocationStockRepository;
+import backend.repositories.OrderCompensationRepository;
+import backend.repositories.OrderRepository;
+import backend.repositories.ProductRepository;
+import backend.repositories.ProductVariantRepository;
+import backend.repositories.ReturnItemRepository;
+import backend.repositories.ReturnRepository;
+import backend.repositories.UserRepository;
+import backend.services.intf.PaymentService;
+import backend.services.intf.ReturnService;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+@Service
+public class ReturnServiceImpl implements ReturnService {
+
+    private static final Logger log = LoggerFactory.getLogger(ReturnServiceImpl.class);
+
+    private final ReturnRepository returnRepository;
+    private final ReturnItemRepository returnItemRepository;
+    private final OrderRepository orderRepository;
+    private final OrderCompensationRepository compensationRepository;
+    private final ProductRepository productRepository;
+    private final ProductVariantRepository variantRepository;
+    private final LocationStockRepository locationStockRepository;
+    private final InventoryAdjustmentRepository adjustmentRepository;
+    private final CompanyRepository companyRepository;
+    private final UserRepository userRepository;
+    private final PaymentService paymentService;
+
+    public ReturnServiceImpl(
+            ReturnRepository returnRepository,
+            ReturnItemRepository returnItemRepository,
+            OrderRepository orderRepository,
+            OrderCompensationRepository compensationRepository,
+            ProductRepository productRepository,
+            ProductVariantRepository variantRepository,
+            LocationStockRepository locationStockRepository,
+            InventoryAdjustmentRepository adjustmentRepository,
+            CompanyRepository companyRepository,
+            UserRepository userRepository,
+            PaymentService paymentService) {
+        this.returnRepository = returnRepository;
+        this.returnItemRepository = returnItemRepository;
+        this.orderRepository = orderRepository;
+        this.compensationRepository = compensationRepository;
+        this.productRepository = productRepository;
+        this.variantRepository = variantRepository;
+        this.locationStockRepository = locationStockRepository;
+        this.adjustmentRepository = adjustmentRepository;
+        this.companyRepository = companyRepository;
+        this.userRepository = userRepository;
+        this.paymentService = paymentService;
+    }
+
+    // -------------------------------------------------------------------------
+    // Buyer-facing
+    // -------------------------------------------------------------------------
+
+    @Override
+    @Transactional
+    public ReturnResponse requestReturn(long orderId, long buyerUserId, BuyerInitiateReturnRequest request) {
+        Order order = orderRepository.findByIdAndUserId(orderId, buyerUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+
+        if (order.getStatus() != OrderStatus.DELIVERED) {
+            throw new ConflictException("Return requests can only be submitted for DELIVERED orders");
+        }
+
+        Return ret = new Return();
+        ret.setOrder(order);
+        ret.setRequestedBy(userRepository.getReferenceById(buyerUserId));
+        ret.setStatus(ReturnStatus.REQUESTED);
+        ret.setReason(request.reason());
+        ret.setBuyerNote(request.buyerNote());
+
+        List<ReturnItem> returnItems = buildReturnItems(ret, request.items(), order);
+        ret.setItems(returnItems);
+
+        return toReturnResponse(returnRepository.save(ret));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ReturnResponse> getReturnsByOrder(long orderId, long buyerUserId) {
+        orderRepository.findByIdAndUserId(orderId, buyerUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        return returnRepository.findAllByOrderId(orderId).stream()
+                .map(this::toReturnResponse)
+                .toList();
+    }
+
+    // -------------------------------------------------------------------------
+    // Merchant-facing
+    // -------------------------------------------------------------------------
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ReturnResponse> getCompanyReturnsByOrder(long orderId, long companyId, long ownerId) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+        return returnRepository.findAllByOrderIdAndCompanyId(orderId, companyId).stream()
+                .map(this::toReturnResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ReturnResponse getCompanyReturn(long returnId, long companyId, long ownerId) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+        Return ret = returnRepository.findByIdAndCompanyId(returnId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Return not found with id: " + returnId));
+        return toReturnResponse(ret);
+    }
+
+    @Override
+    @Transactional
+    public ReturnResponse approveReturn(long returnId, long companyId, long ownerId, MerchantApproveReturnRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Return ret = returnRepository.findByIdAndCompanyId(returnId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Return not found with id: " + returnId));
+
+        if (ret.getStatus() != ReturnStatus.REQUESTED) {
+            throw new ConflictException("Return " + returnId + " is not in REQUESTED status (current: " + ret.getStatus() + ")");
+        }
+
+        ret.setApprovedAt(Instant.now());
+        ret.setMerchantNote(request.merchantNote());
+
+        // Mark items RETURNED so order status can advance — stock restoration is deferred to inspectReturn()
+        for (ReturnItem ri : ret.getItems()) {
+            ri.getOrderItem().setFulfillmentStatus(FulfillmentStatus.RETURNED);
+        }
+
+        issueRefundAtApproval(ret, request.refundAmountOverrideCents());
+        computeOrderStatusAfterReturn(ret.getOrder());
+
+        orderRepository.save(ret.getOrder());
+        return toReturnResponse(returnRepository.save(ret));
+    }
+
+    @Override
+    @Transactional
+    public ReturnResponse inspectReturn(long returnId, long companyId, long ownerId, InspectReturnRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Return ret = returnRepository.findByIdAndCompanyId(returnId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Return not found with id: " + returnId));
+
+        if (ret.getStatus() != ReturnStatus.APPROVED) {
+            throw new ConflictException("Return " + returnId + " must be APPROVED before inspection (current: " + ret.getStatus() + ")");
+        }
+
+        if (request.merchantNote() != null) {
+            ret.setMerchantNote(request.merchantNote());
+        }
+
+        for (InspectReturnItemRequest ir : request.items()) {
+            ReturnItem ri = ret.getItems().stream()
+                    .filter(item -> item.getId().equals(ir.returnItemId()))
+                    .findFirst()
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Return item " + ir.returnItemId() + " not found in return " + returnId));
+
+            ri.setCondition(ir.condition());
+            if (ir.restock()) {
+                try {
+                    restoreReturnedItemStock(ri);
+                    ri.setStockRestored(true);
+                } catch (Exception e) {
+                    log.error("Failed to restore stock for return item {} during inspection: {}", ri.getId(), e.getMessage());
+                }
+            }
+        }
+
+        ret.setStatus(ReturnStatus.COMPLETED);
+        ret.setCompletedAt(Instant.now());
+
+        orderRepository.save(ret.getOrder());
+        return toReturnResponse(returnRepository.save(ret));
+    }
+
+    @Override
+    @Transactional
+    public ReturnResponse rejectReturn(long returnId, long companyId, long ownerId, MerchantRejectReturnRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Return ret = returnRepository.findByIdAndCompanyId(returnId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Return not found with id: " + returnId));
+
+        if (ret.getStatus() != ReturnStatus.REQUESTED) {
+            throw new ConflictException("Return " + returnId + " is not in REQUESTED status (current: " + ret.getStatus() + ")");
+        }
+
+        ret.setStatus(ReturnStatus.REJECTED);
+        ret.setMerchantNote(request.merchantNote());
+
+        return toReturnResponse(returnRepository.save(ret));
+    }
+
+    @Override
+    @Transactional
+    public ReturnResponse merchantInitiateReturn(long orderId, long companyId, long ownerId, MerchantInitiateReturnRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+
+        if (order.getStatus() != OrderStatus.DELIVERED && order.getStatus() != OrderStatus.SHIPPED) {
+            throw new ConflictException("Cannot initiate return for order " + orderId
+                    + ": must be DELIVERED or SHIPPED (current: " + order.getStatus() + ")");
+        }
+
+        Return ret = new Return();
+        ret.setOrder(order);
+        ret.setRequestedBy(null);   // merchant-initiated
+        ret.setStatus(ReturnStatus.REQUESTED);
+        ret.setReason(request.reason());
+        ret.setMerchantNote(request.merchantNote());
+        ret.setRestockItems(request.restockItems());
+        ret.setApprovedAt(Instant.now());
+
+        List<ReturnItem> returnItems = buildReturnItems(ret, request.items(), order);
+        ret.setItems(returnItems);
+
+        processReturnItems(ret, request.restockItems());
+        issueRefundAndFinalize(ret, request.refundAmountOverrideCents());
+
+        orderRepository.save(order);
+        return toReturnResponse(returnRepository.save(ret));
+    }
+
+    // -------------------------------------------------------------------------
+    // Webhook
+    // -------------------------------------------------------------------------
+
+    @Override
+    @Transactional
+    public void handleRefundWebhookEvent(String stripeRefundId, String stripeStatus, long amountCents) {
+        returnRepository.findByStripeRefundId(stripeRefundId).ifPresent(ret -> {
+            RefundStatus newStatus = "succeeded".equals(stripeStatus) ? RefundStatus.SUCCEEDED : RefundStatus.FAILED;
+            ret.setRefundStatus(newStatus);
+            Order order = ret.getOrder();
+
+            if (newStatus == RefundStatus.SUCCEEDED) {
+                // Re-sync in case Stripe's confirmed amount differs (e.g., gateway rounding)
+                long prev = ret.getRefundedAmountCents() != null ? ret.getRefundedAmountCents() : 0L;
+                order.setRefundedAmountCents(order.getRefundedAmountCents() - prev + amountCents);
+                ret.setRefundedAmountCents(amountCents);
+                ret.setRefundFailureReason(null);
+                computeOrderStatusAfterReturn(order);
+            } else {
+                ret.setRefundFailureReason("Stripe webhook reported failure for refund " + stripeRefundId);
+                recordReturnCompensation(order, ret);
+            }
+
+            returnRepository.save(ret);
+            orderRepository.save(order);
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Private helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Validates and constructs ReturnItem rows for the given item requests.
+     * Enforces the double-return guard: queued + new ≤ orderItem.quantity.
+     * Looks up OrderItems from the already-loaded order.getItems() collection.
+     */
+    private List<ReturnItem> buildReturnItems(Return ret, List<BuyerReturnItemRequest> itemRequests, Order order) {
+        List<ReturnItem> returnItems = new ArrayList<>();
+        for (BuyerReturnItemRequest ir : itemRequests) {
+            OrderItem orderItem = order.getItems().stream()
+                    .filter(i -> i.getId().equals(ir.orderItemId()))
+                    .findFirst()
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Order item " + ir.orderItemId() + " not found in order " + order.getId()));
+
+            if (orderItem.getFulfillmentStatus() != FulfillmentStatus.DELIVERED
+                    && orderItem.getFulfillmentStatus() != FulfillmentStatus.SHIPPED) {
+                throw new BadRequestException("Order item " + ir.orderItemId()
+                        + " cannot be returned (fulfillment status: " + orderItem.getFulfillmentStatus() + ")");
+            }
+
+            int alreadyQueued = returnItemRepository.sumReturnedQuantityByOrderItemId(ir.orderItemId());
+            if (alreadyQueued + ir.quantityToReturn() > orderItem.getQuantity()) {
+                throw new BadRequestException("Cannot return " + ir.quantityToReturn()
+                        + " unit(s) of item " + ir.orderItemId() + ": only "
+                        + (orderItem.getQuantity() - alreadyQueued) + " unit(s) remain returnable");
+            }
+
+            ReturnItem ri = new ReturnItem();
+            ri.setReturnRequest(ret);
+            ri.setOrderItem(orderItem);
+            ri.setQuantityReturned(ir.quantityToReturn());
+            returnItems.add(ri);
+        }
+        return returnItems;
+    }
+
+    /**
+     * Marks order items as RETURNED and optionally restores inventory for each ReturnItem.
+     */
+    private void processReturnItems(Return ret, boolean restockItems) {
+        for (ReturnItem ri : ret.getItems()) {
+            ri.getOrderItem().setFulfillmentStatus(FulfillmentStatus.RETURNED);
+
+            if (restockItems) {
+                try {
+                    restoreReturnedItemStock(ri);
+                    ri.setStockRestored(true);
+                } catch (Exception e) {
+                    log.error("Failed to restore stock for return item {} (order item {}): {}",
+                            ri.getId(), ri.getOrderItem().getId(), e.getMessage());
+                }
+            }
+        }
+    }
+
+    /**
+     * Issues the Stripe refund at approval time and sets the return status to APPROVED
+     * (awaiting physical inspection). If the refund call fails, status is set to FAILED.
+     * Stock restoration is NOT performed here — it happens later in inspectReturn().
+     */
+    private void issueRefundAtApproval(Return ret, Long refundAmountOverrideCents) {
+        Order order = ret.getOrder();
+        long refundAmountCents = resolveRefundAmount(ret, refundAmountOverrideCents);
+
+        if (refundAmountCents > 0 && order.getPaymentIntentId() != null) {
+            try {
+                PaymentService.RefundResult result = paymentService.refundPayment(order.getPaymentIntentId(), refundAmountCents);
+                ret.setStripeRefundId(result.id());
+                ret.setRefundedAmountCents(result.amountInCents());
+                ret.setRefundStatus(RefundStatus.PENDING);  // Stripe confirms async via webhook
+                order.setRefundedAmountCents(order.getRefundedAmountCents() + result.amountInCents());
+                ret.setStatus(ReturnStatus.APPROVED);
+            } catch (Exception e) {
+                log.error("Failed to issue refund for return on order {}: {}", order.getId(), e.getMessage());
+                ret.setRefundedAmountCents(refundAmountCents);
+                ret.setRefundStatus(RefundStatus.FAILED);
+                ret.setRefundFailureReason(e.getMessage());
+                recordReturnCompensation(order, ret);
+                ret.setStatus(ReturnStatus.FAILED);
+                ret.setCompletedAt(Instant.now());
+            }
+        } else if (refundAmountCents == 0) {
+            ret.setRefundedAmountCents(0L);
+            ret.setRefundStatus(RefundStatus.NONE);
+            ret.setStatus(ReturnStatus.APPROVED);
+        } else {
+            ret.setStatus(ReturnStatus.APPROVED);
+        }
+    }
+
+    /**
+     * Issues the refund and immediately finalizes the return as COMPLETED (used by
+     * merchantInitiateReturn() where the merchant has already inspected the items).
+     */
+    private void issueRefundAndFinalize(Return ret, Long refundAmountOverrideCents) {
+        Order order = ret.getOrder();
+        long refundAmountCents = resolveRefundAmount(ret, refundAmountOverrideCents);
+
+        if (refundAmountCents > 0 && order.getPaymentIntentId() != null) {
+            try {
+                PaymentService.RefundResult result = paymentService.refundPayment(order.getPaymentIntentId(), refundAmountCents);
+                ret.setStripeRefundId(result.id());
+                ret.setRefundedAmountCents(result.amountInCents());
+                ret.setRefundStatus(RefundStatus.PENDING);  // Stripe confirms async via webhook
+                order.setRefundedAmountCents(order.getRefundedAmountCents() + result.amountInCents());
+            } catch (Exception e) {
+                log.error("Failed to issue refund for return on order {}: {}", order.getId(), e.getMessage());
+                ret.setRefundedAmountCents(refundAmountCents);
+                ret.setRefundStatus(RefundStatus.FAILED);
+                ret.setRefundFailureReason(e.getMessage());
+                recordReturnCompensation(order, ret);
+                ret.setStatus(ReturnStatus.FAILED);
+                ret.setCompletedAt(Instant.now());
+                computeOrderStatusAfterReturn(order);
+                return;
+            }
+        } else if (refundAmountCents == 0) {
+            ret.setRefundedAmountCents(0L);
+            ret.setRefundStatus(RefundStatus.NONE);
+        }
+
+        ret.setStatus(ReturnStatus.COMPLETED);
+        ret.setCompletedAt(Instant.now());
+        computeOrderStatusAfterReturn(order);
+    }
+
+    /**
+     * Resolves the final refund amount in cents.
+     * - Override non-null → use directly (0 = waive).
+     * - Override null → auto-calculate: SUM(unitPrice × quantityReturned) converted to cents.
+     */
+    private long resolveRefundAmount(Return ret, Long refundAmountOverrideCents) {
+        if (refundAmountOverrideCents != null) {
+            return refundAmountOverrideCents;
+        }
+        BigDecimal total = BigDecimal.ZERO;
+        for (ReturnItem ri : ret.getItems()) {
+            total = total.add(ri.getOrderItem().getUnitPrice()
+                    .multiply(BigDecimal.valueOf(ri.getQuantityReturned())));
+        }
+        return total.multiply(BigDecimal.valueOf(100)).longValue();
+    }
+
+    /**
+     * Restores stock for a single ReturnItem, using quantityReturned (not the full orderItem.quantity).
+     * Handles product, variant, bundle, and location stock restoration.
+     */
+    private void restoreReturnedItemStock(ReturnItem ri) {
+        OrderItem item = ri.getOrderItem();
+        int qty = ri.getQuantityReturned();
+
+        if (item.getBundle() != null) {
+            for (BundleItem bi : item.getBundle().getItems()) {
+                int total = qty * bi.getQuantity();
+                if (bi.getVariant() != null) {
+                    variantRepository.restoreStock(bi.getVariant().getId(), total);
+                } else {
+                    productRepository.restoreStock(bi.getProduct().getId(), total);
+                }
+            }
+            recordReturnAdjustment(item, ri.getReturnRequest().getOrder().getId(), qty);
+            return;
+        }
+
+        if (item.getVariant() != null) {
+            variantRepository.restoreStock(item.getVariant().getId(), qty);
+        } else if (item.getProduct() != null) {
+            productRepository.restoreStock(item.getProduct().getId(), qty);
+        }
+
+        // Restore location-level stock (this was missing from the old initiateReturn())
+        if (item.getFulfillmentLocation() != null && item.getProduct() != null) {
+            long variantRef = item.getVariant() != null ? item.getVariant().getId() : 0L;
+            locationStockRepository
+                    .findByLocationIdAndProductIdAndVariantRef(
+                            item.getFulfillmentLocation().getId(), item.getProduct().getId(), variantRef)
+                    .ifPresent(ls -> locationStockRepository.restoreStock(ls.getId(), qty));
+        }
+
+        recordReturnAdjustment(item, ri.getReturnRequest().getOrder().getId(), qty);
+    }
+
+    /**
+     * Creates an InventoryAdjustment audit record for a returned item.
+     */
+    private void recordReturnAdjustment(OrderItem item, long orderId, int qty) {
+        try {
+            InventoryAdjustment adj = new InventoryAdjustment();
+            adj.setProduct(item.getProduct());
+            adj.setVariant(item.getVariant());
+            adj.setDelta(qty);
+            adj.setPreviousStock(0);    // pre-restore stock reading would be a TOCTOU race
+            adj.setNewStock(0);
+            adj.setReason(AdjustmentReason.FULFILLMENT_RETURN);
+            adj.setNote("Return for order #" + orderId);
+            adj.setOrderId(orderId);
+            adjustmentRepository.save(adj);
+        } catch (Exception e) {
+            log.error("Failed to record return adjustment for order {}: {}", orderId, e.getMessage());
+        }
+    }
+
+    /**
+     * Recomputes and sets the order's top-level status after return processing.
+     *
+     * RETURNED  = all items physically returned (refund may be waived or pending)
+     * REFUNDED  = all items returned AND order has been fully refunded
+     */
+    private void computeOrderStatusAfterReturn(Order order) {
+        boolean allReturned = order.getItems().stream()
+                .allMatch(i -> i.getFulfillmentStatus() == FulfillmentStatus.RETURNED
+                        || i.getFulfillmentStatus() == FulfillmentStatus.CANCELLED);
+
+        BigDecimal discount = order.getCouponDiscountAmount() != null
+                ? order.getCouponDiscountAmount() : BigDecimal.ZERO;
+        long orderTotalCents = order.getTotalAmount().subtract(discount)
+                .multiply(BigDecimal.valueOf(100)).longValue();
+
+        boolean fullyRefunded = order.getRefundedAmountCents() >= orderTotalCents;
+
+        if (allReturned && fullyRefunded) {
+            order.setStatus(OrderStatus.REFUNDED);
+        } else if (allReturned) {
+            order.setStatus(OrderStatus.RETURNED);
+        }
+        // partial return → keep current status (DELIVERED / SHIPPED)
+    }
+
+    /**
+     * Records a PAYMENT_REFUND compensation entry for a failed refund so the
+     * OrderCompensationScheduler can retry it. Uses a structured detail format so
+     * retryCompensation() can extract the partial amount and avoid over-refunding.
+     */
+    private void recordReturnCompensation(Order order, Return ret) {
+        OrderCompensation comp = new OrderCompensation();
+        comp.setOrder(order);
+        comp.setType(CompensationType.PAYMENT_REFUND);
+        comp.setStatus(CompensationStatus.FAILED);
+        comp.setDetail("REFUND_PARTIAL:" + order.getPaymentIntentId()
+                + ":CENTS:" + (ret.getRefundedAmountCents() != null ? ret.getRefundedAmountCents() : 0L));
+        comp.setErrorMessage(ret.getRefundFailureReason());
+        comp.setAttempts(1);
+        compensationRepository.save(comp);
+    }
+
+    // -------------------------------------------------------------------------
+    // Response mapping
+    // -------------------------------------------------------------------------
+
+    private ReturnResponse toReturnResponse(Return ret) {
+        List<ReturnItemResponse> itemResponses = ret.getItems().stream()
+                .map(this::toReturnItemResponse)
+                .toList();
+
+        return new ReturnResponse(
+                ret.getId(),
+                ret.getOrder().getId(),
+                ret.getRequestedBy() != null ? ret.getRequestedBy().getId() : null,
+                ret.getStatus().name(),
+                ret.getReason() != null ? ret.getReason().name() : null,
+                ret.getBuyerNote(),
+                ret.getMerchantNote(),
+                ret.isRestockItems(),
+                itemResponses,
+                ret.getRefundedAmountCents(),
+                ret.getRefundStatus().name(),
+                ret.getCreatedAt(),
+                ret.getUpdatedAt(),
+                ret.getApprovedAt(),
+                ret.getCompletedAt()
+        );
+    }
+
+    private ReturnItemResponse toReturnItemResponse(ReturnItem ri) {
+        OrderItem oi = ri.getOrderItem();
+        return new ReturnItemResponse(
+                ri.getId(),
+                oi.getId(),
+                oi.getProductName(),
+                oi.getVariant() != null ? oi.getVariant().getId() : null,
+                oi.getVariantTitle(),
+                ri.getQuantityReturned(),
+                oi.getUnitPrice(),
+                ri.isStockRestored(),
+                ri.getCondition() != null ? ri.getCondition().name() : null
+        );
+    }
+}

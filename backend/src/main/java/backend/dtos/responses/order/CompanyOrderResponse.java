@@ -17,5 +17,6 @@ public record CompanyOrderResponse(
         Instant deliveredAt,
         Instant returnedAt,
         String fulfillmentNote,
+        long refundedAmountCents,
         Instant createdAt
 ) {}

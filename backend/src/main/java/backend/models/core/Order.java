@@ -103,6 +103,17 @@ public class Order {
     private String fulfillmentNote;
 
     // -------------------------------------------------------------------------
+    // Refund tracking
+    // -------------------------------------------------------------------------
+
+    /** Cumulative amount refunded across all Return records, in cents. Denormalized for fast status checks. */
+    @Column(nullable = false)
+    private long refundedAmountCents = 0L;
+
+    @OneToMany(mappedBy = "order", fetch = FetchType.LAZY)
+    private List<Return> returns = new ArrayList<>();
+
+    // -------------------------------------------------------------------------
     // Audit
     // -------------------------------------------------------------------------
 

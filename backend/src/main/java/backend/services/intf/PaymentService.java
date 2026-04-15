@@ -63,12 +63,17 @@ public interface PaymentService {
      *
      * @param type       provider event type (e.g. "payment_intent.succeeded")
      * @param objectId   ID of the object the event relates to
-     * @param objectType provider object type (e.g. "payment_intent", "charge")
+     * @param objectType provider object type (e.g. "payment_intent", "charge", "refund")
+     * @param metadata   optional extra fields extracted from the event payload.
+     *                   For {@code charge.refunded}: {@code refundId}, {@code refundStatus}, {@code refundAmountCents}.
+     *                   For {@code refund.updated}: same fields (objectId is the refund ID).
+     *                   Empty map for all other event types.
      */
     record WebhookEvent(
             String type,
             String objectId,
-            String objectType
+            String objectType,
+            Map<String, String> metadata
     ) {}
 
     /**

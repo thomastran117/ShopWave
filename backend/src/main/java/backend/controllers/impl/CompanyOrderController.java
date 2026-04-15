@@ -8,16 +8,21 @@ import org.springframework.web.bind.annotation.*;
 import backend.annotations.requireAuth.RequireAuth;
 import backend.dtos.requests.order.ReturnOrderRequest;
 import backend.dtos.requests.order.ShipOrderRequest;
+import backend.dtos.requests.return_.MerchantInitiateReturnRequest;
 import backend.dtos.responses.general.PagedResponse;
 import backend.dtos.responses.order.CompanyOrderResponse;
+import backend.dtos.responses.return_.ReturnResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.exceptions.http.InternalServerErrorException;
 import backend.models.enums.OrderStatus;
 import backend.services.intf.OrderService;
+import backend.services.intf.ReturnService;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/companies/{companyId}/orders")
@@ -25,9 +30,11 @@ import jakarta.validation.constraints.Min;
 public class CompanyOrderController {
 
     private final OrderService orderService;
+    private final ReturnService returnService;
 
-    public CompanyOrderController(OrderService orderService) {
+    public CompanyOrderController(OrderService orderService, ReturnService returnService) {
         this.orderService = orderService;
+        this.returnService = returnService;
     }
 
     @GetMapping
@@ -111,6 +118,35 @@ public class CompanyOrderController {
         try {
             long userId = resolveUserId();
             return ResponseEntity.ok(orderService.initiateReturn(companyId, orderId, userId, request));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @GetMapping("/{orderId}/returns")
+    public ResponseEntity<List<ReturnResponse>> getCompanyReturnsByOrder(
+            @PathVariable long companyId,
+            @PathVariable long orderId) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(returnService.getCompanyReturnsByOrder(orderId, companyId, userId));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/{orderId}/returns")
+    public ResponseEntity<ReturnResponse> merchantInitiateReturn(
+            @PathVariable long companyId,
+            @PathVariable long orderId,
+            @RequestBody @Valid MerchantInitiateReturnRequest request) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(returnService.merchantInitiateReturn(orderId, companyId, userId, request));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
