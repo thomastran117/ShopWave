@@ -1,10 +1,10 @@
 package backend.dtos.requests.inventory;
 
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.*;
 import lombok.Getter;
 import lombok.Setter;
+
+import java.math.BigDecimal;
 
 @Getter
 @Setter
@@ -30,4 +30,15 @@ public class CreateLocationRequest {
     private String country;
 
     private Integer displayOrder;
+
+    @DecimalMin(value = "-90.0",  message = "Latitude must be >= -90")
+    @DecimalMax(value = "90.0",   message = "Latitude must be <= 90")
+    private Double latitude;
+
+    @DecimalMin(value = "-180.0", message = "Longitude must be >= -180")
+    @DecimalMax(value = "180.0",  message = "Longitude must be <= 180")
+    private Double longitude;
+
+    @DecimalMin(value = "0.0", message = "Fulfillment cost cannot be negative")
+    private BigDecimal fulfillmentCost;
 }

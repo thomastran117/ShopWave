@@ -57,6 +57,9 @@ import backend.repositories.ProductVariantRepository;
 import backend.repositories.UserRepository;
 import backend.dtos.requests.return_.BuyerReturnItemRequest;
 import backend.dtos.requests.return_.MerchantInitiateReturnRequest;
+import backend.models.core.InventoryLocation;
+import backend.models.enums.AllocationStrategy;
+import backend.services.intf.AllocationService;
 import backend.services.intf.CacheService;
 import backend.services.intf.EmailService;
 import backend.services.intf.OrderService;
@@ -101,6 +104,7 @@ public class OrderServiceImpl implements OrderService {
     private final CacheService cacheService;
     private final StockAlertService stockAlertService;
     private final EmailService emailService;
+    private final AllocationService allocationService;
     private ReturnService returnService;
 
     public OrderServiceImpl(
@@ -120,7 +124,8 @@ public class OrderServiceImpl implements OrderService {
             PaymentService paymentService,
             CacheService cacheService,
             StockAlertService stockAlertService,
-            EmailService emailService) {
+            EmailService emailService,
+            AllocationService allocationService) {
         this.orderRepository = orderRepository;
         this.compensationRepository = compensationRepository;
         this.productRepository = productRepository;
@@ -138,6 +143,7 @@ public class OrderServiceImpl implements OrderService {
         this.cacheService = cacheService;
         this.stockAlertService = stockAlertService;
         this.emailService = emailService;
+        this.allocationService = allocationService;
     }
 
     /** Setter injection breaks the circular dependency: ReturnService → OrderServiceImpl → ReturnService. */
@@ -329,24 +335,22 @@ public class OrderServiceImpl implements OrderService {
 
                 // Location stock — skip for backordered items (no stock was reserved)
                 if (item.getFulfillmentStatus() != FulfillmentStatus.BACKORDERED) {
-                    long variantRefForLoc = (variantId != null) ? variantId : 0L;
-                    List<LocationStock> locCandidates = (variantId != null)
-                            ? locationStockRepository.findTopByVariantStockDesc(
-                                    productId, variantRefForLoc, org.springframework.data.domain.PageRequest.of(0, 1))
-                            : locationStockRepository.findTopByProductStockDesc(
-                                    productId, org.springframework.data.domain.PageRequest.of(0, 1));
+                    List<AllocationService.AllocationResult> allocResults =
+                            allocationService.allocate(productId, variantId, qty, strategy, buyerLat, buyerLng);
 
-                    if (!locCandidates.isEmpty()) {
-                        LocationStock ls = locCandidates.get(0);
-                        int lsUpdated = locationStockRepository.decrementStock(ls.getId(), qty);
-                        if (lsUpdated == 0) {
-                            safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
-                            throw new ConflictException("Insufficient stock at location '" +
-                                    ls.getLocation().getName() + "' for product '" + product.getName() + "'");
-                        }
-                        decrementedLocationStocks.add(new long[]{ls.getId(), qty});
-                        item.setFulfillmentLocation(ls.getLocation());
-                        item.setFulfillmentLocationName(ls.getLocation().getName());
+                    if (allocResults.isEmpty() && hasAnyLocationStock(productId, variantId)) {
+                        safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
+                        throw new ConflictException("Insufficient location stock for product '" + product.getName() + "'");
+                    }
+
+                    for (AllocationService.AllocationResult r : allocResults) {
+                        decrementedLocationStocks.add(new long[]{r.locationStockId(), r.allocatedQty()});
+                    }
+
+                    if (!allocResults.isEmpty()) {
+                        InventoryLocation primaryLoc = allocResults.get(0).location();
+                        item.setFulfillmentLocation(primaryLoc);
+                        item.setFulfillmentLocationName(primaryLoc.getName());
                     }
                 }
 
@@ -406,6 +410,11 @@ public class OrderServiceImpl implements OrderService {
 
                 orderItems.add(bundleItem);
             }
+
+            AllocationStrategy strategy = request.getAllocationStrategy() != null
+                    ? request.getAllocationStrategy() : AllocationStrategy.HIGHEST_STOCK;
+            Double buyerLat = request.getBuyerLatitude();
+            Double buyerLng = request.getBuyerLongitude();
 
             String currency = request.getCurrency() != null ? request.getCurrency().toLowerCase() : "usd";
 
@@ -911,6 +920,14 @@ public class OrderServiceImpl implements OrderService {
                 log.error("Emergency location stock restore failed for locationStockId {}: {}", entry[0], e.getMessage());
             }
         }
+    }
+
+    private boolean hasAnyLocationStock(long productId, Long variantId) {
+        long variantRef = (variantId != null) ? variantId : 0L;
+        List<LocationStock> check = (variantId != null)
+                ? locationStockRepository.findTopByVariantStockDesc(productId, variantRef, PageRequest.of(0, 1))
+                : locationStockRepository.findTopByProductStockDesc(productId, PageRequest.of(0, 1));
+        return !check.isEmpty();
     }
 
     private void restoreItemStock(OrderItem item) {

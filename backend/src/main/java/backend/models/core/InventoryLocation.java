@@ -8,6 +8,7 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 @Entity
@@ -51,6 +52,15 @@ public class InventoryLocation {
 
     @Column(nullable = false)
     private int displayOrder = 0;
+
+    @Column(nullable = true)
+    private Double latitude;
+
+    @Column(nullable = true)
+    private Double longitude;
+
+    @Column(nullable = true, precision = 10, scale = 4)
+    private BigDecimal fulfillmentCost;
 
     @CreatedDate
     @Column(nullable = false, updatable = false)

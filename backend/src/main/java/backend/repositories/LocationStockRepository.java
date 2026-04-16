@@ -48,6 +48,60 @@ public interface LocationStockRepository extends JpaRepository<LocationStock, Lo
             @Param("variantRef") long variantRef,
             Pageable pageable);
 
+    /** Picks active locations for a product ordered by Haversine distance to buyer (product-level stock). */
+    @Query("SELECT ls FROM LocationStock ls JOIN FETCH ls.location loc " +
+           "WHERE ls.product.id = :productId AND ls.variantRef = 0 " +
+           "AND loc.active = true AND ls.stock > 0 " +
+           "AND loc.latitude IS NOT NULL AND loc.longitude IS NOT NULL " +
+           "ORDER BY FUNCTION('ASIN', FUNCTION('SQRT', " +
+           "  FUNCTION('POWER', FUNCTION('SIN', FUNCTION('RADIANS', loc.latitude - :buyerLat) / 2), 2) + " +
+           "  FUNCTION('COS', FUNCTION('RADIANS', :buyerLat)) * FUNCTION('COS', FUNCTION('RADIANS', loc.latitude)) * " +
+           "  FUNCTION('POWER', FUNCTION('SIN', FUNCTION('RADIANS', loc.longitude - :buyerLng) / 2), 2) " +
+           ")) ASC")
+    List<LocationStock> findByProductOrderedByDistance(
+            @Param("productId") long productId,
+            @Param("buyerLat") double buyerLat,
+            @Param("buyerLng") double buyerLng,
+            Pageable pageable);
+
+    /** Picks active locations for a variant ordered by Haversine distance to buyer (variant-level stock). */
+    @Query("SELECT ls FROM LocationStock ls JOIN FETCH ls.location loc " +
+           "WHERE ls.product.id = :productId AND ls.variantRef = :variantRef " +
+           "AND loc.active = true AND ls.stock > 0 " +
+           "AND loc.latitude IS NOT NULL AND loc.longitude IS NOT NULL " +
+           "ORDER BY FUNCTION('ASIN', FUNCTION('SQRT', " +
+           "  FUNCTION('POWER', FUNCTION('SIN', FUNCTION('RADIANS', loc.latitude - :buyerLat) / 2), 2) + " +
+           "  FUNCTION('COS', FUNCTION('RADIANS', :buyerLat)) * FUNCTION('COS', FUNCTION('RADIANS', loc.latitude)) * " +
+           "  FUNCTION('POWER', FUNCTION('SIN', FUNCTION('RADIANS', loc.longitude - :buyerLng) / 2), 2) " +
+           ")) ASC")
+    List<LocationStock> findByVariantOrderedByDistance(
+            @Param("productId") long productId,
+            @Param("variantRef") long variantRef,
+            @Param("buyerLat") double buyerLat,
+            @Param("buyerLng") double buyerLng,
+            Pageable pageable);
+
+    /** Picks active locations for a product ordered by fulfillmentCost ASC (product-level stock). */
+    @Query("SELECT ls FROM LocationStock ls JOIN FETCH ls.location loc " +
+           "WHERE ls.product.id = :productId AND ls.variantRef = 0 " +
+           "AND loc.active = true AND ls.stock > 0 " +
+           "AND loc.fulfillmentCost IS NOT NULL " +
+           "ORDER BY loc.fulfillmentCost ASC, ls.stock DESC")
+    List<LocationStock> findByProductOrderedByCost(
+            @Param("productId") long productId,
+            Pageable pageable);
+
+    /** Picks active locations for a variant ordered by fulfillmentCost ASC (variant-level stock). */
+    @Query("SELECT ls FROM LocationStock ls JOIN FETCH ls.location loc " +
+           "WHERE ls.product.id = :productId AND ls.variantRef = :variantRef " +
+           "AND loc.active = true AND ls.stock > 0 " +
+           "AND loc.fulfillmentCost IS NOT NULL " +
+           "ORDER BY loc.fulfillmentCost ASC, ls.stock DESC")
+    List<LocationStock> findByVariantOrderedByCost(
+            @Param("productId") long productId,
+            @Param("variantRef") long variantRef,
+            Pageable pageable);
+
     /** Used to guard against deleting a location that still has stock records. */
     boolean existsByLocationId(long locationId);
 

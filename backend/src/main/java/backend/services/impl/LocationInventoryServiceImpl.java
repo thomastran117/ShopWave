@@ -113,6 +113,9 @@ public class LocationInventoryServiceImpl implements LocationInventoryService {
         location.setCity(request.getCity());
         location.setCountry(request.getCountry());
         location.setDisplayOrder(request.getDisplayOrder() != null ? request.getDisplayOrder() : 0);
+        location.setLatitude(request.getLatitude());
+        location.setLongitude(request.getLongitude());
+        location.setFulfillmentCost(request.getFulfillmentCost());
 
         return toLocationResponse(locationRepository.save(location));
     }
@@ -139,6 +142,9 @@ public class LocationInventoryServiceImpl implements LocationInventoryService {
         if (request.getCountry() != null) location.setCountry(request.getCountry());
         if (request.getActive() != null) location.setActive(request.getActive());
         if (request.getDisplayOrder() != null) location.setDisplayOrder(request.getDisplayOrder());
+        if (request.getLatitude() != null) location.setLatitude(request.getLatitude());
+        if (request.getLongitude() != null) location.setLongitude(request.getLongitude());
+        if (request.getFulfillmentCost() != null) location.setFulfillmentCost(request.getFulfillmentCost());
 
         return toLocationResponse(locationRepository.save(location));
     }
@@ -394,6 +400,9 @@ public class LocationInventoryServiceImpl implements LocationInventoryService {
                 loc.getCountry(),
                 loc.isActive(),
                 loc.getDisplayOrder(),
+                loc.getLatitude(),
+                loc.getLongitude(),
+                loc.getFulfillmentCost(),
                 loc.getCreatedAt(),
                 loc.getUpdatedAt()
         );

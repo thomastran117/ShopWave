@@ -1,5 +1,6 @@
 package backend.dtos.requests.order;
 
+import backend.models.enums.AllocationStrategy;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import lombok.Getter;
@@ -22,6 +23,21 @@ public class CreateOrderRequest {
     /** Optional coupon code to apply at checkout. Validated and applied in the order service. */
     @Size(max = 50)
     private String couponCode;
+
+    /** Buyer latitude for NEAREST allocation strategy. Range [-90, 90]. */
+    @DecimalMin(value = "-90.0", message = "Buyer latitude must be >= -90")
+    @DecimalMax(value = "90.0",  message = "Buyer latitude must be <= 90")
+    private Double buyerLatitude;
+
+    /** Buyer longitude for NEAREST allocation strategy. Range [-180, 180]. */
+    @DecimalMin(value = "-180.0", message = "Buyer longitude must be >= -180")
+    @DecimalMax(value = "180.0",  message = "Buyer longitude must be <= 180")
+    private Double buyerLongitude;
+
+    /** Allocation strategy. Defaults to HIGHEST_STOCK when absent.
+     *  NEAREST falls back to HIGHEST_STOCK if buyer coords are absent.
+     *  CHEAPEST falls back to HIGHEST_STOCK if no location has fulfillmentCost set. */
+    private AllocationStrategy allocationStrategy;
 
     @Getter
     @Setter
