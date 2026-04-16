@@ -77,7 +77,7 @@ public class ReturnLocationServiceImpl implements ReturnLocationService {
         if (request.postalCode() != null) loc.setPostalCode(request.postalCode());
         if (request.name() != null)    loc.setName(request.name());
 
-        if (Boolean.TRUE.equals(request.primary())) {
+        if (Boolean.TRUE.equals(request.primary()) && !loc.isPrimary()) {
             locationRepository.clearPrimaryForCompany(companyId);
             loc.setPrimary(true);
         } else if (Boolean.FALSE.equals(request.primary())) {

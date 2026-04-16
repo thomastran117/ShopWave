@@ -15,9 +15,13 @@ public interface CompanyReturnLocationRepository extends JpaRepository<CompanyRe
 
     Optional<CompanyReturnLocation> findByIdAndCompanyId(long id, long companyId);
 
-    Optional<CompanyReturnLocation> findFirstByCompanyIdAndPrimaryTrue(long companyId);
-
     long countByCompanyId(long companyId);
+
+    /**
+     * Returns the primary location if one is set, otherwise the first location by insertion order.
+     * Single query using ORDER BY is_primary DESC so this replaces a two-query fallback chain.
+     */
+    Optional<CompanyReturnLocation> findFirstByCompanyIdOrderByPrimaryDescIdAsc(long companyId);
 
     @Modifying
     @Query("UPDATE CompanyReturnLocation l SET l.primary = false WHERE l.company.id = :companyId")

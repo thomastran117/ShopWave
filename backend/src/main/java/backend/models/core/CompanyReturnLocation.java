@@ -45,7 +45,7 @@ public class CompanyReturnLocation {
     private String postalCode;
 
     /** If true, this location is auto-selected when no returnLocationId is specified at approval time. */
-    @Column(nullable = false)
+    @Column(name = "is_primary", nullable = false)
     private boolean primary = false;
 
     @CreatedDate

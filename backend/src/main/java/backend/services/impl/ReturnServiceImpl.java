@@ -594,8 +594,8 @@ public class ReturnServiceImpl implements ReturnService {
                     .orElseThrow(() -> new ResourceNotFoundException(
                             "Return location " + locationId + " not found for company " + company.getId()));
         }
-        return returnLocationRepository.findFirstByCompanyIdAndPrimaryTrue(company.getId())
-                .or(() -> returnLocationRepository.findAllByCompanyId(company.getId()).stream().findFirst())
+        // Single query ordered by is_primary DESC, id ASC — returns primary if set, else oldest location.
+        return returnLocationRepository.findFirstByCompanyIdOrderByPrimaryDescIdAsc(company.getId())
                 .orElseThrow(() -> new ConflictException(
                         "Company has no return locations configured. "
                         + "Add one at POST /companies/" + company.getId() + "/return-locations"));
