@@ -23,8 +23,10 @@ import backend.models.enums.DiscountType;
 import backend.repositories.CompanyRepository;
 import backend.repositories.DiscountRepository;
 import backend.repositories.ProductRepository;
+import backend.events.ProductIndexEvent;
 import backend.services.intf.CacheService;
 import backend.services.intf.DiscountService;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -51,19 +53,19 @@ public class DiscountServiceImpl implements DiscountService {
     private final CompanyRepository companyRepository;
     private final ProductRepository productRepository;
     private final CacheService cacheService;
-    private final ProductIndexingService productIndexingService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public DiscountServiceImpl(
             DiscountRepository discountRepository,
             CompanyRepository companyRepository,
             ProductRepository productRepository,
             CacheService cacheService,
-            ProductIndexingService productIndexingService) {
+            ApplicationEventPublisher eventPublisher) {
         this.discountRepository = discountRepository;
         this.companyRepository = companyRepository;
         this.productRepository = productRepository;
         this.cacheService = cacheService;
-        this.productIndexingService = productIndexingService;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -113,7 +115,7 @@ public class DiscountServiceImpl implements DiscountService {
 
         // Re-index all products so their discount fields are updated in Elasticsearch.
         for (Product p : products) {
-            productIndexingService.indexProduct(p, companyId);
+            eventPublisher.publishEvent(new ProductIndexEvent(p, companyId));
         }
 
         return toResponse(saved);
@@ -150,7 +152,7 @@ public class DiscountServiceImpl implements DiscountService {
 
             // Re-index all affected products so their discount fields reflect the update.
             for (Product p : saved.getProducts()) {
-                productIndexingService.indexProduct(p, companyId);
+                eventPublisher.publishEvent(new ProductIndexEvent(p, companyId));
             }
 
             return toResponse(saved);
@@ -177,7 +179,7 @@ public class DiscountServiceImpl implements DiscountService {
 
         // Re-index all previously associated products so their discount fields are cleared.
         for (Product p : affectedProducts) {
-            productIndexingService.indexProduct(p, companyId);
+            eventPublisher.publishEvent(new ProductIndexEvent(p, companyId));
         }
     }
 

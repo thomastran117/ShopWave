@@ -16,6 +16,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import backend.documents.ProductDocument;
+import backend.events.ProductIndexEvent;
+import backend.events.ProductRemoveEvent;
 import backend.dtos.requests.product.AddProductImageRequest;
 import backend.dtos.requests.product.BatchCreateProductsRequest;
 import backend.dtos.requests.product.BatchDeleteProductsRequest;
@@ -54,6 +56,7 @@ import backend.repositories.ProductRepository;
 import backend.repositories.ProductVariantRepository;
 import backend.repositories.specifications.ProductSpecification;
 import backend.services.intf.ProductService;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.util.HashSet;
@@ -78,7 +81,7 @@ public class ProductServiceImpl implements ProductService {
     private final ProductAttributeRepository productAttributeRepository;
     private final BundleRepository bundleRepository;
     private final DiscountRepository discountRepository;
-    private final ProductIndexingService productIndexingService;
+    private final ApplicationEventPublisher eventPublisher;
     private final ElasticsearchOperations elasticsearchOperations;
 
     public ProductServiceImpl(
@@ -90,7 +93,7 @@ public class ProductServiceImpl implements ProductService {
             ProductAttributeRepository productAttributeRepository,
             BundleRepository bundleRepository,
             DiscountRepository discountRepository,
-            ProductIndexingService productIndexingService,
+            ApplicationEventPublisher eventPublisher,
             ElasticsearchOperations elasticsearchOperations) {
         this.productRepository = productRepository;
         this.companyRepository = companyRepository;
@@ -100,7 +103,7 @@ public class ProductServiceImpl implements ProductService {
         this.productAttributeRepository = productAttributeRepository;
         this.bundleRepository = bundleRepository;
         this.discountRepository = discountRepository;
-        this.productIndexingService = productIndexingService;
+        this.eventPublisher = eventPublisher;
         this.elasticsearchOperations = elasticsearchOperations;
     }
 
@@ -238,7 +241,7 @@ public class ProductServiceImpl implements ProductService {
         product.setStatus(ProductStatus.DRAFT);
 
         Product saved = productRepository.save(product);
-        productIndexingService.indexProduct(saved, saved.getCompany().getId());
+        eventPublisher.publishEvent(new ProductIndexEvent(saved, saved.getCompany().getId()));
         return toResponse(saved);
     }
 
@@ -285,7 +288,7 @@ public class ProductServiceImpl implements ProductService {
         }
 
         Product saved = productRepository.save(product);
-        productIndexingService.indexProduct(saved, saved.getCompany().getId());
+        eventPublisher.publishEvent(new ProductIndexEvent(saved, saved.getCompany().getId()));
         return toResponse(saved);
     }
 
@@ -303,7 +306,7 @@ public class ProductServiceImpl implements ProductService {
 
         discountRepository.removeProductFromAllDiscounts(productId);
         productRepository.delete(product);
-        productIndexingService.removeProduct(productId);
+        eventPublisher.publishEvent(new ProductRemoveEvent(productId));
     }
 
     @Override
@@ -341,7 +344,7 @@ public class ProductServiceImpl implements ProductService {
             product.setStatus(ProductStatus.DRAFT);
 
             Product saved = productRepository.save(product);
-            productIndexingService.indexProduct(saved, companyId);
+            eventPublisher.publishEvent(new ProductIndexEvent(saved, companyId));
             results.add(toResponse(saved));
         }
 
@@ -363,7 +366,7 @@ public class ProductServiceImpl implements ProductService {
         discountRepository.removeProductsFromAllDiscounts(request.getIds());
         productRepository.deleteAll(products);
         for (Long id : request.getIds()) {
-            productIndexingService.removeProduct(id);
+            eventPublisher.publishEvent(new ProductRemoveEvent(id));
         }
     }
 

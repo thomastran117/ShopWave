@@ -28,6 +28,7 @@ import backend.dtos.responses.product.ProductVariantResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.exceptions.http.InternalServerErrorException;
 import backend.models.enums.ProductStatus;
+import backend.services.impl.ProductIndexingService;
 import backend.services.intf.BundleService;
 import backend.services.intf.ProductService;
 
@@ -44,10 +45,12 @@ public class ProductController {
 
     private final ProductService productService;
     private final BundleService bundleService;
+    private final ProductIndexingService productIndexingService;
 
-    public ProductController(ProductService productService, BundleService bundleService) {
+    public ProductController(ProductService productService, BundleService bundleService, ProductIndexingService productIndexingService) {
         this.productService = productService;
         this.bundleService = bundleService;
+        this.productIndexingService = productIndexingService;
     }
 
     @GetMapping
@@ -437,6 +440,19 @@ public class ProductController {
             @PathVariable long companyId,
             @PathVariable long bundleId) {
         return ResponseEntity.ok(bundleService.getBundle(companyId, bundleId));
+    }
+
+    @PostMapping("/reindex")
+    @RequireAuth
+    public ResponseEntity<Void> triggerReindex(@PathVariable long companyId) {
+        try {
+            productIndexingService.reindexCompany(companyId);
+            return ResponseEntity.accepted().build();
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
     }
 
     private long resolveUserId() {

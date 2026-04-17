@@ -3,12 +3,18 @@ package backend.services.impl;
 import backend.configurations.environment.EnvironmentSetting;
 import backend.documents.BundleDocument;
 import backend.documents.ProductDocument;
+import backend.events.BundleIndexEvent;
+import backend.events.BundleRemoveEvent;
+import backend.events.ProductIndexEvent;
+import backend.events.ProductRemoveEvent;
 import backend.models.core.Discount;
+import backend.models.core.IndexingFailure;
 import backend.models.core.Product;
 import backend.models.core.ProductBundle;
 import backend.models.enums.DiscountType;
 import backend.repositories.BundleRepository;
 import backend.repositories.DiscountRepository;
+import backend.repositories.IndexingFailureRepository;
 import backend.repositories.ProductRepository;
 import backend.repositories.search.BundleSearchRepository;
 import backend.repositories.search.ProductSearchRepository;
@@ -19,6 +25,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -42,6 +50,8 @@ public class ProductIndexingService implements ApplicationRunner {
     private final ProductRepository productRepository;
     private final BundleRepository bundleRepository;
     private final DiscountRepository discountRepository;
+    private final IndexingFailureRepository failureRepository;
+    private final IndexVersionManager indexVersionManager;
     private final EnvironmentSetting env;
 
     private volatile LinkedBlockingQueue<IndexingTask> taskQueue;
@@ -53,12 +63,16 @@ public class ProductIndexingService implements ApplicationRunner {
             ProductRepository productRepository,
             BundleRepository bundleRepository,
             DiscountRepository discountRepository,
+            IndexingFailureRepository failureRepository,
+            IndexVersionManager indexVersionManager,
             EnvironmentSetting env) {
         this.productSearchRepository = productSearchRepository;
         this.bundleSearchRepository = bundleSearchRepository;
         this.productRepository = productRepository;
         this.bundleRepository = bundleRepository;
         this.discountRepository = discountRepository;
+        this.failureRepository = failureRepository;
+        this.indexVersionManager = indexVersionManager;
         this.env = env;
     }
 
@@ -93,7 +107,33 @@ public class ProductIndexingService implements ApplicationRunner {
     }
 
     // -------------------------------------------------------------------------
-    // Public API — called by ProductServiceImpl, BundleServiceImpl, DiscountServiceImpl
+    // Event listeners — fire after DB transaction commit
+    // -------------------------------------------------------------------------
+
+    // fallbackExecution=true: if published outside a transaction the event fires immediately
+    // (data is already committed by that point). Inside a transaction it fires after commit.
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void on(ProductIndexEvent e) {
+        indexProduct(e.product(), e.companyId());
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void on(ProductRemoveEvent e) {
+        removeProduct(e.productId());
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void on(BundleIndexEvent e) {
+        indexBundle(e.bundle());
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void on(BundleRemoveEvent e) {
+        removeBundle(e.bundleId());
+    }
+
+    // -------------------------------------------------------------------------
+    // Public API — called by event listeners, startup reindex, and retry scheduler
     // -------------------------------------------------------------------------
 
     /**
@@ -116,6 +156,26 @@ public class ProductIndexingService implements ApplicationRunner {
         submit(new IndexingTask.RemoveBundle(bundleId));
     }
 
+    // -------------------------------------------------------------------------
+    // Full reindex — queues all documents for a company or the entire catalog
+    // -------------------------------------------------------------------------
+
+    public void reindexCompany(long companyId) {
+        productRepository.findAllByCompanyId(companyId)
+                .forEach(p -> submit(new IndexingTask.IndexProduct(p, companyId)));
+        bundleRepository.findAllByCompanyId(companyId)
+                .forEach(b -> submit(new IndexingTask.IndexBundle(b)));
+        log.info("[SEARCH INDEX] Full reindex triggered for company {}", companyId);
+    }
+
+    public void reindexAll() {
+        productRepository.findAll()
+                .forEach(p -> submit(new IndexingTask.IndexProduct(p, p.getCompany().getId())));
+        bundleRepository.findAll()
+                .forEach(b -> submit(new IndexingTask.IndexBundle(b)));
+        log.info("[SEARCH INDEX] Global full reindex triggered");
+    }
+
     private void submit(IndexingTask task) {
         if (!taskQueue.offer(task)) {
             log.warn("[SEARCH INDEX] Queue full — dropping task: {}", task);
@@ -128,6 +188,9 @@ public class ProductIndexingService implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        indexVersionManager.ensureIndexExists("products");
+        indexVersionManager.ensureIndexExists("bundles");
+
         try {
             if (productSearchRepository.count() == 0) {
                 productRepository.findAll()
@@ -198,20 +261,67 @@ public class ProductIndexingService implements ApplicationRunner {
 
         if (!toIndex.isEmpty()) {
             try { productSearchRepository.saveAll(toIndex); }
-            catch (Exception e) { log.warn("[SEARCH INDEX] saveAll products failed: {}", e.getMessage()); }
+            catch (Exception e) {
+                log.warn("[SEARCH INDEX] saveAll products failed: {}", e.getMessage());
+                persistFailures("PRODUCT", "INDEX", toIndex.stream().map(d -> new long[]{d.getId(), d.getCompanyId()}).toList(), e.getMessage());
+            }
         }
         if (!toRemove.isEmpty()) {
             try { productSearchRepository.deleteAllById(toRemove); }
-            catch (Exception e) { log.warn("[SEARCH INDEX] deleteAll products failed: {}", e.getMessage()); }
+            catch (Exception e) {
+                log.warn("[SEARCH INDEX] deleteAll products failed: {}", e.getMessage());
+                persistRemoveFailures("PRODUCT", toRemove, e.getMessage());
+            }
         }
         if (!bundlesToIndex.isEmpty()) {
             try { bundleSearchRepository.saveAll(bundlesToIndex); }
-            catch (Exception e) { log.warn("[SEARCH INDEX] saveAll bundles failed: {}", e.getMessage()); }
+            catch (Exception e) {
+                log.warn("[SEARCH INDEX] saveAll bundles failed: {}", e.getMessage());
+                persistFailures("BUNDLE", "INDEX", bundlesToIndex.stream().map(d -> new long[]{d.getId(), d.getCompanyId()}).toList(), e.getMessage());
+            }
         }
         if (!bundlesToRemove.isEmpty()) {
             try { bundleSearchRepository.deleteAllById(bundlesToRemove); }
-            catch (Exception e) { log.warn("[SEARCH INDEX] deleteAll bundles failed: {}", e.getMessage()); }
+            catch (Exception e) {
+                log.warn("[SEARCH INDEX] deleteAll bundles failed: {}", e.getMessage());
+                persistRemoveFailures("BUNDLE", bundlesToRemove, e.getMessage());
+            }
         }
+    }
+
+    private void persistFailures(String docType, String operation, List<long[]> idPairs, String errorMessage) {
+        try {
+            for (long[] pair : idPairs) {
+                IndexingFailure f = new IndexingFailure();
+                f.setDocumentType(docType);
+                f.setDocumentId(pair[0]);
+                f.setCompanyId(pair[1]);
+                f.setOperation(operation);
+                f.setErrorMessage(truncate(errorMessage, 500));
+                failureRepository.save(f);
+            }
+        } catch (Exception ex) {
+            log.error("[SEARCH INDEX] Failed to persist DLQ record: {}", ex.getMessage());
+        }
+    }
+
+    private void persistRemoveFailures(String docType, List<Long> ids, String errorMessage) {
+        try {
+            for (Long id : ids) {
+                IndexingFailure f = new IndexingFailure();
+                f.setDocumentType(docType);
+                f.setDocumentId(id);
+                f.setOperation("REMOVE");
+                f.setErrorMessage(truncate(errorMessage, 500));
+                failureRepository.save(f);
+            }
+        } catch (Exception ex) {
+            log.error("[SEARCH INDEX] Failed to persist DLQ record: {}", ex.getMessage());
+        }
+    }
+
+    private static String truncate(String s, int max) {
+        return s != null && s.length() > max ? s.substring(0, max) : s;
     }
 
     // -------------------------------------------------------------------------
