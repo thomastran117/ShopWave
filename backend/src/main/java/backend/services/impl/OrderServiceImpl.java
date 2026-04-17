@@ -266,6 +266,11 @@ public class OrderServiceImpl implements OrderService {
                 }
             }
 
+            AllocationStrategy strategy = request.getAllocationStrategy() != null
+                    ? request.getAllocationStrategy() : AllocationStrategy.HIGHEST_STOCK;
+            Double buyerLat = request.getBuyerLatitude();
+            Double buyerLng = request.getBuyerLongitude();
+
             List<OrderItem> orderItems = new ArrayList<>();
             BigDecimal totalAmount = BigDecimal.ZERO;
 
@@ -410,11 +415,6 @@ public class OrderServiceImpl implements OrderService {
 
                 orderItems.add(bundleItem);
             }
-
-            AllocationStrategy strategy = request.getAllocationStrategy() != null
-                    ? request.getAllocationStrategy() : AllocationStrategy.HIGHEST_STOCK;
-            Double buyerLat = request.getBuyerLatitude();
-            Double buyerLng = request.getBuyerLongitude();
 
             String currency = request.getCurrency() != null ? request.getCurrency().toLowerCase() : "usd";
 
