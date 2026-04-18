@@ -44,6 +44,7 @@ import backend.models.enums.OrderStatus;
 import backend.models.enums.ProductStatus;
 import backend.repositories.BundleRepository;
 import backend.repositories.CouponRepository;
+import backend.repositories.CouponPerUserCountRepository;
 import backend.repositories.CouponRedemptionRepository;
 import backend.repositories.DiscountRepository;
 import backend.repositories.CompanyRepository;
@@ -100,6 +101,7 @@ public class OrderServiceImpl implements OrderService {
     private final DiscountRepository discountRepository;
     private final CouponRepository couponRepository;
     private final CouponRedemptionRepository couponRedemptionRepository;
+    private final CouponPerUserCountRepository couponPerUserCountRepository;
     private final PaymentService paymentService;
     private final CacheService cacheService;
     private final StockAlertService stockAlertService;
@@ -121,6 +123,7 @@ public class OrderServiceImpl implements OrderService {
             DiscountRepository discountRepository,
             CouponRepository couponRepository,
             CouponRedemptionRepository couponRedemptionRepository,
+            CouponPerUserCountRepository couponPerUserCountRepository,
             PaymentService paymentService,
             CacheService cacheService,
             StockAlertService stockAlertService,
@@ -139,6 +142,7 @@ public class OrderServiceImpl implements OrderService {
         this.discountRepository = discountRepository;
         this.couponRepository = couponRepository;
         this.couponRedemptionRepository = couponRedemptionRepository;
+        this.couponPerUserCountRepository = couponPerUserCountRepository;
         this.paymentService = paymentService;
         this.cacheService = cacheService;
         this.stockAlertService = stockAlertService;
@@ -443,9 +447,9 @@ public class OrderServiceImpl implements OrderService {
                 }
 
                 if (coupon.getMaxUsesPerUser() != null) {
-                    long perUserCount = couponRedemptionRepository
-                            .countByCouponIdAndUserId(coupon.getId(), userId);
-                    if (perUserCount >= coupon.getMaxUsesPerUser()) {
+                    int claimed = couponPerUserCountRepository.tryIncrementUserCount(
+                            coupon.getId(), userId, coupon.getMaxUsesPerUser());
+                    if (claimed == 0) {
                         throw new BadRequestException("You have already used coupon '"
                                 + code + "' the maximum number of times");
                     }
@@ -653,7 +657,8 @@ public class OrderServiceImpl implements OrderService {
     @Transactional
     public void handlePaymentFailure(String paymentIntentId) {
         orderRepository.findByPaymentIntentId(paymentIntentId).ifPresent(order -> {
-            if (order.isCompensated()) return;
+            if (orderRepository.markCompensated(order.getId()) == 0) return;
+            order.setCompensated(true); // keep entity in sync with DB
             releaseReservation(order.getId());
 
             order.setStatus(OrderStatus.FAILED);
@@ -672,7 +677,6 @@ public class OrderServiceImpl implements OrderService {
                 }
             }
 
-            order.setCompensated(true);
             orderRepository.save(order);
         });
     }
@@ -684,7 +688,8 @@ public class OrderServiceImpl implements OrderService {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void compensateOrder(Order order) {
-        if (order.isCompensated()) return;
+        if (orderRepository.markCompensated(order.getId()) == 0) return;
+        order.setCompensated(true); // keep entity in sync with DB
         releaseReservation(order.getId());
 
         log.info("Compensating order {} (status={})", order.getId(), order.getStatus());
@@ -719,7 +724,6 @@ public class OrderServiceImpl implements OrderService {
             order.setStatus(OrderStatus.FAILED);
             order.setFailureReason("Compensated by scheduler — stale reserved order");
         }
-        order.setCompensated(true);
         orderRepository.save(order);
     }
 
@@ -1166,57 +1170,96 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public void fulfillPendingBackorders(long productId, Long variantId, int availableQty, Long fulfillmentLocationId) {
-        List<Order> backorders = (variantId != null)
-                ? orderRepository.findPaidOrdersWithBackorderedVariant(variantId, FulfillmentStatus.BACKORDERED)
-                : orderRepository.findPaidOrdersWithBackorderedProduct(productId, FulfillmentStatus.BACKORDERED);
+        String lockToken = UUID.randomUUID().toString();
+        List<String> acquiredLocks = new ArrayList<>();
 
-        int remaining = availableQty;
-
-        for (Order order : backorders) {
-            if (remaining <= 0) break;
-
-            for (OrderItem item : order.getItems()) {
-                if (item.getFulfillmentStatus() != FulfillmentStatus.BACKORDERED) continue;
-                if (item.getProduct().getId() != productId) continue;
-                if (variantId != null && (item.getVariant() == null || item.getVariant().getId() != variantId)) continue;
-
-                int qty = item.getQuantity();
-                if (qty > remaining) return; // FIFO: stop rather than skip to a younger order
-
-                int updated = (variantId != null)
-                        ? variantRepository.decrementStock(variantId, qty)
-                        : productRepository.decrementStock(productId, qty);
-
-                if (updated == 0) {
-                    log.warn("fulfillPendingBackorders: decrementStock returned 0 for product={} variant={} qty={} — stopping",
-                            productId, variantId, qty);
-                    return;
+        try {
+            String productLockKey = LOCK_PREFIX + productId;
+            for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
+                if (cacheService.tryLock(productLockKey, lockToken, LOCK_TTL_SECONDS)) {
+                    acquiredLocks.add(productLockKey);
+                    break;
                 }
-
-                remaining -= qty;
-                item.setFulfillmentStatus(FulfillmentStatus.PENDING); // ready for warehouse packing
-
-                if (fulfillmentLocationId != null) {
-                    locationRepository.findById(fulfillmentLocationId).ifPresent(loc -> {
-                        item.setFulfillmentLocation(loc);
-                        item.setFulfillmentLocationName(loc.getName());
-                    });
-                }
-
-                InventoryAdjustment adj = new InventoryAdjustment();
-                adj.setProduct(item.getProduct());
-                adj.setVariant(item.getVariant());
-                adj.setDelta(-qty); // stock was decremented to fulfill this item
-                adj.setPreviousStock(0); // TOCTOU-safe: delta is authoritative
-                adj.setNewStock(0);
-                adj.setReason(AdjustmentReason.BACKORDER_FULFILLED);
-                adj.setNote("Backorder fulfilled for order #" + order.getId());
-                adj.setOrderId(order.getId());
-                adjustmentRepository.save(adj);
+                try { Thread.sleep(LOCK_RETRY_DELAY_MS); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+            }
+            if (acquiredLocks.isEmpty()) {
+                log.warn("fulfillPendingBackorders: could not acquire product lock for product={} — skipping this run", productId);
+                return;
             }
 
-            // Order remains PAID — the merchant will advance it to PACKED once all items are ready.
-            orderRepository.save(order);
+            if (variantId != null) {
+                String variantLockKey = VARIANT_LOCK_PREFIX + variantId;
+                boolean variantAcquired = false;
+                for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
+                    if (cacheService.tryLock(variantLockKey, lockToken, LOCK_TTL_SECONDS)) {
+                        acquiredLocks.add(variantLockKey);
+                        variantAcquired = true;
+                        break;
+                    }
+                    try { Thread.sleep(LOCK_RETRY_DELAY_MS); }
+                    catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+                }
+                if (!variantAcquired) {
+                    log.warn("fulfillPendingBackorders: could not acquire variant lock for variant={} — skipping this run", variantId);
+                    return;
+                }
+            }
+
+            List<Order> backorders = (variantId != null)
+                    ? orderRepository.findPaidOrdersWithBackorderedVariant(variantId, FulfillmentStatus.BACKORDERED)
+                    : orderRepository.findPaidOrdersWithBackorderedProduct(productId, FulfillmentStatus.BACKORDERED);
+
+            int remaining = availableQty;
+
+            for (Order order : backorders) {
+                if (remaining <= 0) break;
+
+                for (OrderItem item : order.getItems()) {
+                    if (item.getFulfillmentStatus() != FulfillmentStatus.BACKORDERED) continue;
+                    if (item.getProduct().getId() != productId) continue;
+                    if (variantId != null && (item.getVariant() == null || item.getVariant().getId() != variantId)) continue;
+
+                    int qty = item.getQuantity();
+                    if (qty > remaining) return; // FIFO: stop rather than skip to a younger order
+
+                    int updated = (variantId != null)
+                            ? variantRepository.decrementStock(variantId, qty)
+                            : productRepository.decrementStock(productId, qty);
+
+                    if (updated == 0) {
+                        log.warn("fulfillPendingBackorders: decrementStock returned 0 for product={} variant={} qty={} — stopping",
+                                productId, variantId, qty);
+                        return;
+                    }
+
+                    remaining -= qty;
+                    item.setFulfillmentStatus(FulfillmentStatus.PENDING); // ready for warehouse packing
+
+                    if (fulfillmentLocationId != null) {
+                        locationRepository.findById(fulfillmentLocationId).ifPresent(loc -> {
+                            item.setFulfillmentLocation(loc);
+                            item.setFulfillmentLocationName(loc.getName());
+                        });
+                    }
+
+                    InventoryAdjustment adj = new InventoryAdjustment();
+                    adj.setProduct(item.getProduct());
+                    adj.setVariant(item.getVariant());
+                    adj.setDelta(-qty); // stock was decremented to fulfill this item
+                    adj.setPreviousStock(0); // TOCTOU-safe: delta is authoritative
+                    adj.setNewStock(0);
+                    adj.setReason(AdjustmentReason.BACKORDER_FULFILLED);
+                    adj.setNote("Backorder fulfilled for order #" + order.getId());
+                    adj.setOrderId(order.getId());
+                    adjustmentRepository.save(adj);
+                }
+
+                // Order remains PAID — the merchant will advance it to PACKED once all items are ready.
+                orderRepository.save(order);
+            }
+        } finally {
+            releaseLocks(acquiredLocks, lockToken);
         }
     }
 

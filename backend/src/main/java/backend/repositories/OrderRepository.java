@@ -3,6 +3,7 @@ package backend.repositories;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -31,6 +32,15 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     @Query("SELECT o FROM Order o JOIN o.items oi WHERE o.id = :orderId AND oi.product.company.id = :companyId")
     Optional<Order> findByIdAndProductCompanyId(@Param("orderId") long orderId, @Param("companyId") long companyId);
+
+    /**
+     * Atomically claims compensation rights for an order. Returns 1 if this caller is the
+     * first to set compensated=true, 0 if another thread already did so. Callers that
+     * receive 0 must skip stock restoration to prevent double-restoring inventory.
+     */
+    @Modifying
+    @Query("UPDATE Order o SET o.compensated = true WHERE o.id = :id AND o.compensated = false")
+    int markCompensated(@Param("id") long id);
 
     /**
      * FIFO: PAID orders that contain at least one BACKORDERED item for the given product.

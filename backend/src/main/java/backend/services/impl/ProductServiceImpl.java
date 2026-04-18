@@ -246,6 +246,7 @@ public class ProductServiceImpl implements ProductService {
     }
 
     @Override
+    @Transactional
     public ProductResponse updateProduct(long companyId, long productId, long ownerId, UpdateProductRequest request) {
         companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
@@ -272,7 +273,6 @@ public class ProductServiceImpl implements ProductService {
         if (request.getBrand() != null) product.setBrand(request.getBrand());
         if (request.getTags() != null) product.setTags(request.getTags());
         if (request.getThumbnailUrl() != null) product.setThumbnailUrl(request.getThumbnailUrl());
-        if (request.getStock() != null) product.setStock(request.getStock());
         if (request.getWeight() != null) product.setWeight(request.getWeight());
         if (request.getWeightUnit() != null) product.setWeightUnit(request.getWeightUnit());
         if (request.getStatus() != null) product.setStatus(request.getStatus());
@@ -389,7 +389,7 @@ public class ProductServiceImpl implements ProductService {
         companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
 
-        Product product = productRepository.findByIdAndCompanyId(productId, companyId)
+        Product product = productRepository.findByIdAndCompanyIdWithLock(productId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
 
         int currentCount = productImageRepository.countByProductId(productId);
