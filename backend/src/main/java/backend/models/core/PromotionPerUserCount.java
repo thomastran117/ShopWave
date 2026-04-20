@@ -1,0 +1,35 @@
+package backend.models.core;
+
+import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+/**
+ * Per-user redemption counter for PromotionRule.maxUsesPerUser enforcement.
+ * Unique constraint on (rule_id, user_id) enables atomic ON DUPLICATE KEY UPDATE increments,
+ * mirroring CouponPerUserCount.
+ */
+@Entity
+@Table(name = "promotion_per_user_counts",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uk_promo_per_user",
+                columnNames = {"rule_id", "user_id"}))
+@Getter
+@Setter
+@NoArgsConstructor
+public class PromotionPerUserCount {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "rule_id", nullable = false)
+    private long ruleId;
+
+    @Column(name = "user_id", nullable = false)
+    private long userId;
+
+    @Column(nullable = false)
+    private int count;
+}
