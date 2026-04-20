@@ -7,6 +7,7 @@ import backend.models.core.Coupon;
 import backend.models.core.PromotionRule;
 import backend.models.enums.DiscountStatus;
 import backend.models.enums.DiscountType;
+import backend.models.enums.PromotionRuleType;
 import backend.repositories.CouponRepository;
 import backend.repositories.PromotionRuleRepository;
 import backend.services.intf.PricingEngine;
@@ -16,6 +17,7 @@ import backend.services.pricing.CartLine;
 import backend.services.pricing.LineBreakdown;
 import backend.services.pricing.PricingResult;
 import backend.services.pricing.WorkingLine;
+import backend.services.pricing.config.FreeShippingConfig;
 import backend.services.pricing.config.PromotionConfigValidator;
 import backend.services.pricing.evaluators.RuleEvaluator;
 
@@ -112,10 +114,31 @@ public class PricingEngineImpl implements PricingEngine {
 
         List<AppliedPromotion> applied = new ArrayList<>();
         BigDecimal promotionSavings = BigDecimal.ZERO;
+        BigDecimal remainingShipping = ctx.shippingAmount() != null
+                ? ctx.shippingAmount().setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal shippingSavings = BigDecimal.ZERO;
         boolean nonStackableFired = false;
 
         for (PromotionRule rule : eligible) {
             if (!rule.isStackable() && nonStackableFired) continue;
+
+            if (rule.getRuleType() == PromotionRuleType.FREE_SHIPPING) {
+                BigDecimal saving = applyFreeShipping(rule, lines, remainingShipping, warnings);
+                if (saving.signum() <= 0) continue;
+                shippingSavings = shippingSavings.add(saving);
+                remainingShipping = remainingShipping.subtract(saving).max(BigDecimal.ZERO);
+                applied.add(new AppliedPromotion(
+                        rule.getId(),
+                        rule.getName(),
+                        rule.getRuleType(),
+                        saving,
+                        rule.getFundedByCompany() != null
+                                ? rule.getFundedByCompany().getId()
+                                : rule.getCompany().getId()));
+                if (!rule.isStackable()) nonStackableFired = true;
+                continue;
+            }
 
             RuleEvaluator evaluator = evaluators.get(rule.getRuleType());
             if (evaluator == null) {
@@ -153,14 +176,11 @@ public class PricingEngineImpl implements PricingEngine {
             }
         }
 
-        BigDecimal shipping = ctx.shippingAmount() != null
-                ? ctx.shippingAmount().setScale(2, RoundingMode.HALF_UP)
-                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
         BigDecimal finalTotal = subtotal
                 .subtract(promotionSavings)
                 .subtract(couponSavings)
                 .max(BigDecimal.ZERO)
-                .add(shipping)
+                .add(remainingShipping)
                 .setScale(2, RoundingMode.HALF_UP);
 
         List<LineBreakdown> breakdowns = lines.stream().map(WorkingLine::toBreakdown).toList();
@@ -171,9 +191,46 @@ public class PricingEngineImpl implements PricingEngine {
                 promotionSavings.setScale(2, RoundingMode.HALF_UP),
                 couponSavings.setScale(2, RoundingMode.HALF_UP),
                 appliedCouponCode,
-                shipping,
+                remainingShipping,
+                shippingSavings.setScale(2, RoundingMode.HALF_UP),
                 finalTotal,
                 List.copyOf(warnings));
+    }
+
+    /**
+     * FREE_SHIPPING is special-cased: it reduces the shipping line, not item subtotals, so
+     * it doesn't flow through the {@link RuleEvaluator} contract. Returns the positive
+     * shipping reduction (scale 2, HALF_UP) or zero if the rule is inapplicable.
+     */
+    private BigDecimal applyFreeShipping(
+            PromotionRule rule,
+            List<WorkingLine> lines,
+            BigDecimal remainingShipping,
+            List<String> warnings) {
+        if (remainingShipping.signum() <= 0) return BigDecimal.ZERO;
+        List<WorkingLine> eligibleLines = linesForRule(rule, lines);
+        if (eligibleLines.isEmpty()) return BigDecimal.ZERO;
+
+        FreeShippingConfig cfg = (FreeShippingConfig) configValidator
+                .parseStored(rule.getRuleType(), rule.getConfigJson());
+
+        if (cfg.requiresAllTargetProducts()
+                && rule.getTargetProducts() != null
+                && !rule.getTargetProducts().isEmpty()) {
+            Set<Long> cartProductIds = lines.stream()
+                    .map(WorkingLine::productId)
+                    .collect(Collectors.toSet());
+            boolean allPresent = rule.getTargetProducts().stream()
+                    .allMatch(p -> cartProductIds.contains(p.getId()));
+            if (!allPresent) {
+                warnings.add("Rule '" + rule.getName() + "' skipped: requires all target products in cart");
+                return BigDecimal.ZERO;
+            }
+        }
+
+        BigDecimal cap = cfg.maxShippingDiscount() != null
+                ? cfg.maxShippingDiscount() : remainingShipping;
+        return cap.min(remainingShipping).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
     }
 
     private List<PromotionRule> filterAndSort(
@@ -316,7 +373,8 @@ public class PricingEngineImpl implements PricingEngine {
         BigDecimal shipping = ctx.shippingAmount() != null
                 ? ctx.shippingAmount().setScale(2, RoundingMode.HALF_UP)
                 : zero;
-        return new PricingResult(List.of(), List.of(), zero, zero, zero, null, shipping, shipping, List.of());
+        return new PricingResult(
+                List.of(), List.of(), zero, zero, zero, null, shipping, zero, shipping, List.of());
     }
 
     private record CouponOutcome(BigDecimal saving) {

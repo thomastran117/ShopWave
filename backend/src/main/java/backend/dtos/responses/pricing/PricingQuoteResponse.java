@@ -11,6 +11,7 @@ public record PricingQuoteResponse(
         BigDecimal couponSavings,
         String appliedCouponCode,
         BigDecimal shippingAmount,
+        BigDecimal shippingSavings,
         BigDecimal finalTotal,
         String currency,
         List<String> warnings

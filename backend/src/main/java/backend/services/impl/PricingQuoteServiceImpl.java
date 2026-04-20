@@ -124,6 +124,7 @@ public class PricingQuoteServiceImpl implements PricingQuoteService {
                 r.couponSavings(),
                 r.appliedCouponCode(),
                 r.shippingAmount(),
+                r.shippingSavings(),
                 r.finalTotal(),
                 currency,
                 r.warnings());

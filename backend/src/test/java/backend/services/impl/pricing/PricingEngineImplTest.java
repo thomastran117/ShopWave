@@ -374,6 +374,52 @@ class PricingEngineImplTest {
         assertEquals(bd("0.00"), result.promotionSavings());
     }
 
+    // -------------------- 21. FREE_SHIPPING --------------------
+
+    @Test
+    void freeShipping_reducesShippingToZero() {
+        CartContext ctx = contextWithShipping(
+                List.of(line(0, 1, 1, "50.00")), null, Set.of(), "12.50");
+        PromotionRule rule = freeShippingRule(null, false);
+        PricingResult result = engine.compute(ctx, List.of(rule), null);
+
+        assertEquals(bd("0.00"), result.promotionSavings());
+        assertEquals(bd("12.50"), result.shippingSavings());
+        assertEquals(bd("0.00"), result.shippingAmount());
+        assertEquals(bd("50.00"), result.finalTotal());
+        assertEquals(1, result.appliedPromotions().size());
+        assertEquals(bd("12.50"), result.appliedPromotions().get(0).savings());
+    }
+
+    @Test
+    void freeShipping_cappedByMaxShippingDiscount() {
+        CartContext ctx = contextWithShipping(
+                List.of(line(0, 1, 1, "50.00")), null, Set.of(), "20.00");
+        PromotionRule rule = freeShippingRule("5.00", false);
+        PricingResult result = engine.compute(ctx, List.of(rule), null);
+
+        assertEquals(bd("5.00"), result.shippingSavings());
+        assertEquals(bd("15.00"), result.shippingAmount());
+        assertEquals(bd("65.00"), result.finalTotal());
+    }
+
+    @Test
+    void freeShipping_requiresAllTargetProducts_skipsWhenMissing() {
+        CartContext ctx = contextWithShipping(
+                List.of(line(0, 1, 1, "50.00")), null, Set.of(), "10.00");
+        PromotionRule rule = freeShippingRule(null, true);
+        Product p1 = new Product();
+        p1.setId(1L);
+        Product p2 = new Product();
+        p2.setId(2L);
+        rule.setTargetProducts(new HashSet<>(List.of(p1, p2)));
+        PricingResult result = engine.compute(ctx, List.of(rule), null);
+
+        assertEquals(bd("0.00"), result.shippingSavings());
+        assertEquals(bd("10.00"), result.shippingAmount());
+        assertTrue(result.appliedPromotions().isEmpty());
+    }
+
     // -------------------- helpers --------------------
 
     private static BigDecimal bd(String v) {
@@ -386,6 +432,19 @@ class PricingEngineImplTest {
 
     private static CartContext context(List<CartLine> lines, Long userId, Set<Long> segments) {
         return new CartContext(lines, userId, segments, "USD", null, null, Instant.now());
+    }
+
+    private static CartContext contextWithShipping(
+            List<CartLine> lines, Long userId, Set<Long> segments, String shipping) {
+        return new CartContext(lines, userId, segments, "USD", null, new BigDecimal(shipping), Instant.now());
+    }
+
+    private PromotionRule freeShippingRule(String maxShippingDiscount, boolean requiresAll) {
+        String json = "{"
+                + (maxShippingDiscount != null ? "\"maxShippingDiscount\":" + maxShippingDiscount + "," : "")
+                + "\"requiresAllTargetProducts\":" + requiresAll
+                + "}";
+        return baseRule(PromotionRuleType.FREE_SHIPPING, json, false, 100);
     }
 
     private PromotionRule baseRule(PromotionRuleType type, String configJson, boolean stackable, int priority) {
