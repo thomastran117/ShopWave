@@ -227,7 +227,7 @@ public class ProductServiceImpl implements ProductService {
         product.setSku(request.getSku());
         product.setPrice(request.getPrice());
         product.setCompareAtPrice(request.getCompareAtPrice());
-        product.setCurrency(request.getCurrency() != null ? request.getCurrency().toUpperCase() : "USD");
+        product.setCurrency(request.getCurrency() != null ? request.getCurrency() : "USD");
         product.setCategory(request.getCategory());
         product.setBrand(request.getBrand());
         product.setTags(request.getTags());
@@ -268,7 +268,7 @@ public class ProductServiceImpl implements ProductService {
         if (request.getDescription() != null) product.setDescription(request.getDescription());
         if (request.getPrice() != null) product.setPrice(request.getPrice());
         if (request.getCompareAtPrice() != null) product.setCompareAtPrice(request.getCompareAtPrice());
-        if (request.getCurrency() != null) product.setCurrency(request.getCurrency().toUpperCase());
+        if (request.getCurrency() != null) product.setCurrency(request.getCurrency());
         if (request.getCategory() != null) product.setCategory(request.getCategory());
         if (request.getBrand() != null) product.setBrand(request.getBrand());
         if (request.getTags() != null) product.setTags(request.getTags());

@@ -1,5 +1,6 @@
 package backend.dtos.requests.inventory;
 
+import backend.annotations.safeRichText.SafeRichText;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -26,5 +27,6 @@ public class CreateRestockRequest {
     private LocalDate expectedArrivalDate;
 
     @Size(max = 2000)
+    @SafeRichText
     private String supplierNote;
 }

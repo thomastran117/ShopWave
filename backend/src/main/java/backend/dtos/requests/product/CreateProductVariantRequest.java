@@ -1,5 +1,7 @@
 package backend.dtos.requests.product;
 
+import backend.annotations.safeIdentifier.SafeIdentifier;
+import backend.annotations.safeText.SafeText;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -13,6 +15,7 @@ import java.math.BigDecimal;
 public class CreateProductVariantRequest {
 
     @Size(max = 100, message = "SKU must be at most 100 characters")
+    @SafeIdentifier
     private String sku;
 
     @NotNull(message = "Price is required")
@@ -28,12 +31,15 @@ public class CreateProductVariantRequest {
     private boolean purchasable = true;
 
     @Size(max = 100)
+    @SafeText
     private String option1;
 
     @Size(max = 100)
+    @SafeText
     private String option2;
 
     @Size(max = 100)
+    @SafeText
     private String option3;
 
     private int displayOrder = 0;

@@ -13,6 +13,7 @@ import backend.dtos.responses.general.PagedResponse;
 import backend.dtos.responses.inventory.RestockRequestResponse;
 import backend.models.enums.RestockStatus;
 import backend.services.intf.RestockService;
+import backend.services.intf.SanitizationService;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -24,9 +25,11 @@ import jakarta.validation.constraints.Min;
 public class RestockController {
 
     private final RestockService restockService;
+    private final SanitizationService sanitizationService;
 
-    public RestockController(RestockService restockService) {
+    public RestockController(RestockService restockService, SanitizationService sanitizationService) {
         this.restockService = restockService;
+        this.sanitizationService = sanitizationService;
     }
 
     @GetMapping
@@ -44,6 +47,7 @@ public class RestockController {
     public ResponseEntity<RestockRequestResponse> createRestockRequest(
             @PathVariable long companyId,
             @Valid @RequestBody CreateRestockRequest request) {
+        sanitizationService.normalize(request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(restockService.createRestockRequest(companyId, resolveUserId(), request));
     }
@@ -60,7 +64,8 @@ public class RestockController {
     public ResponseEntity<RestockRequestResponse> updateRestockRequest(
             @PathVariable long companyId,
             @PathVariable long restockId,
-            @RequestBody UpdateRestockRequest request) {
+            @Valid @RequestBody UpdateRestockRequest request) {
+        sanitizationService.normalize(request);
         return ResponseEntity.ok(
                 restockService.updateRestockRequest(companyId, restockId, resolveUserId(), request));
     }

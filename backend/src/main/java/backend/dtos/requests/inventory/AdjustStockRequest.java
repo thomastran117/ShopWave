@@ -1,5 +1,6 @@
 package backend.dtos.requests.inventory;
 
+import backend.annotations.safeRichText.SafeRichText;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
@@ -18,5 +19,6 @@ public class AdjustStockRequest {
     private AdjustmentReason reason;
 
     @Size(max = 500, message = "Note must not exceed 500 characters")
+    @SafeRichText
     private String note;
 }

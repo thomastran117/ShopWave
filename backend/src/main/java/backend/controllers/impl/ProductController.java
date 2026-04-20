@@ -31,6 +31,7 @@ import backend.models.enums.ProductStatus;
 import backend.services.impl.ProductIndexingService;
 import backend.services.intf.BundleService;
 import backend.services.intf.ProductService;
+import backend.services.intf.SanitizationService;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -46,11 +47,16 @@ public class ProductController {
     private final ProductService productService;
     private final BundleService bundleService;
     private final ProductIndexingService productIndexingService;
+    private final SanitizationService sanitizationService;
 
-    public ProductController(ProductService productService, BundleService bundleService, ProductIndexingService productIndexingService) {
+    public ProductController(ProductService productService,
+                             BundleService bundleService,
+                             ProductIndexingService productIndexingService,
+                             SanitizationService sanitizationService) {
         this.productService = productService;
         this.bundleService = bundleService;
         this.productIndexingService = productIndexingService;
+        this.sanitizationService = sanitizationService;
     }
 
     @GetMapping
@@ -98,6 +104,7 @@ public class ProductController {
             @PathVariable long companyId,
             @Valid @RequestBody BatchCreateProductsRequest request) {
         try {
+            sanitizationService.normalize(request);
             long userId = resolveUserId();
             return ResponseEntity.status(HttpStatus.CREATED).body(productService.batchCreateProducts(companyId, userId, request));
         } catch (AppHttpException e) {
@@ -143,6 +150,7 @@ public class ProductController {
             @PathVariable long companyId,
             @Valid @RequestBody CreateProductRequest request) {
         try {
+            sanitizationService.normalize(request);
             long userId = resolveUserId();
             return ResponseEntity.status(HttpStatus.CREATED).body(productService.createProduct(companyId, userId, request));
         } catch (AppHttpException e) {
@@ -159,6 +167,7 @@ public class ProductController {
             @PathVariable long id,
             @Valid @RequestBody UpdateProductRequest request) {
         try {
+            sanitizationService.normalize(request);
             long userId = resolveUserId();
             return ResponseEntity.ok(productService.updateProduct(companyId, id, userId, request));
         } catch (AppHttpException e) {
@@ -204,6 +213,7 @@ public class ProductController {
             @PathVariable long productId,
             @Valid @RequestBody AddProductImageRequest request) {
         try {
+            sanitizationService.normalize(request);
             long userId = resolveUserId();
             return ResponseEntity.status(HttpStatus.CREATED)
                     .body(productService.addProductImage(companyId, productId, userId, request));
@@ -269,6 +279,7 @@ public class ProductController {
             @PathVariable long productId,
             @Valid @RequestBody CreateProductOptionRequest request) {
         try {
+            sanitizationService.normalize(request);
             long userId = resolveUserId();
             return ResponseEntity.status(HttpStatus.CREATED)
                     .body(productService.addProductOption(companyId, productId, userId, request));
@@ -287,6 +298,7 @@ public class ProductController {
             @PathVariable long optionId,
             @Valid @RequestBody UpdateProductOptionRequest request) {
         try {
+            sanitizationService.normalize(request);
             long userId = resolveUserId();
             return ResponseEntity.ok(productService.updateProductOption(companyId, productId, optionId, userId, request));
         } catch (AppHttpException e) {
@@ -349,6 +361,7 @@ public class ProductController {
             @PathVariable long productId,
             @Valid @RequestBody CreateProductVariantRequest request) {
         try {
+            sanitizationService.normalize(request);
             long userId = resolveUserId();
             return ResponseEntity.status(HttpStatus.CREATED)
                     .body(productService.createProductVariant(companyId, productId, userId, request));
@@ -367,6 +380,7 @@ public class ProductController {
             @PathVariable long variantId,
             @Valid @RequestBody UpdateProductVariantRequest request) {
         try {
+            sanitizationService.normalize(request);
             long userId = resolveUserId();
             return ResponseEntity.ok(productService.updateProductVariant(companyId, productId, variantId, userId, request));
         } catch (AppHttpException e) {
@@ -415,6 +429,7 @@ public class ProductController {
             @PathVariable long productId,
             @Valid @RequestBody SetProductAttributesRequest request) {
         try {
+            sanitizationService.normalize(request);
             long userId = resolveUserId();
             return ResponseEntity.ok(productService.setProductAttributes(companyId, productId, userId, request));
         } catch (AppHttpException e) {

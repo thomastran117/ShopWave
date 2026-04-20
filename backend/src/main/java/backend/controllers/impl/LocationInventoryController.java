@@ -16,6 +16,7 @@ import backend.dtos.responses.inventory.LocationStockResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.exceptions.http.InternalServerErrorException;
 import backend.services.intf.LocationInventoryService;
+import backend.services.intf.SanitizationService;
 
 import jakarta.validation.Valid;
 
@@ -26,9 +27,12 @@ import java.util.List;
 public class LocationInventoryController {
 
     private final LocationInventoryService locationInventoryService;
+    private final SanitizationService sanitizationService;
 
-    public LocationInventoryController(LocationInventoryService locationInventoryService) {
+    public LocationInventoryController(LocationInventoryService locationInventoryService,
+                                       SanitizationService sanitizationService) {
         this.locationInventoryService = locationInventoryService;
+        this.sanitizationService = sanitizationService;
     }
 
     @GetMapping
@@ -50,6 +54,7 @@ public class LocationInventoryController {
             @PathVariable long companyId,
             @Valid @RequestBody CreateLocationRequest request) {
         try {
+            sanitizationService.normalize(request);
             long userId = resolveUserId();
             return ResponseEntity.status(HttpStatus.CREATED)
                     .body(locationInventoryService.createLocation(companyId, userId, request));
@@ -82,6 +87,7 @@ public class LocationInventoryController {
             @PathVariable long locationId,
             @Valid @RequestBody UpdateLocationRequest request) {
         try {
+            sanitizationService.normalize(request);
             long userId = resolveUserId();
             return ResponseEntity.ok(locationInventoryService.updateLocation(companyId, locationId, userId, request));
         } catch (AppHttpException e) {
@@ -150,6 +156,7 @@ public class LocationInventoryController {
             @RequestParam(required = false) Long variantId,
             @Valid @RequestBody AdjustStockRequest request) {
         try {
+            sanitizationService.normalize(request);
             long userId = resolveUserId();
             return ResponseEntity.ok(locationInventoryService.adjustLocationStock(
                     companyId, locationId, productId, userId, request, variantId));

@@ -23,6 +23,7 @@ import backend.models.enums.ProductStatus;
 import backend.dtos.responses.inventory.LocationStockResponse;
 import backend.services.intf.InventoryService;
 import backend.services.intf.LocationInventoryService;
+import backend.services.intf.SanitizationService;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -42,11 +43,14 @@ public class InventoryController {
 
     private final InventoryService inventoryService;
     private final LocationInventoryService locationInventoryService;
+    private final SanitizationService sanitizationService;
 
     public InventoryController(InventoryService inventoryService,
-                               LocationInventoryService locationInventoryService) {
+                               LocationInventoryService locationInventoryService,
+                               SanitizationService sanitizationService) {
         this.inventoryService = inventoryService;
         this.locationInventoryService = locationInventoryService;
+        this.sanitizationService = sanitizationService;
     }
 
     @GetMapping
@@ -122,6 +126,7 @@ public class InventoryController {
             @PathVariable long productId,
             @Valid @RequestBody AdjustStockRequest request) {
         try {
+            sanitizationService.normalize(request);
             long userId = resolveUserId();
             return ResponseEntity.ok(inventoryService.adjustStock(companyId, productId, userId, request));
         } catch (AppHttpException e) {
@@ -136,6 +141,7 @@ public class InventoryController {
             @PathVariable long companyId,
             @Valid @RequestBody BulkAdjustRequest request) {
         try {
+            sanitizationService.normalize(request);
             long userId = resolveUserId();
             return ResponseEntity.ok(inventoryService.bulkAdjust(companyId, userId, request));
         } catch (AppHttpException e) {

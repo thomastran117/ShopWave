@@ -1,5 +1,8 @@
 package backend.dtos.requests.product;
 
+import backend.annotations.safeIdentifier.SafeIdentifier;
+import backend.annotations.safeRichText.SafeRichText;
+import backend.annotations.safeText.SafeText;
 import backend.models.enums.ProductStatus;
 import jakarta.validation.constraints.*;
 import lombok.Getter;
@@ -12,11 +15,15 @@ import java.math.BigDecimal;
 public class UpdateProductRequest {
 
     @Size(max = 255, message = "Product name must not exceed 255 characters")
+    @SafeText
     private String name;
 
+    @Size(max = 10000, message = "Description must not exceed 10000 characters")
+    @SafeRichText
     private String description;
 
     @Size(max = 100, message = "SKU must not exceed 100 characters")
+    @SafeIdentifier
     private String sku;
 
     @DecimalMin(value = "0.00", inclusive = true, message = "Price must be 0.00 or greater")
@@ -31,12 +38,15 @@ public class UpdateProductRequest {
     private String currency;
 
     @Size(max = 100, message = "Category must not exceed 100 characters")
+    @SafeText
     private String category;
 
     @Size(max = 100, message = "Brand must not exceed 100 characters")
+    @SafeText
     private String brand;
 
     @Size(max = 500, message = "Tags must not exceed 500 characters")
+    @SafeRichText
     private String tags;
 
     @Size(max = 500, message = "Thumbnail URL must not exceed 500 characters")
@@ -50,6 +60,7 @@ public class UpdateProductRequest {
     private BigDecimal weight;
 
     @Size(max = 10, message = "Weight unit must not exceed 10 characters")
+    @SafeText
     private String weightUnit;
 
     private ProductStatus status;
