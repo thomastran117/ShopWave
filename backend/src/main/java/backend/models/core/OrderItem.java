@@ -54,6 +54,21 @@ public class OrderItem {
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal discountAmount = BigDecimal.ZERO;
 
+    /**
+     * Total savings from PromotionRule-driven discounts attributed to this line
+     * (line-total, not per-unit). Zero when no promotion rule touched the line.
+     */
+    @Column(nullable = false, precision = 12, scale = 2)
+    private BigDecimal promotionSavings = BigDecimal.ZERO;
+
+    /**
+     * Comma-separated snapshot of promotion rule ids that applied to this line.
+     * Kept as a simple string (not JSON) to stay portable across MySQL/H2 without
+     * pulling {@code @JdbcTypeCode(SqlTypes.JSON)} into the item table.
+     */
+    @Column(name = "applied_rule_ids", nullable = true, length = 500)
+    private String appliedRuleIdsCsv;
+
     @Column(nullable = false, length = 255)
     private String productName;
 

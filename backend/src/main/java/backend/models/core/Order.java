@@ -55,6 +55,14 @@ public class Order {
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal couponDiscountAmount = BigDecimal.ZERO;
 
+    /**
+     * Total savings from PromotionRule-driven discounts (stackable + non-stackable).
+     * Separate from {@link #couponDiscountAmount} so settlement reports can split
+     * code-redeemed savings from rule-driven savings.
+     */
+    @Column(nullable = false, precision = 12, scale = 2)
+    private BigDecimal promotionSavings = BigDecimal.ZERO;
+
     @Column(nullable = false, length = 3)
     private String currency = "USD";
 

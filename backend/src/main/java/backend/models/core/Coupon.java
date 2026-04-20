@@ -35,6 +35,16 @@ public class Coupon {
     private Company company;
 
     /**
+     * Backing PromotionRule auto-created/maintained by CouponService. Lets the pricing
+     * engine apply coupon-gated discounts the same way it applies any other rule.
+     * Null during a brief window between coupon creation and rule sync; also null for
+     * coupons created before the backing-rule sync was introduced.
+     */
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "promotion_rule_id", nullable = true)
+    private PromotionRule rule;
+
+    /**
      * Globally unique redemption code (stored uppercase).
      * Immutable after creation — distributed codes cannot be changed.
      */
