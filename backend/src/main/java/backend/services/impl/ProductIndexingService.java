@@ -7,17 +7,20 @@ import backend.events.BundleIndexEvent;
 import backend.events.BundleRemoveEvent;
 import backend.events.ProductIndexEvent;
 import backend.events.ProductRemoveEvent;
-import backend.models.core.Discount;
 import backend.models.core.IndexingFailure;
 import backend.models.core.Product;
 import backend.models.core.ProductBundle;
-import backend.models.enums.DiscountType;
+import backend.models.core.PromotionRule;
+import backend.models.enums.PromotionRuleType;
 import backend.repositories.BundleRepository;
-import backend.repositories.DiscountRepository;
 import backend.repositories.IndexingFailureRepository;
 import backend.repositories.ProductRepository;
+import backend.repositories.PromotionRuleRepository;
 import backend.repositories.search.BundleSearchRepository;
 import backend.repositories.search.ProductSearchRepository;
+import backend.services.pricing.config.FixedOffConfig;
+import backend.services.pricing.config.PercentageOffConfig;
+import backend.services.pricing.config.PromotionConfigValidator;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -49,7 +52,8 @@ public class ProductIndexingService implements ApplicationRunner {
     private final BundleSearchRepository bundleSearchRepository;
     private final ProductRepository productRepository;
     private final BundleRepository bundleRepository;
-    private final DiscountRepository discountRepository;
+    private final PromotionRuleRepository promotionRuleRepository;
+    private final PromotionConfigValidator configValidator;
     private final IndexingFailureRepository failureRepository;
     private final IndexVersionManager indexVersionManager;
     private final EnvironmentSetting env;
@@ -62,7 +66,8 @@ public class ProductIndexingService implements ApplicationRunner {
             BundleSearchRepository bundleSearchRepository,
             ProductRepository productRepository,
             BundleRepository bundleRepository,
-            DiscountRepository discountRepository,
+            PromotionRuleRepository promotionRuleRepository,
+            PromotionConfigValidator configValidator,
             IndexingFailureRepository failureRepository,
             IndexVersionManager indexVersionManager,
             EnvironmentSetting env) {
@@ -70,7 +75,8 @@ public class ProductIndexingService implements ApplicationRunner {
         this.bundleSearchRepository = bundleSearchRepository;
         this.productRepository = productRepository;
         this.bundleRepository = bundleRepository;
-        this.discountRepository = discountRepository;
+        this.promotionRuleRepository = promotionRuleRepository;
+        this.configValidator = configValidator;
         this.failureRepository = failureRepository;
         this.indexVersionManager = indexVersionManager;
         this.env = env;
@@ -330,17 +336,17 @@ public class ProductIndexingService implements ApplicationRunner {
 
     private ProductDocument toProductDocument(Product p, long companyId) {
         Instant now = Instant.now();
-        List<Discount> discounts = discountRepository.findActiveDiscountsForProduct(companyId, p.getId(), now);
+        List<PromotionRule> rules = promotionRuleRepository.findActiveRulesForProduct(companyId, p.getId(), now);
 
-        List<String> discountCategories = discounts.stream()
-                .map(Discount::getDiscountCategory)
+        List<String> discountCategories = rules.stream()
+                .map(PromotionRule::getDescription)
                 .filter(Objects::nonNull)
                 .map(String::toLowerCase)
                 .distinct()
                 .toList();
 
-        BigDecimal bestSaving = discounts.stream()
-                .map(d -> computeSaving(d, p.getPrice()))
+        BigDecimal bestSaving = rules.stream()
+                .map(r -> computeSaving(r, p.getPrice()))
                 .max(BigDecimal::compareTo)
                 .orElse(BigDecimal.ZERO);
 
@@ -366,13 +372,28 @@ public class ProductIndexingService implements ApplicationRunner {
         );
     }
 
-    private BigDecimal computeSaving(Discount discount, BigDecimal price) {
-        if (discount.getType() == DiscountType.PERCENTAGE) {
-            return price.multiply(discount.getValue())
+    /**
+     * Quick per-unit saving for indexing. Only PERCENTAGE_OFF and FIXED_OFF contribute —
+     * BOGO/TIERED/FREE_SHIPPING depend on quantity or apply to shipping, so they don't
+     * produce a stable per-unit discounted price for search results.
+     */
+    private BigDecimal computeSaving(PromotionRule rule, BigDecimal price) {
+        if (rule.getRuleType() == PromotionRuleType.PERCENTAGE_OFF) {
+            PercentageOffConfig cfg = (PercentageOffConfig)
+                    configValidator.parseStored(rule.getRuleType(), rule.getConfigJson());
+            BigDecimal saving = price.multiply(cfg.percent())
                     .divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+            if (cfg.maxDiscount() != null) {
+                saving = saving.min(cfg.maxDiscount());
+            }
+            return saving.min(price);
         }
-        // FIXED_AMOUNT: cap at base price — discount can't make price negative
-        return discount.getValue().min(price);
+        if (rule.getRuleType() == PromotionRuleType.FIXED_OFF) {
+            FixedOffConfig cfg = (FixedOffConfig)
+                    configValidator.parseStored(rule.getRuleType(), rule.getConfigJson());
+            return cfg.amount().min(price);
+        }
+        return BigDecimal.ZERO;
     }
 
     private BundleDocument toBundleDocument(ProductBundle b) {

@@ -48,12 +48,12 @@ import backend.models.core.ProductVariant;
 import backend.models.enums.ProductStatus;
 import backend.repositories.BundleRepository;
 import backend.repositories.CompanyRepository;
-import backend.repositories.DiscountRepository;
 import backend.repositories.ProductAttributeRepository;
 import backend.repositories.ProductImageRepository;
 import backend.repositories.ProductOptionRepository;
 import backend.repositories.ProductRepository;
 import backend.repositories.ProductVariantRepository;
+import backend.repositories.PromotionRuleRepository;
 import backend.repositories.specifications.ProductSpecification;
 import backend.services.intf.ProductService;
 import org.springframework.context.ApplicationEventPublisher;
@@ -80,7 +80,7 @@ public class ProductServiceImpl implements ProductService {
     private final ProductVariantRepository productVariantRepository;
     private final ProductAttributeRepository productAttributeRepository;
     private final BundleRepository bundleRepository;
-    private final DiscountRepository discountRepository;
+    private final PromotionRuleRepository promotionRuleRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final ElasticsearchOperations elasticsearchOperations;
 
@@ -92,7 +92,7 @@ public class ProductServiceImpl implements ProductService {
             ProductVariantRepository productVariantRepository,
             ProductAttributeRepository productAttributeRepository,
             BundleRepository bundleRepository,
-            DiscountRepository discountRepository,
+            PromotionRuleRepository promotionRuleRepository,
             ApplicationEventPublisher eventPublisher,
             ElasticsearchOperations elasticsearchOperations) {
         this.productRepository = productRepository;
@@ -102,7 +102,7 @@ public class ProductServiceImpl implements ProductService {
         this.productVariantRepository = productVariantRepository;
         this.productAttributeRepository = productAttributeRepository;
         this.bundleRepository = bundleRepository;
-        this.discountRepository = discountRepository;
+        this.promotionRuleRepository = promotionRuleRepository;
         this.eventPublisher = eventPublisher;
         this.elasticsearchOperations = elasticsearchOperations;
     }
@@ -304,7 +304,7 @@ public class ProductServiceImpl implements ProductService {
             throw new ConflictException("Product is part of one or more bundles. Remove it from all bundles before deleting.");
         }
 
-        discountRepository.removeProductFromAllDiscounts(productId);
+        promotionRuleRepository.removeProductFromAllRules(productId);
         productRepository.delete(product);
         eventPublisher.publishEvent(new ProductRemoveEvent(productId));
     }
@@ -363,7 +363,7 @@ public class ProductServiceImpl implements ProductService {
             throw new ResourceNotFoundException("One or more products were not found in this company");
         }
 
-        discountRepository.removeProductsFromAllDiscounts(request.getIds());
+        promotionRuleRepository.removeProductsFromAllRules(request.getIds());
         productRepository.deleteAll(products);
         for (Long id : request.getIds()) {
             eventPublisher.publishEvent(new ProductRemoveEvent(id));

@@ -5,8 +5,8 @@ import jakarta.persistence.criteria.Root;
 import jakarta.persistence.criteria.Subquery;
 import org.springframework.data.jpa.domain.Specification;
 
-import backend.models.core.Discount;
 import backend.models.core.Product;
+import backend.models.core.PromotionRule;
 import backend.models.enums.DiscountStatus;
 import backend.models.enums.ProductStatus;
 
@@ -89,30 +89,50 @@ public class ProductSpecification {
             }
 
             if (discountCategory != null && !discountCategory.isBlank()) {
-                // Subquery: products whose id appears in any discount with this category
-                Subquery<Long> subq = query.subquery(Long.class);
-                Root<Discount> discountRoot = subq.from(Discount.class);
-                subq.select(discountRoot.join("products").get("id"))
-                        .where(cb.equal(
-                                cb.lower(discountRoot.get("discountCategory")),
-                                discountCategory.trim().toLowerCase()));
-                predicates.add(root.get("id").in(subq));
+                String cat = discountCategory.trim().toLowerCase();
+                // Either the product appears in a rule's targetProducts whose description
+                // matches the category, or a company-wide rule (empty targetProducts) with
+                // matching description exists — in which case every company product passes.
+                Subquery<Long> byTarget = query.subquery(Long.class);
+                Root<PromotionRule> rt = byTarget.from(PromotionRule.class);
+                byTarget.select(rt.join("targetProducts").get("id"))
+                        .where(cb.equal(cb.lower(rt.get("description")), cat));
+
+                Subquery<Long> companyWide = query.subquery(Long.class);
+                Root<PromotionRule> rw = companyWide.from(PromotionRule.class);
+                companyWide.select(rw.get("id")).where(
+                        cb.equal(rw.get("company").get("id"), companyId),
+                        cb.equal(cb.lower(rw.get("description")), cat),
+                        cb.isEmpty(rw.get("targetProducts"))
+                );
+                predicates.add(cb.or(root.get("id").in(byTarget), cb.exists(companyWide)));
             }
 
             if (Boolean.TRUE.equals(hasDiscount)) {
-                // Subquery: products covered by at least one ACTIVE, in-window discount
-                Subquery<Long> subq = query.subquery(Long.class);
-                Root<Discount> dr = subq.from(Discount.class);
-                subq.select(dr.join("products").get("id"))
+                Subquery<Long> byTarget = query.subquery(Long.class);
+                Root<PromotionRule> rt = byTarget.from(PromotionRule.class);
+                byTarget.select(rt.join("targetProducts").get("id"))
                         .where(
-                            cb.equal(dr.get("company").get("id"), companyId),
-                            cb.equal(dr.get("status"), DiscountStatus.ACTIVE),
-                            cb.or(cb.isNull(dr.get("startDate")),
-                                  cb.lessThanOrEqualTo(dr.get("startDate"), cb.currentTimestamp())),
-                            cb.or(cb.isNull(dr.get("endDate")),
-                                  cb.greaterThan(dr.get("endDate"), cb.currentTimestamp()))
+                                cb.equal(rt.get("company").get("id"), companyId),
+                                cb.equal(rt.get("status"), DiscountStatus.ACTIVE),
+                                cb.or(cb.isNull(rt.get("startDate")),
+                                      cb.lessThanOrEqualTo(rt.get("startDate"), cb.currentTimestamp())),
+                                cb.or(cb.isNull(rt.get("endDate")),
+                                      cb.greaterThan(rt.get("endDate"), cb.currentTimestamp()))
                         );
-                predicates.add(root.get("id").in(subq));
+
+                Subquery<Long> companyWide = query.subquery(Long.class);
+                Root<PromotionRule> rw = companyWide.from(PromotionRule.class);
+                companyWide.select(rw.get("id")).where(
+                        cb.equal(rw.get("company").get("id"), companyId),
+                        cb.equal(rw.get("status"), DiscountStatus.ACTIVE),
+                        cb.or(cb.isNull(rw.get("startDate")),
+                              cb.lessThanOrEqualTo(rw.get("startDate"), cb.currentTimestamp())),
+                        cb.or(cb.isNull(rw.get("endDate")),
+                              cb.greaterThan(rw.get("endDate"), cb.currentTimestamp())),
+                        cb.isEmpty(rw.get("targetProducts"))
+                );
+                predicates.add(cb.or(root.get("id").in(byTarget), cb.exists(companyWide)));
             }
 
             return cb.and(predicates.toArray(new Predicate[0]));

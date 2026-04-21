@@ -52,6 +52,24 @@ public interface PromotionRuleRepository extends JpaRepository<PromotionRule, Lo
     @Query("UPDATE PromotionRule r SET r.usedCount = r.usedCount + 1 WHERE r.id = :id AND (r.maxUses IS NULL OR r.usedCount < r.maxUses)")
     int tryIncrementUsedCount(@Param("id") long id);
 
+    /**
+     * Active, in-window rules for a product: either explicitly targeting the product or
+     * applying to the whole company catalogue (empty targetProducts). Used by search
+     * indexing to populate {@code hasActiveDiscount} / {@code discountedPrice}.
+     */
+    @Query("""
+            SELECT DISTINCT r FROM PromotionRule r LEFT JOIN r.targetProducts p
+            WHERE r.company.id = :companyId
+              AND r.status = backend.models.enums.DiscountStatus.ACTIVE
+              AND (:now >= r.startDate OR r.startDate IS NULL)
+              AND (:now <  r.endDate   OR r.endDate   IS NULL)
+              AND (r.targetProducts IS EMPTY OR p.id = :productId)
+            """)
+    List<PromotionRule> findActiveRulesForProduct(
+            @Param("companyId") long companyId,
+            @Param("productId") long productId,
+            @Param("now") Instant now);
+
     /** Bulk-deletes expired rules. Called by an expiry scheduler analogous to DiscountExpiryScheduler. */
     @Modifying
     @Query("DELETE FROM PromotionRule r WHERE r.endDate IS NOT NULL AND r.endDate < :now")
