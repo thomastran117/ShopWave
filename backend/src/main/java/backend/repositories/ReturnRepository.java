@@ -7,6 +7,7 @@ import org.springframework.stereotype.Repository;
 
 import backend.models.core.Return;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -40,4 +41,12 @@ public interface ReturnRepository extends JpaRepository<Return, Long> {
            "JOIN r.items ri JOIN ri.orderItem oi " +
            "WHERE r.id = :returnId AND oi.product.company.id = :companyId")
     Optional<Return> findByIdAndCompanyId(@Param("returnId") long returnId, @Param("companyId") long companyId);
+
+    /** Total lifetime return count for a user — feeds ReturnPatternEvaluator's return-rate signal. */
+    @Query("SELECT COUNT(r) FROM Return r WHERE r.order.user.id = :userId")
+    long countByUserId(@Param("userId") long userId);
+
+    /** Returns created by a user after {@code since} — used for repeat-return velocity. */
+    @Query("SELECT COUNT(r) FROM Return r WHERE r.order.user.id = :userId AND r.createdAt > :since")
+    long countByUserIdAndCreatedAtAfter(@Param("userId") long userId, @Param("since") Instant since);
 }

@@ -11,7 +11,8 @@ import java.time.Instant;
 @Entity
 @Table(name = "coupon_redemptions", indexes = {
         @Index(name = "idx_redemption_coupon", columnList = "coupon_id"),
-        @Index(name = "idx_redemption_user",   columnList = "user_id")
+        @Index(name = "idx_redemption_user",   columnList = "user_id"),
+        @Index(name = "idx_redemption_ip_time", columnList = "ip, redeemed_at")
 })
 @Getter
 @Setter
@@ -41,4 +42,8 @@ public class CouponRedemption {
 
     @Column(nullable = false)
     private Instant redeemedAt;
+
+    /** Client IP at redemption time. Used by CouponAbuseEvaluator for cross-account IP velocity. */
+    @Column(nullable = true, length = 45)
+    private String ip;
 }

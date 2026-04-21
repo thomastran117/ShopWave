@@ -9,12 +9,17 @@ import backend.annotations.requireAuth.RequireAuth;
 import backend.dtos.requests.order.ReturnOrderRequest;
 import backend.dtos.requests.order.ShipOrderRequest;
 import backend.dtos.requests.return_.MerchantInitiateReturnRequest;
+import backend.dtos.requests.risk.RiskDecisionRequest;
 import backend.dtos.responses.general.PagedResponse;
 import backend.dtos.responses.order.CompanyOrderResponse;
+import backend.dtos.responses.order.OrderResponse;
 import backend.dtos.responses.return_.ReturnResponse;
+import backend.dtos.responses.risk.RiskAssessmentResponse;
+import backend.dtos.responses.risk.RiskReviewResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.exceptions.http.InternalServerErrorException;
 import backend.models.enums.OrderStatus;
+import backend.models.enums.RiskReviewStatus;
 import backend.services.intf.OrderService;
 import backend.services.intf.ReturnService;
 
@@ -147,6 +152,70 @@ public class CompanyOrderController {
         try {
             long userId = resolveUserId();
             return ResponseEntity.ok(returnService.merchantInitiateReturn(orderId, companyId, userId, request));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Risk review queue
+    // -------------------------------------------------------------------------
+
+    @GetMapping("/risk-review")
+    public ResponseEntity<PagedResponse<RiskReviewResponse>> listRiskReviews(
+            @PathVariable long companyId,
+            @RequestParam(required = false) RiskReviewStatus status,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(orderService.listRiskReviews(companyId, userId, status, page, size));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @GetMapping("/{orderId}/risk")
+    public ResponseEntity<RiskAssessmentResponse> getOrderRisk(
+            @PathVariable long companyId,
+            @PathVariable long orderId) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(orderService.getOrderRisk(companyId, orderId, userId));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/{orderId}/risk/approve")
+    public ResponseEntity<OrderResponse> approveRiskReview(
+            @PathVariable long companyId,
+            @PathVariable long orderId,
+            @RequestBody(required = false) @Valid RiskDecisionRequest request) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(orderService.approveRiskReview(companyId, orderId, userId, request));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/{orderId}/risk/reject")
+    public ResponseEntity<OrderResponse> rejectRiskReview(
+            @PathVariable long companyId,
+            @PathVariable long orderId,
+            @RequestBody(required = false) @Valid RiskDecisionRequest request) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(orderService.rejectRiskReview(companyId, orderId, userId, request));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {

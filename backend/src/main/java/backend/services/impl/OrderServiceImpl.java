@@ -15,10 +15,15 @@ import backend.dtos.responses.general.PagedResponse;
 import backend.dtos.responses.order.CompanyOrderResponse;
 import backend.dtos.responses.order.OrderItemResponse;
 import backend.dtos.responses.order.OrderResponse;
+import backend.dtos.responses.risk.RiskAssessmentResponse;
+import backend.dtos.responses.risk.RiskReviewResponse;
+import backend.dtos.responses.risk.RiskSignalResponse;
+import backend.dtos.requests.risk.RiskDecisionRequest;
 import backend.exceptions.http.BadRequestException;
 import backend.exceptions.http.ConflictException;
 import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
+import backend.exceptions.http.RiskStepUpRequiredException;
 import backend.models.core.BundleItem;
 import backend.models.core.InventoryAdjustment;
 import backend.models.core.LocationStock;
@@ -32,8 +37,11 @@ import backend.models.core.User;
 import backend.models.core.Company;
 import backend.models.core.Coupon;
 import backend.models.core.CouponRedemption;
+import backend.models.core.FailedPaymentAttempt;
 import backend.models.core.PromotionRedemption;
 import backend.models.core.PromotionRule;
+import backend.models.core.RiskAssessment;
+import backend.models.core.RiskReview;
 import backend.dtos.requests.order.ReturnOrderRequest;
 import backend.dtos.requests.order.ShipOrderRequest;
 import backend.models.enums.AdjustmentReason;
@@ -43,6 +51,10 @@ import backend.models.enums.DiscountStatus;
 import backend.models.enums.FulfillmentStatus;
 import backend.models.enums.OrderStatus;
 import backend.models.enums.ProductStatus;
+import backend.models.enums.RiskAction;
+import backend.models.enums.RiskAssessmentKind;
+import backend.models.enums.RiskMode;
+import backend.models.enums.RiskReviewStatus;
 import backend.repositories.BundleRepository;
 import backend.repositories.CouponRepository;
 import backend.repositories.CouponPerUserCountRepository;
@@ -57,6 +69,9 @@ import backend.repositories.OrderCompensationRepository;
 import backend.repositories.OrderRepository;
 import backend.repositories.ProductRepository;
 import backend.repositories.ProductVariantRepository;
+import backend.repositories.FailedPaymentAttemptRepository;
+import backend.repositories.RiskAssessmentRepository;
+import backend.repositories.RiskReviewRepository;
 import backend.repositories.UserRepository;
 import backend.dtos.requests.return_.BuyerReturnItemRequest;
 import backend.dtos.requests.return_.MerchantInitiateReturnRequest;
@@ -64,12 +79,21 @@ import backend.models.core.InventoryLocation;
 import backend.models.enums.AllocationStrategy;
 import backend.services.intf.AllocationService;
 import backend.services.intf.CacheService;
+import backend.services.intf.DeviceService;
 import backend.services.intf.EmailService;
+import backend.services.intf.EmailVerificationService;
 import backend.services.intf.OrderService;
 import backend.services.intf.PaymentService;
 import backend.services.intf.PaymentService.PaymentIntentResult;
 import backend.services.intf.PricingEngine;
 import backend.services.intf.ReturnService;
+import backend.services.intf.RiskEngine;
+import backend.services.risk.RiskAssessmentResult;
+import backend.services.risk.RiskContext;
+import backend.services.risk.RiskSignal;
+import backend.configurations.environment.RiskProperties;
+import backend.http.ClientInfo;
+import backend.http.ClientRequestContext;
 import backend.services.pricing.AppliedPromotion;
 import backend.services.pricing.CartContext;
 import backend.services.pricing.CartLine;
@@ -117,6 +141,14 @@ public class OrderServiceImpl implements OrderService {
     private final StockAlertService stockAlertService;
     private final EmailService emailService;
     private final AllocationService allocationService;
+    private final RiskEngine riskEngine;
+    private final RiskAssessmentRepository riskAssessmentRepository;
+    private final RiskReviewRepository riskReviewRepository;
+    private final FailedPaymentAttemptRepository failedPaymentAttemptRepository;
+    private final RiskProperties riskProperties;
+    private final DeviceService deviceService;
+    private final EmailVerificationService emailVerificationService;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
     private ReturnService returnService;
 
     public OrderServiceImpl(
@@ -140,7 +172,14 @@ public class OrderServiceImpl implements OrderService {
             CacheService cacheService,
             StockAlertService stockAlertService,
             EmailService emailService,
-            AllocationService allocationService) {
+            AllocationService allocationService,
+            RiskEngine riskEngine,
+            RiskAssessmentRepository riskAssessmentRepository,
+            RiskReviewRepository riskReviewRepository,
+            FailedPaymentAttemptRepository failedPaymentAttemptRepository,
+            RiskProperties riskProperties,
+            DeviceService deviceService,
+            EmailVerificationService emailVerificationService) {
         this.orderRepository = orderRepository;
         this.compensationRepository = compensationRepository;
         this.productRepository = productRepository;
@@ -162,6 +201,13 @@ public class OrderServiceImpl implements OrderService {
         this.stockAlertService = stockAlertService;
         this.emailService = emailService;
         this.allocationService = allocationService;
+        this.riskEngine = riskEngine;
+        this.riskAssessmentRepository = riskAssessmentRepository;
+        this.riskReviewRepository = riskReviewRepository;
+        this.failedPaymentAttemptRepository = failedPaymentAttemptRepository;
+        this.riskProperties = riskProperties;
+        this.deviceService = deviceService;
+        this.emailVerificationService = emailVerificationService;
     }
 
     /** Setter injection breaks the circular dependency: ReturnService → OrderServiceImpl → ReturnService. */
@@ -561,6 +607,10 @@ public class OrderServiceImpl implements OrderService {
                 redemption.setUser(user);
                 redemption.setDiscountAmount(couponDiscountAmount);
                 redemption.setRedeemedAt(Instant.now());
+                ClientInfo clientInfoForCoupon = ClientRequestContext.get();
+                if (clientInfoForCoupon != null && clientInfoForCoupon.ip() != null) {
+                    redemption.setIp(clientInfoForCoupon.ip());
+                }
                 couponRedemptionRepository.save(redemption);
             }
 
@@ -627,6 +677,22 @@ public class OrderServiceImpl implements OrderService {
                         pr.var() != null ? pr.var().getId() : null,
                         pr.var() != null ? pr.var().getSku() : null,
                         pr.newStock(), threshold);
+            }
+
+            // --- Risk / fraud evaluation. Assessment is always persisted (SHADOW + ENFORCE);
+            //     ENFORCE flips the order to UNDER_REVIEW or raises a step-up exception.
+            RiskAssessment persistedAssessment = runRiskAssessment(
+                    user, order, userSegmentIds, pricing,
+                    request.getRiskVerificationToken());
+            order.setRiskAssessmentId(persistedAssessment.getId());
+            order.setRiskDecision(persistedAssessment.getDecision());
+            order.setRiskScore(persistedAssessment.getScore());
+            if (order.getStatus() == OrderStatus.UNDER_REVIEW) {
+                // Block path: order is parked for merchant review. Stock stays reserved;
+                // stale-order scheduler auto-releases if no decision within the TTL.
+                OrderResponse response = toResponse(orderRepository.save(order));
+                emailService.sendOrderReceiptEmail(user.getEmail(), user.getFirstName(), response);
+                return response;
             }
 
             PaymentIntentResult paymentIntent;
@@ -753,6 +819,10 @@ public class OrderServiceImpl implements OrderService {
 
             order.setStatus(OrderStatus.FAILED);
             order.setFailureReason("Payment failed via webhook");
+
+            // Feed the failed-payment velocity signal. The webhook itself has no IP;
+            // recover it from the risk assessment recorded at checkout time.
+            recordFailedPaymentAttempt(order, paymentIntentId, "Payment failed via webhook");
 
             for (OrderItem item : order.getItems()) {
                 try {
@@ -1572,5 +1642,344 @@ public class OrderServiceImpl implements OrderService {
         return targets.stream()
                 .map(i -> new BuyerReturnItemRequest(i.getId(), i.getQuantity()))
                 .toList();
+    }
+
+    // -------------------------------------------------------------------------
+    // Risk / fraud engine integration
+    // -------------------------------------------------------------------------
+
+    /**
+     * Assesses the in-flight order, persists the assessment, and applies the engine's
+     * verdict according to the current mode.
+     *
+     * <ul>
+     *   <li>SHADOW mode: always returns (the caller proceeds to Stripe); assessment row
+     *       is still written so thresholds can be tuned against real traffic.</li>
+     *   <li>ENFORCE + ALLOW: proceeds.</li>
+     *   <li>ENFORCE + VERIFY: if the caller supplied a valid {@code riskVerificationToken}
+     *       for this user, the token is consumed and the order proceeds. Otherwise the
+     *       email step-up has already been dispatched inside the engine and we throw
+     *       {@link RiskStepUpRequiredException} so the controller can surface HTTP 428.</li>
+     *   <li>ENFORCE + BLOCK: the order is flipped to {@link OrderStatus#UNDER_REVIEW} and a
+     *       PENDING {@link RiskReview} row is created. The Stripe call is skipped entirely.</li>
+     * </ul>
+     */
+    private RiskAssessment runRiskAssessment(
+            User user,
+            Order order,
+            Set<Long> userSegmentIds,
+            PricingResult pricing,
+            String suppliedVerificationToken) {
+
+        ClientInfo clientInfo = ClientRequestContext.get();
+        String fingerprint = (clientInfo != null && clientInfo.userAgent() != null
+                && !clientInfo.userAgent().isBlank())
+                ? deviceService.computeFingerprint(clientInfo.userAgent())
+                : null;
+
+        List<Long> companyIds = order.getItems().stream()
+                .map(item -> item.getProduct() != null ? item.getProduct().getCompany().getId()
+                        : (item.getBundle() != null ? item.getBundle().getCompany().getId() : null))
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        RiskContext ctx = new RiskContext(
+                user.getId(),
+                user.getEmail(),
+                user.getCreatedAt(),
+                null, // lastLoginAt not currently exposed on User — fine, evaluators treat null as unknown
+                userSegmentIds,
+                order.getId(),
+                order.getTotalAmount(),
+                null, // no delivery yet on checkout
+                order.getCurrency(),
+                order.getCouponCode(),
+                pricing != null ? pricing.couponSavings() : null,
+                companyIds,
+                null, // shippingCountry — GeoIP stub; wire up when Address entity lands
+                clientInfo != null ? clientInfo.ip() : null,
+                fingerprint,
+                clientInfo != null ? clientInfo.userAgent() : null,
+                clientInfo != null ? clientInfo.deviceType() : null,
+                RiskAssessmentKind.CHECKOUT,
+                Instant.now());
+
+        RiskAssessmentResult result = riskEngine.assess(ctx);
+        RiskMode mode = riskProperties.getMode();
+        RiskAssessment saved = persistAssessment(ctx, result, mode);
+
+        if (mode == RiskMode.SHADOW) {
+            log.info("Risk(SHADOW) orderId={} action={} score={}",
+                    order.getId(), result.action(), result.totalScore());
+            return saved;
+        }
+
+        switch (result.action()) {
+            case ALLOW -> { /* proceed */ }
+            case VERIFY -> {
+                if (suppliedVerificationToken == null || suppliedVerificationToken.isBlank()) {
+                    throw new RiskStepUpRequiredException(order.getId(), "EMAIL");
+                }
+                long tokenUserId;
+                try {
+                    tokenUserId = emailVerificationService.consumeVerificationToken(suppliedVerificationToken);
+                } catch (RuntimeException ex) {
+                    throw new RiskStepUpRequiredException(order.getId(), "EMAIL");
+                }
+                if (tokenUserId != user.getId()) {
+                    throw new RiskStepUpRequiredException(order.getId(), "EMAIL");
+                }
+                // token valid → proceed
+            }
+            case BLOCK -> {
+                order.setStatus(OrderStatus.UNDER_REVIEW);
+                RiskReview review = new RiskReview();
+                review.setOrderId(order.getId());
+                review.setAssessmentId(saved.getId());
+                review.setStatus(RiskReviewStatus.PENDING);
+                riskReviewRepository.save(review);
+            }
+        }
+        return saved;
+    }
+
+    private RiskAssessment persistAssessment(RiskContext ctx, RiskAssessmentResult result, RiskMode mode) {
+        RiskAssessment assessment = new RiskAssessment();
+        assessment.setOrderId(ctx.orderId());
+        assessment.setUserId(ctx.userId());
+        assessment.setDecision(result.action());
+        assessment.setScore(result.totalScore());
+        assessment.setMode(mode);
+        assessment.setKind(ctx.kind());
+        assessment.setIp(ctx.clientIp());
+        assessment.setDeviceFingerprint(ctx.deviceFingerprint());
+        String ua = ctx.userAgent();
+        if (ua != null && ua.length() > 512) {
+            ua = ua.substring(0, 512);
+        }
+        assessment.setUserAgent(ua);
+        assessment.setReasonsJson(serializeSignals(result));
+        return riskAssessmentRepository.save(assessment);
+    }
+
+    private String serializeSignals(RiskAssessmentResult result) {
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            List<Map<String, Object>> signalsJson = new ArrayList<>();
+            for (RiskSignal sig : result.signals()) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("type", sig.type().name());
+                row.put("decision", sig.decision().name());
+                row.put("score", sig.scoreContribution());
+                row.put("reason", sig.reason());
+                signalsJson.add(row);
+            }
+            payload.put("signals", signalsJson);
+            payload.put("warnings", result.warnings());
+            return objectMapper.writeValueAsString(payload);
+        } catch (Exception e) {
+            log.warn("Failed to serialize risk signals", e);
+            return "{}";
+        }
+    }
+
+    @Override
+    public PagedResponse<RiskReviewResponse> listRiskReviews(long companyId, long ownerId,
+                                                             RiskReviewStatus status, int page, int size) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+        if (size > 50) size = 50;
+        RiskReviewStatus effective = status != null ? status : RiskReviewStatus.PENDING;
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        return new PagedResponse<>(
+                riskReviewRepository.findByCompanyIdAndStatus(companyId, effective, pageable)
+                        .map(this::toRiskReviewResponse));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public RiskAssessmentResponse getOrderRisk(long companyId, long orderId, long ownerId) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+        orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        RiskAssessment latest = riskAssessmentRepository.findTopByOrderIdOrderByCreatedAtDesc(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("No risk assessment on order " + orderId));
+        return toRiskAssessmentResponse(latest);
+    }
+
+    @Override
+    @Transactional
+    public OrderResponse approveRiskReview(long companyId, long orderId, long ownerId, RiskDecisionRequest req) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        if (order.getStatus() != OrderStatus.UNDER_REVIEW) {
+            throw new ConflictException("Order is not under review (status=" + order.getStatus() + ")");
+        }
+        RiskReview review = riskReviewRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("No pending review for order " + orderId));
+        if (review.getStatus() != RiskReviewStatus.PENDING) {
+            throw new ConflictException("Review already decided (status=" + review.getStatus() + ")");
+        }
+
+        long amountInCents = order.getTotalAmount().multiply(BigDecimal.valueOf(100))
+                .setScale(0, RoundingMode.HALF_UP).longValueExact();
+        PaymentIntentResult paymentIntent;
+        try {
+            paymentIntent = paymentService.createPaymentIntent(
+                    amountInCents,
+                    order.getCurrency(),
+                    null,
+                    Map.of("user_id", String.valueOf(order.getUser().getId()),
+                            "order_id", String.valueOf(order.getId()),
+                            "risk_reviewed_by", String.valueOf(ownerId))
+            );
+        } catch (Exception e) {
+            throw new backend.exceptions.http.BadGatewayException(
+                    "Failed to create payment intent: " + e.getMessage());
+        }
+        order.setPaymentIntentId(paymentIntent.id());
+        order.setPaymentClientSecret(paymentIntent.clientSecret());
+        order.setStatus(OrderStatus.RESERVED);
+        orderRepository.save(order);
+
+        review.setStatus(RiskReviewStatus.APPROVED);
+        review.setDecidedByUserId(ownerId);
+        review.setDecidedAt(Instant.now());
+        if (req != null && req.getMerchantNote() != null) {
+            review.setMerchantNote(req.getMerchantNote());
+        }
+        riskReviewRepository.save(review);
+
+        return toResponse(order);
+    }
+
+    @Override
+    @Transactional
+    public OrderResponse rejectRiskReview(long companyId, long orderId, long ownerId, RiskDecisionRequest req) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        if (order.getStatus() != OrderStatus.UNDER_REVIEW) {
+            throw new ConflictException("Order is not under review (status=" + order.getStatus() + ")");
+        }
+        RiskReview review = riskReviewRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("No pending review for order " + orderId));
+        if (review.getStatus() != RiskReviewStatus.PENDING) {
+            throw new ConflictException("Review already decided (status=" + review.getStatus() + ")");
+        }
+
+        // Delegate stock-restore + order-cancel to the existing cancel pipeline.
+        OrderResponse cancelled = cancelOrder(orderId, order.getUser().getId());
+
+        review.setStatus(RiskReviewStatus.REJECTED);
+        review.setDecidedByUserId(ownerId);
+        review.setDecidedAt(Instant.now());
+        if (req != null && req.getMerchantNote() != null) {
+            review.setMerchantNote(req.getMerchantNote());
+        }
+        riskReviewRepository.save(review);
+
+        return cancelled;
+    }
+
+    private RiskReviewResponse toRiskReviewResponse(RiskReview review) {
+        RiskReviewResponse r = new RiskReviewResponse();
+        r.setId(review.getId());
+        r.setOrderId(review.getOrderId());
+        r.setAssessmentId(review.getAssessmentId());
+        r.setStatus(review.getStatus());
+        r.setDecidedByUserId(review.getDecidedByUserId());
+        r.setDecidedAt(review.getDecidedAt());
+        r.setMerchantNote(review.getMerchantNote());
+        r.setCreatedAt(review.getCreatedAt());
+        if (review.getAssessmentId() != null) {
+            riskAssessmentRepository.findById(review.getAssessmentId()).ifPresent(a -> {
+                r.setScore(a.getScore());
+                r.setTopReason(topReason(a));
+            });
+        }
+        return r;
+    }
+
+    private String topReason(RiskAssessment a) {
+        String json = a.getReasonsJson();
+        if (json == null || json.isBlank()) return null;
+        try {
+            var tree = objectMapper.readTree(json);
+            var signals = tree.get("signals");
+            if (signals == null || !signals.isArray()) return null;
+            com.fasterxml.jackson.databind.JsonNode best = null;
+            int bestScore = -1;
+            for (var s : signals) {
+                int sc = s.has("score") ? s.get("score").asInt() : 0;
+                if (sc > bestScore) {
+                    bestScore = sc;
+                    best = s;
+                }
+            }
+            return best != null && best.has("reason") ? best.get("reason").asText() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void recordFailedPaymentAttempt(Order order, String paymentIntentId, String reason) {
+        try {
+            String ip = null;
+            if (order.getRiskAssessmentId() != null) {
+                ip = riskAssessmentRepository.findById(order.getRiskAssessmentId())
+                        .map(RiskAssessment::getIp)
+                        .orElse(null);
+            }
+            FailedPaymentAttempt attempt = new FailedPaymentAttempt(
+                    order.getUser().getId(),
+                    order.getId(),
+                    ip,
+                    paymentIntentId,
+                    reason);
+            failedPaymentAttemptRepository.save(attempt);
+        } catch (Exception ex) {
+            // Best-effort telemetry — do not let signal capture break the webhook.
+            log.warn("Failed to record FailedPaymentAttempt for orderId={}", order.getId(), ex);
+        }
+    }
+
+    private RiskAssessmentResponse toRiskAssessmentResponse(RiskAssessment a) {
+        List<RiskSignalResponse> signalList = new ArrayList<>();
+        if (a.getReasonsJson() != null && !a.getReasonsJson().isBlank()) {
+            try {
+                var tree = objectMapper.readTree(a.getReasonsJson());
+                var signals = tree.get("signals");
+                if (signals != null && signals.isArray()) {
+                    for (var s : signals) {
+                        signalList.add(new RiskSignalResponse(
+                                backend.models.enums.RiskSignalType.valueOf(s.get("type").asText()),
+                                backend.models.enums.RiskDecision.valueOf(s.get("decision").asText()),
+                                s.has("score") ? s.get("score").asInt() : 0,
+                                s.has("reason") ? s.get("reason").asText() : null));
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to parse risk assessment reasons for id={}", a.getId(), e);
+            }
+        }
+        return new RiskAssessmentResponse(
+                a.getId(),
+                a.getOrderId(),
+                a.getUserId(),
+                a.getDecision(),
+                a.getScore(),
+                a.getMode(),
+                a.getKind(),
+                a.getIp(),
+                a.getDeviceFingerprint(),
+                a.getUserAgent(),
+                a.getCreatedAt(),
+                signalList);
     }
 }

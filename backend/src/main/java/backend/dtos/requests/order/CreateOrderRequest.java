@@ -39,6 +39,10 @@ public class CreateOrderRequest {
      *  CHEAPEST falls back to HIGHEST_STOCK if no location has fulfillmentCost set. */
     private AllocationStrategy allocationStrategy;
 
+    /** Step-up token supplied on retry after a risk VERIFY response. Consumed atomically server-side. */
+    @Size(max = 64)
+    private String riskVerificationToken;
+
     @Getter
     @Setter
     public static class OrderItemRequest {

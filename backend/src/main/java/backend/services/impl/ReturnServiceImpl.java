@@ -27,6 +27,7 @@ import backend.models.core.OrderCompensation;
 import backend.models.core.OrderItem;
 import backend.models.core.Return;
 import backend.models.core.ReturnItem;
+import backend.models.core.RiskAssessment;
 import backend.models.core.User;
 import backend.models.enums.AdjustmentReason;
 import backend.models.enums.CompensationStatus;
@@ -36,6 +37,9 @@ import backend.models.enums.OrderStatus;
 import backend.models.enums.RefundStatus;
 import backend.models.enums.ReturnReason;
 import backend.models.enums.ReturnStatus;
+import backend.models.enums.RiskAction;
+import backend.models.enums.RiskAssessmentKind;
+import backend.models.enums.RiskMode;
 import backend.repositories.CompanyRepository;
 import backend.repositories.CompanyReturnLocationRepository;
 import backend.repositories.InventoryAdjustmentRepository;
@@ -46,9 +50,15 @@ import backend.repositories.ProductRepository;
 import backend.repositories.ProductVariantRepository;
 import backend.repositories.ReturnItemRepository;
 import backend.repositories.ReturnRepository;
+import backend.repositories.RiskAssessmentRepository;
 import backend.repositories.UserRepository;
 import backend.services.intf.PaymentService;
 import backend.services.intf.ReturnService;
+import backend.services.intf.RiskEngine;
+import backend.services.risk.RiskAssessmentResult;
+import backend.services.risk.RiskContext;
+import backend.services.risk.RiskSignal;
+import backend.configurations.environment.RiskProperties;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -80,6 +90,10 @@ public class ReturnServiceImpl implements ReturnService {
     private final CompanyReturnLocationRepository returnLocationRepository;
     private final UserRepository userRepository;
     private final PaymentService paymentService;
+    private final RiskEngine riskEngine;
+    private final RiskAssessmentRepository riskAssessmentRepository;
+    private final RiskProperties riskProperties;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public ReturnServiceImpl(
             ReturnRepository returnRepository,
@@ -93,7 +107,10 @@ public class ReturnServiceImpl implements ReturnService {
             CompanyRepository companyRepository,
             CompanyReturnLocationRepository returnLocationRepository,
             UserRepository userRepository,
-            PaymentService paymentService) {
+            PaymentService paymentService,
+            RiskEngine riskEngine,
+            RiskAssessmentRepository riskAssessmentRepository,
+            RiskProperties riskProperties) {
         this.returnRepository = returnRepository;
         this.returnItemRepository = returnItemRepository;
         this.orderRepository = orderRepository;
@@ -106,6 +123,9 @@ public class ReturnServiceImpl implements ReturnService {
         this.returnLocationRepository = returnLocationRepository;
         this.userRepository = userRepository;
         this.paymentService = paymentService;
+        this.riskEngine = riskEngine;
+        this.riskAssessmentRepository = riskAssessmentRepository;
+        this.riskProperties = riskProperties;
     }
 
     // -------------------------------------------------------------------------
@@ -200,11 +220,87 @@ public class ReturnServiceImpl implements ReturnService {
             ri.getOrderItem().setFulfillmentStatus(FulfillmentStatus.RETURNED);
         }
 
+        // Risk check on the return itself (abuse / serial-returner detection). VERIFY and BLOCK both
+        // collapse to "reject the return" on this path — there is no mid-flow buyer step-up here.
+        RiskAssessmentResult riskResult = assessReturn(ret);
+        if (riskProperties.getMode() == RiskMode.ENFORCE
+                && (riskResult.action() == RiskAction.BLOCK || riskResult.action() == RiskAction.VERIFY)) {
+            String topReason = riskResult.signals().stream()
+                    .filter(s -> s.scoreContribution() > 0)
+                    .findFirst()
+                    .map(RiskSignal::reason)
+                    .orElse("Risk engine flagged this return");
+            ret.setStatus(ReturnStatus.REJECTED);
+            ret.setMerchantNote("Auto-rejected by risk engine: " + topReason);
+            return toReturnResponse(returnRepository.save(ret));
+        }
+
         issueRefundAtApproval(ret, request.refundAmountOverrideCents());
         computeOrderStatusAfterReturn(ret.getOrder());
 
         orderRepository.save(ret.getOrder());
         return toReturnResponse(returnRepository.save(ret));
+    }
+
+    private RiskAssessmentResult assessReturn(Return ret) {
+        User buyer = ret.getRequestedBy();
+        Order order = ret.getOrder();
+        RiskContext ctx = new RiskContext(
+                buyer != null ? buyer.getId() : order.getUser().getId(),
+                buyer != null ? buyer.getEmail() : order.getUser().getEmail(),
+                buyer != null ? buyer.getCreatedAt() : order.getUser().getCreatedAt(),
+                null,
+                java.util.Collections.emptySet(),
+                order.getId(),
+                order.getTotalAmount(),
+                order.getDeliveredAt(),
+                order.getCurrency(),
+                null,
+                null,
+                java.util.Collections.emptyList(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                RiskAssessmentKind.RETURN,
+                Instant.now());
+
+        RiskAssessmentResult result = riskEngine.assess(ctx);
+        try {
+            RiskAssessment assessment = new RiskAssessment();
+            assessment.setOrderId(order.getId());
+            assessment.setUserId(ctx.userId());
+            assessment.setDecision(result.action());
+            assessment.setScore(result.totalScore());
+            assessment.setMode(riskProperties.getMode());
+            assessment.setKind(RiskAssessmentKind.RETURN);
+            assessment.setReasonsJson(serializeRiskSignals(result));
+            riskAssessmentRepository.save(assessment);
+        } catch (Exception ex) {
+            log.warn("Failed to persist return-path risk assessment for returnId={}", ret.getId(), ex);
+        }
+        return result;
+    }
+
+    private String serializeRiskSignals(RiskAssessmentResult result) {
+        try {
+            java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
+            java.util.List<java.util.Map<String, Object>> rows = new java.util.ArrayList<>();
+            for (RiskSignal sig : result.signals()) {
+                java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+                row.put("type", sig.type().name());
+                row.put("decision", sig.decision().name());
+                row.put("score", sig.scoreContribution());
+                row.put("reason", sig.reason());
+                rows.add(row);
+            }
+            payload.put("signals", rows);
+            payload.put("warnings", result.warnings());
+            return objectMapper.writeValueAsString(payload);
+        } catch (Exception e) {
+            return "{}";
+        }
     }
 
     @Override

@@ -3,10 +3,14 @@ package backend.services.intf;
 import backend.dtos.requests.order.CreateOrderRequest;
 import backend.dtos.requests.order.ReturnOrderRequest;
 import backend.dtos.requests.order.ShipOrderRequest;
+import backend.dtos.requests.risk.RiskDecisionRequest;
 import backend.dtos.responses.general.PagedResponse;
 import backend.dtos.responses.order.CompanyOrderResponse;
 import backend.dtos.responses.order.OrderResponse;
+import backend.dtos.responses.risk.RiskAssessmentResponse;
+import backend.dtos.responses.risk.RiskReviewResponse;
 import backend.models.enums.OrderStatus;
+import backend.models.enums.RiskReviewStatus;
 
 public interface OrderService {
     OrderResponse createOrder(long userId, CreateOrderRequest request);
@@ -35,4 +39,21 @@ public interface OrderService {
 
     /** Processes a return for a DELIVERED (or SHIPPED) order — optionally restocks and refunds. */
     CompanyOrderResponse initiateReturn(long companyId, long orderId, long ownerId, ReturnOrderRequest request);
+
+    // -------------------------------------------------------------------------
+    // Merchant risk-review queue
+    // -------------------------------------------------------------------------
+
+    /** Paginated list of risk-review rows for the merchant. Defaults to PENDING when status is null. */
+    PagedResponse<RiskReviewResponse> listRiskReviews(long companyId, long ownerId,
+                                                      RiskReviewStatus status, int page, int size);
+
+    /** Returns the latest persisted risk assessment for an order, scoped to the merchant's company. */
+    RiskAssessmentResponse getOrderRisk(long companyId, long orderId, long ownerId);
+
+    /** Approves an UNDER_REVIEW order — triggers the skipped Stripe payment-intent creation. */
+    OrderResponse approveRiskReview(long companyId, long orderId, long ownerId, RiskDecisionRequest req);
+
+    /** Rejects an UNDER_REVIEW order — delegates to cancelOrder to release reservation and restore stock. */
+    OrderResponse rejectRiskReview(long companyId, long orderId, long ownerId, RiskDecisionRequest req);
 }

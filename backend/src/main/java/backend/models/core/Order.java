@@ -10,6 +10,7 @@ import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import backend.models.enums.OrderStatus;
+import backend.models.enums.RiskAction;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -120,6 +121,23 @@ public class Order {
 
     @OneToMany(mappedBy = "order", fetch = FetchType.LAZY)
     private List<Return> returns = new ArrayList<>();
+
+    // -------------------------------------------------------------------------
+    // Risk / fraud engine
+    // -------------------------------------------------------------------------
+
+    /** Total score from the most recent checkout risk assessment (0–100+). Null if engine never ran. */
+    @Column(nullable = true)
+    private Integer riskScore;
+
+    /** Engine verdict at checkout. Persisted even in SHADOW mode so we can compare to actual status. */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = true, length = 10)
+    private RiskAction riskDecision;
+
+    /** Loose FK to {@code risk_assessments.id}. Not a JPA relationship to keep assessment lifecycle independent. */
+    @Column(nullable = true)
+    private Long riskAssessmentId;
 
     // -------------------------------------------------------------------------
     // Audit

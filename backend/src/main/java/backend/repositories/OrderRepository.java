@@ -20,6 +20,9 @@ import java.util.Optional;
 public interface OrderRepository extends JpaRepository<Order, Long> {
     Page<Order> findAllByUserId(long userId, Pageable pageable);
     Optional<Order> findByIdAndUserId(long id, long userId);
+
+    /** Total orders placed by this user — feeds CouponAbuseEvaluator's first-order heuristic. */
+    long countByUserId(long userId);
     Optional<Order> findByPaymentIntentId(String paymentIntentId);
     Page<Order> findAllByUserIdAndStatus(long userId, OrderStatus status, Pageable pageable);
     List<Order> findAllByStatusAndCompensatedFalseAndCreatedAtBefore(OrderStatus status, Instant before);

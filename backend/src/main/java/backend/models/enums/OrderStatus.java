@@ -20,5 +20,7 @@ public enum OrderStatus {
     /** Order cancelled by customer (allowed from RESERVED, PAID, or PACKED). */
     CANCELLED,
     /** Full refund issued post-delivery. */
-    REFUNDED
+    REFUNDED,
+    /** Held by fraud engine; merchant decision pending. Stock is reserved but Stripe was NOT charged. */
+    UNDER_REVIEW
 }
