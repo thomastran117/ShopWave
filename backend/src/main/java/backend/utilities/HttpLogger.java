@@ -76,10 +76,35 @@ public class HttpLogger {
         return a.a(ms + "ms").reset().toString();
     }
 
+    private static final String[] SENSITIVE_PARAMS = {
+            "token", "idToken", "refreshToken", "code", "resetToken"
+    };
+
+    private static String redactQueryString(String qs) {
+        if (qs == null || qs.isBlank()) return null;
+        String[] pairs =qs.split("&");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < pairs.length; i++) {
+            if (i > 0) sb.append("&");
+            int eq = pairs[i].indexOf('=');
+            if (eq > 0) {
+                String key = pairs[i].substring(0, eq);
+                boolean sensitive = false;
+                for (String sp : SENSITIVE_PARAMS) {
+                    if (sp.equalsIgnoreCase(key)) { sensitive = true; break; }
+                }
+                sb.append(sensitive ? key + "=REDACTED" : pairs[i]);
+            } else {
+                sb.append(pairs[i]);
+            }
+        }
+        return sb.toString();
+    }
+
     private static String path(HttpServletRequest req) {
         String uri = req.getRequestURI();
 
-        String queryString = req.getQueryString();
+        String queryString = redactQueryString(req.getQueryString());
         if (queryString != null && !queryString.isBlank()) {
             uri += "?" + ansi().fgBrightBlack().a(queryString).reset();
         }
