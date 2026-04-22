@@ -1,0 +1,87 @@
+name: Feature request
+description: Suggest a new capability or improvement for ShopWave.
+title: "[Feature]: "
+labels: ["Feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing an idea for ShopWave. Strong feature requests explain the user problem, not just the desired implementation.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+      description: What user need, workflow, or limitation should this feature address?
+      placeholder: "Example: Store admins need a faster way to mark products as out of stock without editing the full product record."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior or experience you would like to see.
+      placeholder: "Add an inventory status toggle to the admin product table."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Product area
+      description: Which part of ShopWave would this affect most?
+      options:
+        - Storefront
+        - Search or product browsing
+        - Cart or checkout
+        - Orders
+        - User accounts
+        - Admin tools
+        - Backend/API
+        - Database
+        - Dev tooling
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Impact
+      description: How important is this feature?
+      options:
+        - Nice to have
+        - Improves an existing workflow
+        - Blocks an important workflow
+        - Critical for launch or production use
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Are there other ways to solve this problem?
+      placeholder: "We could also add bulk editing, but a status toggle would solve the immediate need."
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: What should be true when this feature is complete?
+      placeholder: |
+        - Admins can toggle a product between in stock and out of stock.
+        - Out-of-stock products remain visible but cannot be added to the cart.
+        - The API returns the inventory status with product details.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked for existing issues or discussions covering this request.
+          required: true
+        - label: I described the user problem or workflow this feature supports.
+          required: true
