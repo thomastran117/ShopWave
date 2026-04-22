@@ -21,34 +21,133 @@ jobs:
           API_KEY: ${{ secrets.CLAUDE_REVIEW_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_OWNER: ${{ github.repository_owner }}
+          PR_REPO: ${{ github.event.repository.name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          RESPONSE=$(curl -sf \
+          set -Eeuo pipefail
+
+          echo "::group::Workflow context"
+          echo "Event: ${{ github.event_name }}"
+          echo "Action: ${{ github.event.action }}"
+          echo "Label: ${{ github.event.label.name }}"
+          echo "Repository: ${{ github.repository }}"
+          echo "PR owner: $PR_OWNER"
+          echo "PR repo: $PR_REPO"
+          echo "PR number: $PR_NUMBER"
+          echo "PR URL: $PR_URL"
+          echo "Runner OS: $RUNNER_OS"
+          echo "curl version: $(curl --version | head -n 1)"
+          echo "jq version: $(jq --version)"
+          echo "::endgroup::"
+
+          echo "::group::Input validation"
+          if [ -z "${API_URL:-}" ]; then
+            echo "::error::CLAUDE_REVIEW_API_URL secret is empty or missing."
+            exit 1
+          fi
+          if [ -z "${API_KEY:-}" ]; then
+            echo "::error::CLAUDE_REVIEW_API_KEY secret is empty or missing."
+            exit 1
+          fi
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "::error::ANTHROPIC_API_KEY secret is empty or missing."
+            exit 1
+          fi
+          if [ -z "${PR_OWNER:-}" ] || [ -z "${PR_REPO:-}" ] || [ -z "${PR_NUMBER:-}" ]; then
+            echo "::error::GitHub PR context is incomplete. owner='$PR_OWNER' repo='$PR_REPO' number='$PR_NUMBER'"
+            exit 1
+          fi
+          echo "CLAUDE_REVIEW_API_URL configured: yes"
+          echo "CLAUDE_REVIEW_API_KEY configured: yes"
+          echo "ANTHROPIC_API_KEY configured: yes"
+          echo "::endgroup::"
+
+          ENDPOINT="${API_URL%/}/api/review"
+          RESPONSE_FILE="$(mktemp)"
+          CURL_INFO_FILE="$(mktemp)"
+          REQUEST_BODY="$(jq -cn \
+            --arg anthropic_api_key "$ANTHROPIC_API_KEY" \
+            --arg owner "$PR_OWNER" \
+            --arg repo "$PR_REPO" \
+            --argjson pull_number "$PR_NUMBER" \
+            '{anthropic_api_key: $anthropic_api_key, owner: $owner, repo: $repo, pull_number: $pull_number, post_comment: true}')"
+
+          echo "::group::Request summary"
+          echo "Endpoint: $ENDPOINT"
+          echo "Request body:"
+          echo "$REQUEST_BODY" | jq '{anthropic_api_key: "***", owner, repo, pull_number, post_comment}'
+          echo "::endgroup::"
+
+          CURL_EXIT_CODE=0
+          curl -sS \
+            --location \
             --max-time 600 \
-            -X POST "$API_URL/api/review" \
+            --connect-timeout 30 \
+            --retry 2 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            -X POST "$ENDPOINT" \
             -H "Authorization: Bearer $API_KEY" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"anthropic_api_key\": \"$ANTHROPIC_API_KEY\",
-              \"pr_url\": \"$PR_URL\",
-              \"post_comment\": true
-            }")
+            -d "$REQUEST_BODY" \
+            -o "$RESPONSE_FILE" \
+            -w "http_code=%{http_code}\ntime_total=%{time_total}\ntime_connect=%{time_connect}\ntime_starttransfer=%{time_starttransfer}\nremote_ip=%{remote_ip}\nsize_download=%{size_download}\n" \
+            > "$CURL_INFO_FILE" || CURL_EXIT_CODE=$?
 
-          echo "Review status: $(echo "$RESPONSE" | jq -r '.status')"
-          echo "Files reviewed: $(echo "$RESPONSE" | jq -r '.metadata.files_reviewed')"
-          echo "Files truncated: $(echo "$RESPONSE" | jq -r '.metadata.files_truncated')"
-          echo "Context files: $(echo "$RESPONSE" | jq -r '.metadata.context_files')"
-          echo "Split review: $(echo "$RESPONSE" | jq -r '.metadata.split_review')"
-          echo "Inline comments posted: $(echo "$RESPONSE" | jq -r '.metadata.inline_comments_posted')"
-          echo "Cached: $(echo "$RESPONSE" | jq -r '.metadata.cached')"
-          echo "Model: $(echo "$RESPONSE" | jq -r '.metadata.model')"
-          echo "Duration ms: $(echo "$RESPONSE" | jq -r '.metadata.duration_ms')"
+          echo "::group::curl diagnostics"
+          cat "$CURL_INFO_FILE"
+          echo "curl_exit_code=$CURL_EXIT_CODE"
+          echo "::endgroup::"
 
-          STATUS=$(echo "$RESPONSE" | jq -r '.status')
+          HTTP_CODE="$(awk -F= '/^http_code=/{print $2}' "$CURL_INFO_FILE")"
+
+          echo "::group::API response"
+          echo "HTTP status: ${HTTP_CODE:-unknown}"
+          if [ -s "$RESPONSE_FILE" ]; then
+            if jq empty "$RESPONSE_FILE" >/dev/null 2>&1; then
+              jq . "$RESPONSE_FILE"
+            else
+              cat "$RESPONSE_FILE"
+            fi
+          else
+            echo "(empty response body)"
+          fi
+          echo "::endgroup::"
+
+          if [ "$CURL_EXIT_CODE" -ne 0 ]; then
+            echo "::error::curl failed with exit code $CURL_EXIT_CODE."
+            exit "$CURL_EXIT_CODE"
+          fi
+
+          if [ -z "${HTTP_CODE:-}" ] || [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "::error::Claude PR Review API returned HTTP ${HTTP_CODE:-unknown}."
+            exit 1
+          fi
+
+          if ! jq empty "$RESPONSE_FILE" >/dev/null 2>&1; then
+            echo "::error::Claude PR Review API returned a non-JSON response."
+            exit 1
+          fi
+
+          echo "::group::Review metadata"
+          echo "Review status: $(jq -r '.status // "UNKNOWN"' "$RESPONSE_FILE")"
+          echo "Files reviewed: $(jq -r '.metadata.files_reviewed // "null"' "$RESPONSE_FILE")"
+          echo "Files truncated: $(jq -r '.metadata.files_truncated // "null"' "$RESPONSE_FILE")"
+          echo "Context files: $(jq -r '.metadata.context_files // "null"' "$RESPONSE_FILE")"
+          echo "Split review: $(jq -r '.metadata.split_review // "null"' "$RESPONSE_FILE")"
+          echo "Inline comments posted: $(jq -r '.metadata.inline_comments_posted // "null"' "$RESPONSE_FILE")"
+          echo "Cached: $(jq -r '.metadata.cached // "null"' "$RESPONSE_FILE")"
+          echo "Model: $(jq -r '.metadata.model // "null"' "$RESPONSE_FILE")"
+          echo "Duration ms: $(jq -r '.metadata.duration_ms // "null"' "$RESPONSE_FILE")"
+          echo "::endgroup::"
+
+          STATUS=$(jq -r '.status // "UNKNOWN"' "$RESPONSE_FILE")
           if [ "$STATUS" = "FAIL" ]; then
             echo "::error::Claude marked this PR as FAIL. Please address the issues before merging."
             exit 1
           elif [ "$STATUS" = "OK" ]; then
-            echo "::warning::Claude marked this PR as OK — improvements recommended but not blocking."
+            echo "::warning::Claude marked this PR as OK - improvements recommended but not blocking."
           else
-            echo "Claude marked this PR as PASS. ✅"
+            echo "Claude marked this PR as PASS."
           fi
