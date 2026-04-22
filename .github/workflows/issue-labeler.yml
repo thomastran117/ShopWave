@@ -1,0 +1,86 @@
+name: Issue labeler
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply labels from issue form
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const managedLabels = [
+              "priority:high",
+              "priority:medium",
+              "priority:low",
+              "complexity:high",
+              "complexity:medium",
+              "complexity:low",
+              "frontend",
+              "backend"
+            ];
+
+            function fieldValue(label) {
+              const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+              const pattern = new RegExp(`### ${escaped}\\s+([\\s\\S]*?)(?=\\n### |$)`, "i");
+              const match = issue.body?.match(pattern);
+              return match?.[1]?.trim() ?? "";
+            }
+
+            const nextLabels = new Set();
+            const priority = fieldValue("Priority");
+            const complexity = fieldValue("Complexity");
+            const domain = fieldValue("Affected domain").toLowerCase();
+
+            if (!priority && !complexity && !domain) {
+              core.info("No managed issue-form fields found. Skipping label sync.");
+              return;
+            }
+
+            if (managedLabels.includes(priority)) {
+              nextLabels.add(priority);
+            }
+
+            if (managedLabels.includes(complexity)) {
+              nextLabels.add(complexity);
+            }
+
+            if (domain === "frontend" || domain === "both") {
+              nextLabels.add("frontend");
+            }
+
+            if (domain === "backend" || domain === "both") {
+              nextLabels.add("backend");
+            }
+
+            const labelsToRemove = issue.labels
+              .map((label) => label.name)
+              .filter((label) => managedLabels.includes(label) && !nextLabels.has(label));
+
+            for (const label of labelsToRemove) {
+              await github.rest.issues.removeLabel({
+                owner,
+                repo,
+                issue_number: issue.number,
+                name: label
+              });
+            }
+
+            if (nextLabels.size > 0) {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: issue.number,
+                labels: [...nextLabels]
+              });
+            }

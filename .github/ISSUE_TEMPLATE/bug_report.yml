@@ -18,20 +18,58 @@ body:
       required: true
 
   - type: dropdown
+    id: domain
+    attributes:
+      label: Affected domain
+      description: Which part of the codebase does this affect?
+      options:
+        - Frontend
+        - Backend
+        - Both
+    validations:
+      required: true
+
+  - type: dropdown
     id: area
     attributes:
       label: Affected area
       description: Where did you notice the issue?
       options:
-        - Frontend
-        - Backend/API
-        - Database
-        - Authentication
+        - Storefront
+        - Search or product browsing
         - Cart or checkout
         - Orders
+        - User accounts
         - Admin tools
+        - API
+        - Database
+        - Dev tooling
         - Documentation
         - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: Choose the priority label for this bug.
+      options:
+        - "priority:high"
+        - "priority:medium"
+        - "priority:low"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: Complexity
+      description: Choose the expected complexity label for this bug.
+      options:
+        - "complexity:high"
+        - "complexity:medium"
+        - "complexity:low"
     validations:
       required: true
 

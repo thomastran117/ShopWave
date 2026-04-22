@@ -27,6 +27,18 @@ body:
       required: true
 
   - type: dropdown
+    id: domain
+    attributes:
+      label: Affected domain
+      description: Which part of the codebase does this affect?
+      options:
+        - Frontend
+        - Backend
+        - Both
+    validations:
+      required: true
+
+  - type: dropdown
     id: area
     attributes:
       label: Product area
@@ -49,13 +61,24 @@ body:
   - type: dropdown
     id: priority
     attributes:
-      label: Impact
-      description: How important is this feature?
+      label: Priority
+      description: Choose the priority label for this feature.
       options:
-        - Nice to have
-        - Improves an existing workflow
-        - Blocks an important workflow
-        - Critical for launch or production use
+        - "priority:high"
+        - "priority:medium"
+        - "priority:low"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: Complexity
+      description: Choose the expected complexity label for this feature.
+      options:
+        - "complexity:high"
+        - "complexity:medium"
+        - "complexity:low"
     validations:
       required: true
 
