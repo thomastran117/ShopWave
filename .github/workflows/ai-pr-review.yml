@@ -12,7 +12,7 @@ jobs:
   review:
     if: github.event.pull_request.draft == false && github.event.label.name == 'ai-review'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
 
     steps:
       - name: Call Claude PR Review API
@@ -23,7 +23,7 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           RESPONSE=$(curl -sf \
-            --max-time 120 \
+            --max-time 600 \
             -X POST "$API_URL/api/review" \
             -H "Authorization: Bearer $API_KEY" \
             -H "Content-Type: application/json" \
@@ -35,7 +35,13 @@ jobs:
 
           echo "Review status: $(echo "$RESPONSE" | jq -r '.status')"
           echo "Files reviewed: $(echo "$RESPONSE" | jq -r '.metadata.files_reviewed')"
+          echo "Files truncated: $(echo "$RESPONSE" | jq -r '.metadata.files_truncated')"
+          echo "Context files: $(echo "$RESPONSE" | jq -r '.metadata.context_files')"
+          echo "Split review: $(echo "$RESPONSE" | jq -r '.metadata.split_review')"
           echo "Inline comments posted: $(echo "$RESPONSE" | jq -r '.metadata.inline_comments_posted')"
+          echo "Cached: $(echo "$RESPONSE" | jq -r '.metadata.cached')"
+          echo "Model: $(echo "$RESPONSE" | jq -r '.metadata.model')"
+          echo "Duration ms: $(echo "$RESPONSE" | jq -r '.metadata.duration_ms')"
 
           STATUS=$(echo "$RESPONSE" | jq -r '.status')
           if [ "$STATUS" = "FAIL" ]; then
