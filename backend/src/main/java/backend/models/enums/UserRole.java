@@ -7,5 +7,6 @@ public enum UserRole {
     USER,
     MERCHANT,
     ADMIN,
-    MODERATOR
+    MODERATOR,
+    SUPPORT
 }

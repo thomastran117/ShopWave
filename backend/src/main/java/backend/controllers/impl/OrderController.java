@@ -7,14 +7,17 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import backend.annotations.requireAuth.RequireAuth;
+import backend.dtos.requests.issue.ResolveWithReplacementRequest;
 import backend.dtos.requests.order.CreateOrderRequest;
 import backend.dtos.responses.general.PagedResponse;
 import backend.dtos.responses.order.OrderResponse;
+import backend.dtos.responses.return_.ReturnResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.exceptions.http.InternalServerErrorException;
 import backend.models.enums.OrderStatus;
 import backend.services.intf.OrderService;
 import backend.services.intf.PaymentService;
+import backend.services.intf.ReplacementOrderService;
 import backend.services.intf.ReturnService;
 
 import jakarta.validation.Valid;
@@ -28,11 +31,14 @@ public class OrderController {
     private final OrderService orderService;
     private final PaymentService paymentService;
     private final ReturnService returnService;
+    private final ReplacementOrderService replacementOrderService;
 
-    public OrderController(OrderService orderService, PaymentService paymentService, ReturnService returnService) {
+    public OrderController(OrderService orderService, PaymentService paymentService,
+                           ReturnService returnService, ReplacementOrderService replacementOrderService) {
         this.orderService = orderService;
         this.paymentService = paymentService;
         this.returnService = returnService;
+        this.replacementOrderService = replacementOrderService;
     }
 
     @PostMapping
@@ -123,6 +129,36 @@ public class OrderController {
             }
 
             return ResponseEntity.ok().build();
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/support/orders/{orderId}/partial-refund")
+    @RequireAuth
+    public ResponseEntity<ReturnResponse> issuePartialRefund(
+            @PathVariable long orderId,
+            @RequestParam long amountCents,
+            @RequestParam(required = false) String reason) {
+        try {
+            return ResponseEntity.ok(returnService.issuePartialRefund(orderId, amountCents, reason, resolveUserId()));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
+    }
+
+    @PostMapping("/support/orders/{orderId}/replacement")
+    @RequireAuth
+    public ResponseEntity<OrderResponse> createReplacement(
+            @PathVariable long orderId,
+            @Valid @RequestBody ResolveWithReplacementRequest request) {
+        try {
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(replacementOrderService.createReplacement(orderId, request, resolveUserId()));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {

@@ -1,6 +1,8 @@
 package backend.services.intf;
 
 import backend.dtos.responses.order.OrderResponse;
+import backend.dtos.responses.support.TicketResponse;
+import backend.dtos.responses.support.TicketMessageResponse;
 
 public interface EmailService {
 
@@ -55,4 +57,33 @@ public interface EmailService {
                                 Long variantId, String variantSku,
                                 int currentStock, Integer threshold,
                                 boolean outOfStock);
+
+    /**
+     * Notifies the customer that their support ticket has been created.
+     * Sent asynchronously with exponential backoff retries.
+     */
+    void sendTicketCreatedEmail(String toEmail, String firstName, TicketResponse ticket);
+
+    /**
+     * Notifies the customer (or staff, depending on the reply direction) that a new
+     * message has been added to their ticket thread.
+     * Sent asynchronously with exponential backoff retries.
+     */
+    void sendTicketReplyEmail(String toEmail, String firstName, TicketResponse ticket,
+                              TicketMessageResponse message);
+
+    /**
+     * Notifies the customer that store credit has been issued to their account.
+     * Sent asynchronously with exponential backoff retries.
+     *
+     * @param amountCents the credit amount in cents
+     * @param reason      staff-supplied reason for the credit
+     */
+    void sendCreditIssuedEmail(String toEmail, String firstName, long amountCents, String reason);
+
+    /**
+     * Notifies the customer that a replacement order has been created for them.
+     * Sent asynchronously with exponential backoff retries.
+     */
+    void sendReplacementOrderEmail(String toEmail, String firstName, OrderResponse replacementOrder);
 }

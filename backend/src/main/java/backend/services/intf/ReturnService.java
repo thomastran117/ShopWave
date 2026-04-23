@@ -62,6 +62,23 @@ public interface ReturnService {
     ReturnResponse merchantInitiateReturn(long orderId, long companyId, long ownerId, MerchantInitiateReturnRequest request);
 
     // -------------------------------------------------------------------------
+    // Support operations
+    // -------------------------------------------------------------------------
+
+    /**
+     * Staff-initiated partial refund without requiring item-level granularity.
+     * Creates a merchant-initiated Return for the specified amount and immediately
+     * issues the Stripe refund. Records the staff actor in merchantNote.
+     *
+     * @param orderId       the order to refund against
+     * @param amountCents   refund amount in cents; must be > 0
+     * @param reason        optional staff-supplied reason (stored in merchantNote)
+     * @param actorUserId   staff member authorising the refund
+     * @return the created Return record
+     */
+    ReturnResponse issuePartialRefund(long orderId, long amountCents, String reason, long actorUserId);
+
+    // -------------------------------------------------------------------------
     // Webhook
     // -------------------------------------------------------------------------
 

@@ -401,6 +401,36 @@ public class ReturnServiceImpl implements ReturnService {
     }
 
     // -------------------------------------------------------------------------
+    // Support operations
+    // -------------------------------------------------------------------------
+
+    @Override
+    @Transactional
+    public ReturnResponse issuePartialRefund(long orderId, long amountCents, String reason, long actorUserId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found: " + orderId));
+
+        if (amountCents <= 0) {
+            throw new BadRequestException("Refund amount must be greater than zero");
+        }
+
+        String note = reason != null ? reason : "Partial refund issued by support staff #" + actorUserId;
+
+        Return ret = new Return();
+        ret.setOrder(order);
+        ret.setRequestedBy(null);
+        ret.setStatus(ReturnStatus.REQUESTED);
+        ret.setMerchantNote(note);
+        ret.setRestockItems(false);
+        ret.setApprovedAt(Instant.now());
+        ret.setItems(new ArrayList<>());
+
+        issueRefundAndFinalize(ret, amountCents);
+        orderRepository.save(order);
+        return toReturnResponse(returnRepository.save(ret));
+    }
+
+    // -------------------------------------------------------------------------
     // Webhook
     // -------------------------------------------------------------------------
 

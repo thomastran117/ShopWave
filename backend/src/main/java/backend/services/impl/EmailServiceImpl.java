@@ -3,6 +3,8 @@ package backend.services.impl;
 import backend.configurations.environment.EnvironmentSetting;
 import backend.dtos.responses.order.OrderItemResponse;
 import backend.dtos.responses.order.OrderResponse;
+import backend.dtos.responses.support.TicketMessageResponse;
+import backend.dtos.responses.support.TicketResponse;
 import backend.services.intf.EmailService;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
@@ -157,6 +159,89 @@ public class EmailServiceImpl implements EmailService {
     public void sendOrderReceiptEmail(String toEmail, String firstName, OrderResponse order) {
         String htmlBody = buildOrderReceiptHtml(toEmail, firstName, order);
         sendMimeMessage(toEmail, "Your ShopWave order #" + order.getId() + " \u2014 Receipt", htmlBody);
+    }
+
+    @Async("emailExecutor")
+    @Override
+    public void sendTicketCreatedEmail(String toEmail, String firstName, TicketResponse ticket) {
+        String greeting = firstName != null ? "Hi " + firstName + "," : "Hi,";
+        String body = """
+            <h1 style="margin:0 0 8px 0;font-size:26px;font-weight:800;color:#0F172A;letter-spacing:-0.5px;">
+              Your support ticket has been received
+            </h1>
+            <p style="margin:0 0 16px 0;font-size:15px;color:#475569;line-height:1.7;">%s</p>
+            <p style="margin:0 0 16px 0;font-size:15px;color:#475569;line-height:1.7;">
+              Ticket <strong>#%d</strong> \u2014 <em>%s</em><br>
+              Our team will review your request and respond shortly.
+            </p>
+            """.formatted(greeting, ticket.getId(), ticket.getSubject());
+        sendMimeMessage(toEmail, "Support ticket #" + ticket.getId() + " received \u2014 ShopWave",
+                wrapInShell("Support", body));
+    }
+
+    @Async("emailExecutor")
+    @Override
+    public void sendTicketReplyEmail(String toEmail, String firstName, TicketResponse ticket,
+                                     TicketMessageResponse message) {
+        String greeting = firstName != null ? "Hi " + firstName + "," : "Hi,";
+        String body = """
+            <h1 style="margin:0 0 8px 0;font-size:26px;font-weight:800;color:#0F172A;letter-spacing:-0.5px;">
+              New reply on your support ticket
+            </h1>
+            <p style="margin:0 0 16px 0;font-size:15px;color:#475569;line-height:1.7;">%s</p>
+            <p style="margin:0 0 8px 0;font-size:14px;color:#64748B;">
+              Ticket <strong>#%d</strong> \u2014 %s
+            </p>
+            <div style="background:#F8FAFF;border-left:4px solid #3B82F6;border-radius:4px;padding:16px 20px;margin:16px 0;">
+              <p style="margin:0;font-size:14px;color:#334155;line-height:1.7;">%s</p>
+            </div>
+            """.formatted(greeting, ticket.getId(), ticket.getSubject(), message.getBody());
+        sendMimeMessage(toEmail, "New reply on ticket #" + ticket.getId() + " \u2014 ShopWave",
+                wrapInShell("Support", body));
+    }
+
+    @Async("emailExecutor")
+    @Override
+    public void sendCreditIssuedEmail(String toEmail, String firstName, long amountCents, String reason) {
+        String greeting = firstName != null ? "Hi " + firstName + "," : "Hi,";
+        String formatted = String.format("$%.2f", amountCents / 100.0);
+        String reasonLine = reason != null && !reason.isBlank()
+                ? "<p style=\"margin:8px 0 0 0;font-size:13px;color:#64748B;\">Reason: " + reason + "</p>"
+                : "";
+        String body = """
+            <h1 style="margin:0 0 8px 0;font-size:26px;font-weight:800;color:#0F172A;letter-spacing:-0.5px;">
+              You've received store credit!
+            </h1>
+            <p style="margin:0 0 16px 0;font-size:15px;color:#475569;line-height:1.7;">%s</p>
+            <div style="background:#EFF6FF;border-radius:8px;padding:20px;margin:16px 0;text-align:center;">
+              <p style="margin:0;font-size:32px;font-weight:800;color:#1D4ED8;">%s</p>
+              <p style="margin:4px 0 0 0;font-size:13px;color:#64748B;">store credit added to your account</p>
+              %s
+            </div>
+            <p style="margin:16px 0 0 0;font-size:14px;color:#475569;line-height:1.7;">
+              This credit will be automatically applied to your next qualifying order.
+            </p>
+            """.formatted(greeting, formatted, reasonLine);
+        sendMimeMessage(toEmail, "You've received " + formatted + " in store credit \u2014 ShopWave",
+                wrapInShell("Store Credit", body));
+    }
+
+    @Async("emailExecutor")
+    @Override
+    public void sendReplacementOrderEmail(String toEmail, String firstName, OrderResponse replacementOrder) {
+        String greeting = firstName != null ? "Hi " + firstName + "," : "Hi,";
+        String body = """
+            <h1 style="margin:0 0 8px 0;font-size:26px;font-weight:800;color:#0F172A;letter-spacing:-0.5px;">
+              Your replacement order is on its way
+            </h1>
+            <p style="margin:0 0 16px 0;font-size:15px;color:#475569;line-height:1.7;">%s</p>
+            <p style="margin:0 0 16px 0;font-size:15px;color:#475569;line-height:1.7;">
+              We've created replacement order <strong>#%d</strong> for you at no charge.
+              You'll receive a shipping confirmation once it has been dispatched.
+            </p>
+            """.formatted(greeting, replacementOrder.getId());
+        sendMimeMessage(toEmail, "Your replacement order #" + replacementOrder.getId() + " \u2014 ShopWave",
+                wrapInShell("Replacement Order", body));
     }
 
     private void sendMimeMessage(String toEmail, String subject, String htmlBody) {

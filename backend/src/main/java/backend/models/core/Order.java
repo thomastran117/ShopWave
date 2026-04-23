@@ -24,7 +24,8 @@ import java.util.List;
 @AllArgsConstructor
 @Table(name = "orders", indexes = {
         @Index(name = "idx_order_user", columnList = "user_id"),
-        @Index(name = "idx_order_payment_intent", columnList = "payment_intent_id")
+        @Index(name = "idx_order_payment_intent", columnList = "payment_intent_id"),
+        @Index(name = "idx_order_replacement_of", columnList = "replacement_of_order_id")
 })
 @EntityListeners(AuditingEntityListener.class)
 public class Order {
@@ -121,6 +122,18 @@ public class Order {
 
     @OneToMany(mappedBy = "order", fetch = FetchType.LAZY)
     private List<Return> returns = new ArrayList<>();
+
+    // -------------------------------------------------------------------------
+    // Support / replacement tracking
+    // -------------------------------------------------------------------------
+
+    /** Loose FK to orders.id — non-null when this order was created as a replacement for another. */
+    @Column(nullable = true)
+    private Long replacementOfOrderId;
+
+    /** Amount of store credit applied at checkout, in cents. Zero if no credit was used. */
+    @Column(nullable = false)
+    private long creditAppliedCents = 0L;
 
     // -------------------------------------------------------------------------
     // Risk / fraud engine
