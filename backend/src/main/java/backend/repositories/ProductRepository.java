@@ -11,6 +11,7 @@ import org.springframework.stereotype.Repository;
 import jakarta.persistence.LockModeType;
 
 import backend.models.core.Product;
+import backend.repositories.projections.DailyDemandProjection;
 import backend.repositories.projections.ProductDemandProjection;
 import backend.repositories.projections.ProductSalesProjection;
 
@@ -193,6 +194,55 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
             @Param("companyId") long companyId,
             @Param("since") Instant since,
             @Param("limit") int limit);
+
+    /**
+     * Returns one row per (product, calendar day UTC) with total units sold in PAID orders
+     * placed on or after :since for the given company. Days with no sales are absent — callers
+     * must zero-fill the series. Used by ForecastingService to compute daily demand baselines.
+     */
+    @Query(nativeQuery = true, value = """
+            SELECT
+                p.id                                    AS productId,
+                CAST(DATE(o.created_at) AS DATE)        AS day,
+                SUM(oi.quantity)                        AS units
+            FROM products p
+            JOIN order_items oi ON oi.product_id = p.id
+            JOIN orders o       ON oi.order_id   = o.id
+            WHERE p.company_id  = :companyId
+              AND o.status      = 'PAID'
+              AND o.created_at >= :since
+              AND oi.product_id IS NOT NULL
+            GROUP BY p.id, DATE(o.created_at)
+            ORDER BY p.id, day
+            """)
+    List<DailyDemandProjection> findDailyDemandSince(
+            @Param("companyId") long companyId,
+            @Param("since") Instant since);
+
+    /**
+     * Same as findDailyDemandSince but bounded on both ends — used for the year-over-year
+     * seasonal comparison window.
+     */
+    @Query(nativeQuery = true, value = """
+            SELECT
+                p.id                                    AS productId,
+                CAST(DATE(o.created_at) AS DATE)        AS day,
+                SUM(oi.quantity)                        AS units
+            FROM products p
+            JOIN order_items oi ON oi.product_id = p.id
+            JOIN orders o       ON oi.order_id   = o.id
+            WHERE p.company_id  = :companyId
+              AND o.status      = 'PAID'
+              AND o.created_at >= :from
+              AND o.created_at <= :to
+              AND oi.product_id IS NOT NULL
+            GROUP BY p.id, DATE(o.created_at)
+            ORDER BY p.id, day
+            """)
+    List<DailyDemandProjection> findDailyDemandBetween(
+            @Param("companyId") long companyId,
+            @Param("from") Instant from,
+            @Param("to") Instant to);
 
     /**
      * Returns distinct company IDs that have at least one PAID product order since :since.
