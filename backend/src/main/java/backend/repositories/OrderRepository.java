@@ -24,6 +24,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     /** Total orders placed by this user — feeds CouponAbuseEvaluator's first-order heuristic. */
     long countByUserId(long userId);
     Optional<Order> findByPaymentIntentId(String paymentIntentId);
+    Optional<Order> findByStripeInvoiceId(String stripeInvoiceId);
     Page<Order> findAllByUserIdAndStatus(long userId, OrderStatus status, Pageable pageable);
     List<Order> findAllByStatusAndCompensatedFalseAndCreatedAtBefore(OrderStatus status, Instant before);
 

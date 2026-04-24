@@ -19,6 +19,7 @@ import backend.services.intf.OrderService;
 import backend.services.intf.PaymentService;
 import backend.services.intf.ReplacementOrderService;
 import backend.services.intf.ReturnService;
+import backend.services.intf.SubscriptionService;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -32,13 +33,16 @@ public class OrderController {
     private final PaymentService paymentService;
     private final ReturnService returnService;
     private final ReplacementOrderService replacementOrderService;
+    private final SubscriptionService subscriptionService;
 
     public OrderController(OrderService orderService, PaymentService paymentService,
-                           ReturnService returnService, ReplacementOrderService replacementOrderService) {
+                           ReturnService returnService, ReplacementOrderService replacementOrderService,
+                           SubscriptionService subscriptionService) {
         this.orderService = orderService;
         this.paymentService = paymentService;
         this.returnService = returnService;
         this.replacementOrderService = replacementOrderService;
+        this.subscriptionService = subscriptionService;
     }
 
     @PostMapping
@@ -123,6 +127,31 @@ public class OrderController {
                                 event.objectId(),
                                 event.metadata().getOrDefault("refundStatus", "pending"),
                                 Long.parseLong(event.metadata().getOrDefault("refundAmountCents", "0")));
+                    }
+                }
+                case "customer.subscription.updated", "customer.subscription.deleted" -> {
+                    if (event.objectId() != null) {
+                        subscriptionService.handleSubscriptionUpdated(event.objectId());
+                    }
+                }
+                case "invoice.paid" -> {
+                    String subId = event.metadata().get("subscriptionId");
+                    long amountPaid = Long.parseLong(event.metadata().getOrDefault("amountPaidCents", "0"));
+                    if (subId != null && event.objectId() != null) {
+                        subscriptionService.handleInvoicePaid(event.objectId(), subId, amountPaid);
+                    }
+                }
+                case "invoice.payment_failed" -> {
+                    String subId = event.metadata().get("subscriptionId");
+                    if (subId != null && event.objectId() != null) {
+                        subscriptionService.handleInvoicePaymentFailed(event.objectId(), subId);
+                    }
+                }
+                case "setup_intent.succeeded" -> {
+                    String customerId = event.metadata().get("customerId");
+                    String paymentMethodId = event.metadata().get("paymentMethodId");
+                    if (customerId != null && paymentMethodId != null) {
+                        subscriptionService.handleSetupIntentSucceeded(customerId, paymentMethodId);
                     }
                 }
                 default -> { }

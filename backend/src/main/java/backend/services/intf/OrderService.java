@@ -9,6 +9,8 @@ import backend.dtos.responses.order.CompanyOrderResponse;
 import backend.dtos.responses.order.OrderResponse;
 import backend.dtos.responses.risk.RiskAssessmentResponse;
 import backend.dtos.responses.risk.RiskReviewResponse;
+import backend.models.core.Order;
+import backend.models.core.Subscription;
 import backend.models.enums.OrderStatus;
 import backend.models.enums.RiskReviewStatus;
 
@@ -56,4 +58,18 @@ public interface OrderService {
 
     /** Rejects an UNDER_REVIEW order — delegates to cancelOrder to release reservation and restore stock. */
     OrderResponse rejectRiskReview(long companyId, long orderId, long ownerId, RiskDecisionRequest req);
+
+    // -------------------------------------------------------------------------
+    // Subscription renewals
+    // -------------------------------------------------------------------------
+
+    /**
+     * Creates a fulfillment Order from a paid subscription invoice. Idempotent on
+     * {@code stripeInvoiceId} — returns the existing order if one already exists for
+     * this invoice. Skips PaymentIntent creation (Stripe already charged the customer
+     * via the subscription invoice) and starts the order at PAID. Inventory is
+     * decremented; if stock is unavailable and backorder is disabled, the resulting
+     * order item is marked BACKORDERED rather than failing the whole renewal.
+     */
+    Order createRenewalOrder(Subscription subscription, String stripeInvoiceId, long amountPaidCents);
 }

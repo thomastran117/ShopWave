@@ -73,6 +73,13 @@ public class User {
     private String address;
 
     /**
+     * Stripe Customer ID linked to this user. Provisioned lazily the first time
+     * the user saves a payment method or creates a subscription. Null until then.
+     */
+    @Column(nullable = true, length = 100, unique = true)
+    private String stripeCustomerId;
+
+    /**
      * Customer segments this user belongs to (VIP, WHOLESALE, …).
      * Used by PricingEngine to gate segment-targeted promotion rules.
      * Assigned manually by platform admins.

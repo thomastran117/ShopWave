@@ -1,5 +1,8 @@
 package backend.services.intf;
 
+import backend.models.enums.BillingInterval;
+
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -121,4 +124,134 @@ public interface PaymentService {
      * @param sigHeader value of the provider's signature header
      */
     WebhookEvent constructWebhookEvent(String payload, String sigHeader);
+
+    // -------------------------------------------------------------------------
+    // Subscriptions / saved payment methods
+    // -------------------------------------------------------------------------
+
+    /**
+     * @param id           provider SetupIntent ID
+     * @param clientSecret secret passed to the client-side SDK to confirm card setup
+     * @param customerId   Stripe customer the SetupIntent is attached to
+     */
+    record SetupIntentResult(String id, String clientSecret, String customerId) {}
+
+    /**
+     * Snapshot of a Stripe PaymentMethod relevant for display + selection.
+     */
+    record PaymentMethodInfo(
+            String id,
+            String customerId,
+            String brand,
+            String last4,
+            Integer expMonth,
+            Integer expYear
+    ) {}
+
+    /**
+     * @param id Stripe Price ID for use as a recurring subscription line item.
+     */
+    record PriceResult(String id, long unitAmountCents, String currency) {}
+
+    /**
+     * Snapshot of a Stripe Subscription mirrored locally.
+     */
+    record SubscriptionResult(
+            String id,
+            String customerId,
+            String status,
+            String latestInvoiceId,
+            java.time.Instant currentPeriodStart,
+            java.time.Instant currentPeriodEnd,
+            String defaultPaymentMethodId,
+            String firstSubscriptionItemId
+    ) {}
+
+    /**
+     * Creates a SetupIntent so the customer can save a card for future off-session use
+     * (subscription renewals). Caller must provide an existing Stripe customer ID.
+     */
+    SetupIntentResult createSetupIntent(String customerId);
+
+    /**
+     * Lists all card-type PaymentMethods attached to the given Stripe customer.
+     */
+    List<PaymentMethodInfo> listPaymentMethods(String customerId);
+
+    /**
+     * Retrieves a single PaymentMethod by ID.
+     */
+    PaymentMethodInfo retrievePaymentMethod(String paymentMethodId);
+
+    /**
+     * Detaches a PaymentMethod from its Stripe customer. Idempotent — already-detached
+     * methods are silently ignored.
+     */
+    void detachPaymentMethod(String paymentMethodId);
+
+    /**
+     * Creates a recurring (subscription-eligible) Price in Stripe. The returned Price
+     * is consumable as a subscription_item.price.
+     *
+     * @param productName display name for the inline Stripe Product created alongside the Price
+     */
+    PriceResult createRecurringPrice(long unitAmountCents, String currency,
+                                     BillingInterval interval, int intervalCount,
+                                     String productName, Map<String, String> metadata);
+
+    /**
+     * Creates a Stripe Subscription that will charge the given Price every cycle.
+     *
+     * @param defaultPaymentMethodId saved Stripe PaymentMethod to charge off-session
+     */
+    SubscriptionResult createSubscription(String customerId, String priceId, int quantity,
+                                          String defaultPaymentMethodId,
+                                          Map<String, String> metadata);
+
+    /**
+     * Updates a subscription's quantity on its first item. Uses no proration so the
+     * change applies cleanly on the next cycle without surprise mid-cycle charges.
+     */
+    SubscriptionResult updateSubscriptionQuantity(String stripeSubscriptionId,
+                                                  String stripeSubscriptionItemId,
+                                                  int newQuantity);
+
+    /**
+     * Swaps the price (and optionally quantity) on a subscription's first item. Use this
+     * when the customer changes interval, swaps product, or both. Uses no proration.
+     */
+    SubscriptionResult swapSubscriptionPrice(String stripeSubscriptionId,
+                                             String stripeSubscriptionItemId,
+                                             String newPriceId, int newQuantity);
+
+    /**
+     * Cancels a subscription. When {@code atPeriodEnd} is true, billing continues
+     * through the current cycle and stops at the period end; otherwise cancels
+     * immediately (no refund — caller decides whether to issue one).
+     */
+    SubscriptionResult cancelSubscription(String stripeSubscriptionId, boolean atPeriodEnd);
+
+    /**
+     * Pauses collection on a subscription. Stripe stops generating invoices until
+     * {@link #resumeSubscription(String)} is called.
+     */
+    SubscriptionResult pauseSubscription(String stripeSubscriptionId);
+
+    /**
+     * Resumes a paused subscription. Stripe resumes the regular billing cycle.
+     */
+    SubscriptionResult resumeSubscription(String stripeSubscriptionId);
+
+    /**
+     * Advances the subscription's billing anchor by one cycle so the next invoice
+     * is skipped. Used to implement customer "skip next shipment".
+     */
+    SubscriptionResult skipNextCycle(String stripeSubscriptionId,
+                                     BillingInterval interval, int intervalCount);
+
+    /**
+     * Retrieves the current state of a Stripe subscription. Used by webhook handlers
+     * to re-sync local state from Stripe (the source of truth for billing).
+     */
+    SubscriptionResult retrieveSubscription(String stripeSubscriptionId);
 }

@@ -132,6 +132,29 @@ public class Product {
     @Column(nullable = false)
     private boolean listed = true;
 
+    // -------------------------------------------------------------------------
+    // Subscription / recurring orders
+    // -------------------------------------------------------------------------
+
+    /** When true, this product can be purchased as a recurring subscription. */
+    @Column(nullable = false)
+    private boolean subscribable = false;
+
+    /**
+     * Allowed billing cadences when subscribed, encoded as comma-separated
+     * {@code INTERVAL:COUNT} pairs (e.g. {@code "MONTH:1,MONTH:3,WEEK:2"}).
+     * Null/blank means every cadence is allowed when {@link #subscribable} is true.
+     */
+    @Column(nullable = true, length = 255)
+    private String subscriptionIntervals;
+
+    /**
+     * Optional subscriber discount applied to {@link #price} when ordered on a subscription.
+     * E.g. {@code 10.00} = 10% off. Null = no discount.
+     */
+    @Column(nullable = true, precision = 5, scale = 2)
+    private BigDecimal subscriptionDiscountPercent;
+
     @CreatedDate
     @Column(nullable = false, updatable = false)
     private Instant createdAt;

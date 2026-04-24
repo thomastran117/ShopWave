@@ -33,6 +33,8 @@ import backend.models.core.OrderItem;
 import backend.models.core.Product;
 import backend.models.core.ProductBundle;
 import backend.models.core.ProductVariant;
+import backend.models.core.Subscription;
+import backend.models.core.SubscriptionItem;
 import backend.models.core.User;
 import backend.models.core.Company;
 import backend.models.core.Coupon;
@@ -1981,5 +1983,80 @@ public class OrderServiceImpl implements OrderService {
                 a.getUserAgent(),
                 a.getCreatedAt(),
                 signalList);
+    }
+
+    // -------------------------------------------------------------------------
+    // Subscription renewals
+    // -------------------------------------------------------------------------
+
+    @Override
+    @Transactional
+    public Order createRenewalOrder(Subscription subscription, String stripeInvoiceId, long amountPaidCents) {
+        // Idempotency: invoice.paid can be delivered more than once.
+        Order existing = orderRepository.findByStripeInvoiceId(stripeInvoiceId).orElse(null);
+        if (existing != null) {
+            return existing;
+        }
+
+        if (subscription.getItems().isEmpty()) {
+            throw new BadRequestException("Cannot create renewal order: subscription has no items");
+        }
+
+        BigDecimal totalAmount = BigDecimal.valueOf(amountPaidCents)
+                .movePointLeft(2)
+                .setScale(2, RoundingMode.HALF_UP);
+
+        Order order = new Order();
+        order.setUser(subscription.getUser());
+        order.setStatus(OrderStatus.PAID);
+        order.setTotalAmount(totalAmount);
+        order.setCurrency(subscription.getCurrency());
+        order.setSubscription(subscription);
+        order.setRenewal(true);
+        order.setStripeInvoiceId(stripeInvoiceId);
+        order.setCompensated(true); // No reservation lifecycle: this order is born paid.
+
+        for (SubscriptionItem si : subscription.getItems()) {
+            Product product = si.getProduct();
+            int qty = si.getQuantity();
+
+            OrderItem item = new OrderItem();
+            item.setOrder(order);
+            item.setProduct(product);
+            item.setProductName(product.getName());
+            item.setQuantity(qty);
+            item.setUnitPrice(BigDecimal.valueOf(si.getUnitPriceCents()).movePointLeft(2));
+
+            if (si.getVariant() != null) {
+                ProductVariant variant = si.getVariant();
+                item.setVariant(variant);
+                item.setVariantTitle(buildVariantTitle(variant));
+                item.setVariantSku(variant.getSku());
+
+                int updated = variantRepository.decrementStock(variant.getId(), qty);
+                if (updated == 0) {
+                    item.setFulfillmentStatus(FulfillmentStatus.BACKORDERED);
+                }
+            } else {
+                int updated = productRepository.decrementStock(product.getId(), qty);
+                if (updated == 0) {
+                    item.setFulfillmentStatus(FulfillmentStatus.BACKORDERED);
+                }
+            }
+
+            order.getItems().add(item);
+        }
+
+        Order saved = orderRepository.save(order);
+
+        try {
+            User user = subscription.getUser();
+            OrderResponse response = toResponse(saved);
+            emailService.sendOrderReceiptEmail(user.getEmail(), user.getFirstName(), response);
+        } catch (Exception e) {
+            log.warn("Failed to send renewal receipt email for order {}: {}", saved.getId(), e.getMessage());
+        }
+
+        return saved;
     }
 }
