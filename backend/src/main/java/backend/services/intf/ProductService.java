@@ -8,15 +8,18 @@ import backend.dtos.requests.product.CreateProductRequest;
 import backend.dtos.requests.product.CreateProductVariantRequest;
 import backend.dtos.requests.product.ReorderProductImagesRequest;
 import backend.dtos.requests.product.SetProductAttributesRequest;
+import backend.dtos.requests.product.UpdateMarketplaceListingRequest;
 import backend.dtos.requests.product.UpdateProductOptionRequest;
 import backend.dtos.requests.product.UpdateProductRequest;
 import backend.dtos.requests.product.UpdateProductVariantRequest;
 import backend.dtos.responses.general.PagedResponse;
+import backend.dtos.responses.product.MarketplaceCatalogProductResponse;
 import backend.dtos.responses.product.ProductAttributeResponse;
 import backend.dtos.responses.product.ProductImageResponse;
 import backend.dtos.responses.product.ProductOptionResponse;
 import backend.dtos.responses.product.ProductResponse;
 import backend.dtos.responses.product.ProductVariantResponse;
+import backend.dtos.responses.product.VendorStorefrontResponse;
 import backend.models.enums.ProductStatus;
 
 import java.math.BigDecimal;
@@ -54,4 +57,23 @@ public interface ProductService {
     // Attributes
     List<ProductAttributeResponse> getProductAttributes(long companyId, long productId);
     List<ProductAttributeResponse> setProductAttributes(long companyId, long productId, long ownerId, SetProductAttributesRequest request);
+
+    // -------------------------------------------------------------------------
+    // Marketplace catalog
+    // -------------------------------------------------------------------------
+
+    /** Cross-vendor product search for a marketplace storefront. Only returns ACTIVE + marketplaceListed=true products. */
+    PagedResponse<MarketplaceCatalogProductResponse> searchMarketplaceCatalog(
+            long marketplaceId, String q, String category, String brand,
+            BigDecimal minPrice, BigDecimal maxPrice, Boolean featured, Long vendorId,
+            int page, int size, String sort, String direction);
+
+    /** Returns a single marketplace product detail including vendor information. */
+    MarketplaceCatalogProductResponse getMarketplaceProduct(long marketplaceId, long productId);
+
+    /** Returns a vendor's public storefront (profile + featured products). */
+    VendorStorefrontResponse getVendorStorefront(long marketplaceId, long vendorId);
+
+    /** Vendor lists or unlists one of their products on a marketplace. */
+    ProductResponse updateMarketplaceListing(long companyId, long productId, long ownerId, UpdateMarketplaceListingRequest request);
 }

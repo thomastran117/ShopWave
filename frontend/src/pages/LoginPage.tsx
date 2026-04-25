@@ -3,15 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { setCredentials } from "../stores/authSlice";
 import type { AppDispatch, RootState } from "../stores";
-import axios from "axios";
+import api from "../api";
+import Environment from "../configuration/Environment";
 import "../styles/login.css";
 
 const images = ["/carousel1.jpg", "/carousel2.jpg", "/carousel3.jpg"];
-
-const api = axios.create({
-  baseURL: "http://localhost:8090/api",
-  withCredentials: true,
-});
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -47,10 +43,14 @@ export default function LoginPage() {
   };
 
   const handleGoogleLogin = () => {
-    const clientId =
-      "199609700164-kob74jigm65p2i1gtcmc3dkk60766tk4.apps.googleusercontent.com";
-    const redirectUri = "http://localhost:3090/auth/google";
+    const clientId = Environment.google_client;
+    const redirectUri = `${Environment.frontend_url}/auth/google`;
     const scope = "openid email profile";
+
+    if (!clientId) {
+      console.error("Missing Google client ID");
+      return;
+    }
 
     const params = new URLSearchParams({
       client_id: clientId,

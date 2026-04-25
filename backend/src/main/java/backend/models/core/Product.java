@@ -25,7 +25,8 @@ import java.util.List;
 @AllArgsConstructor
 @Table(name = "products", indexes = {
         @Index(name = "idx_product_company", columnList = "company_id"),
-        @Index(name = "idx_product_sku_company", columnList = "sku, company_id", unique = true)
+        @Index(name = "idx_product_sku_company", columnList = "sku, company_id", unique = true),
+        @Index(name = "idx_product_marketplace", columnList = "marketplace_id")
 })
 @EntityListeners(AuditingEntityListener.class)
 public class Product {
@@ -37,6 +38,17 @@ public class Product {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "company_id", nullable = false)
     private Company company;
+
+    /**
+     * Non-null when this product is listed on a marketplace. Null for standalone (non-marketplace) products.
+     * The FK points to the marketplace Company (the operator), not the vendor Company.
+     */
+    @Column(name = "marketplace_id", nullable = true)
+    private Long marketplaceId;
+
+    /** When true, the vendor has enabled this product for marketplace display. Ignored when marketplaceId is null. */
+    @Column(nullable = false)
+    private boolean marketplaceListed = false;
 
     @Column(nullable = false, length = 255)
     private String name;

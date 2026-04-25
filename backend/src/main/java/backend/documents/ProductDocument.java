@@ -24,6 +24,18 @@ public class ProductDocument {
 
     private Long companyId;
 
+    /** Non-null when the product is listed on a marketplace. */
+    private Long marketplaceId;
+
+    /** The owning vendor's company ID — populated when marketplaceId is set. */
+    private Long vendorId;
+
+    @Field(type = FieldType.Keyword)
+    private String vendorName;
+
+    /** True when the vendor has enabled this product for marketplace display. */
+    private boolean marketplaceListed;
+
     @Field(type = FieldType.Text)
     private String name;
 

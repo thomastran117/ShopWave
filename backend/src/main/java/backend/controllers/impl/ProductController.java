@@ -17,6 +17,7 @@ import backend.dtos.requests.product.ReorderProductImagesRequest;
 import backend.dtos.requests.product.SetProductAttributesRequest;
 import backend.dtos.requests.product.UpdateProductOptionRequest;
 import backend.dtos.requests.product.UpdateProductRequest;
+import backend.dtos.requests.product.UpdateMarketplaceListingRequest;
 import backend.dtos.requests.product.UpdateProductVariantRequest;
 import backend.dtos.responses.general.PagedResponse;
 import backend.dtos.responses.product.BundleResponse;
@@ -455,6 +456,22 @@ public class ProductController {
             @PathVariable long companyId,
             @PathVariable long bundleId) {
         return ResponseEntity.ok(bundleService.getBundle(companyId, bundleId));
+    }
+
+    @PatchMapping("/{productId}/marketplace")
+    @RequireAuth
+    public ResponseEntity<ProductResponse> updateMarketplaceListing(
+            @PathVariable long companyId,
+            @PathVariable long productId,
+            @Valid @RequestBody UpdateMarketplaceListingRequest request) {
+        try {
+            long userId = resolveUserId();
+            return ResponseEntity.ok(productService.updateMarketplaceListing(companyId, productId, userId, request));
+        } catch (AppHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new InternalServerErrorException();
+        }
     }
 
     @PostMapping("/reindex")

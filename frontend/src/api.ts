@@ -1,9 +1,10 @@
 import axios from "axios";
 import { store } from "./stores";
 import { setCredentials, clearCredentials } from "./stores/authSlice";
+import Environment from "./configuration/Environment";
 
 const api = axios.create({
-  baseURL: "http://localhost:8090/api",
+  baseURL: Environment.backend_url,
   withCredentials: true, // send cookies for refresh
 });
 
@@ -57,7 +58,7 @@ api.interceptors.response.use(
 
       try {
         const resp = await axios.post(
-          "http://localhost:8090/api/auth/refresh",
+          `${Environment.backend_url}/auth/refresh`,
           {},
           { withCredentials: true }
         );

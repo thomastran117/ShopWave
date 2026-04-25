@@ -46,8 +46,14 @@ import backend.models.core.ProductImage;
 import backend.models.core.ProductOption;
 import backend.models.core.ProductVariant;
 import backend.models.enums.ProductStatus;
+import backend.dtos.requests.product.UpdateMarketplaceListingRequest;
+import backend.dtos.responses.product.MarketplaceCatalogProductResponse;
+import backend.dtos.responses.product.VendorStorefrontResponse;
+import backend.models.core.MarketplaceVendor;
 import backend.repositories.BundleRepository;
 import backend.repositories.CompanyRepository;
+import backend.repositories.MarketplaceProfileRepository;
+import backend.repositories.MarketplaceVendorRepository;
 import backend.repositories.ProductAttributeRepository;
 import backend.repositories.ProductImageRepository;
 import backend.repositories.ProductOptionRepository;
@@ -81,6 +87,8 @@ public class ProductServiceImpl implements ProductService {
     private final ProductAttributeRepository productAttributeRepository;
     private final BundleRepository bundleRepository;
     private final PromotionRuleRepository promotionRuleRepository;
+    private final MarketplaceProfileRepository marketplaceProfileRepository;
+    private final MarketplaceVendorRepository marketplaceVendorRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final ElasticsearchOperations elasticsearchOperations;
 
@@ -93,6 +101,8 @@ public class ProductServiceImpl implements ProductService {
             ProductAttributeRepository productAttributeRepository,
             BundleRepository bundleRepository,
             PromotionRuleRepository promotionRuleRepository,
+            MarketplaceProfileRepository marketplaceProfileRepository,
+            MarketplaceVendorRepository marketplaceVendorRepository,
             ApplicationEventPublisher eventPublisher,
             ElasticsearchOperations elasticsearchOperations) {
         this.productRepository = productRepository;
@@ -103,6 +113,8 @@ public class ProductServiceImpl implements ProductService {
         this.productAttributeRepository = productAttributeRepository;
         this.bundleRepository = bundleRepository;
         this.promotionRuleRepository = promotionRuleRepository;
+        this.marketplaceProfileRepository = marketplaceProfileRepository;
+        this.marketplaceVendorRepository = marketplaceVendorRepository;
         this.eventPublisher = eventPublisher;
         this.elasticsearchOperations = elasticsearchOperations;
     }
@@ -673,6 +685,149 @@ public class ProductServiceImpl implements ProductService {
                 .toList();
     }
 
+    // --- Marketplace catalog ---
+
+    @Override
+    @Transactional(readOnly = true)
+    public PagedResponse<MarketplaceCatalogProductResponse> searchMarketplaceCatalog(
+            long marketplaceId, String q, String category, String brand,
+            BigDecimal minPrice, BigDecimal maxPrice, Boolean featured, Long vendorId,
+            int page, int size, String sort, String direction) {
+
+        if (!marketplaceProfileRepository.existsByCompanyId(marketplaceId)) {
+            throw new ResourceNotFoundException("Marketplace not found");
+        }
+        if (size > 50) size = 50;
+
+        String sortField = (sort != null && SORTABLE_FIELDS.contains(sort)) ? sort : "createdAt";
+        Sort.Direction sortDir = "asc".equalsIgnoreCase(direction) ? Sort.Direction.ASC : Sort.Direction.DESC;
+        Pageable pageable = PageRequest.of(page, size, Sort.by(sortDir, sortField));
+
+        // --- Elasticsearch path ---
+        try {
+            final long fVendorId = vendorId != null ? vendorId : 0L;
+            BoolQuery.Builder bq = new BoolQuery.Builder()
+                    .filter(TermQuery.of(t -> t.field("marketplaceId").value(marketplaceId))._toQuery())
+                    .filter(TermQuery.of(t -> t.field("marketplaceListed").value(true))._toQuery())
+                    .filter(TermQuery.of(t -> t.field("status").value("ACTIVE"))._toQuery());
+
+            if (q != null && !q.isBlank()) {
+                bq.must(MultiMatchQuery.of(mm -> mm
+                        .fields("name^3", "description", "brand^2", "category", "tags", "vendorName")
+                        .query(q))._toQuery());
+            }
+            if (category != null) bq.filter(TermQuery.of(t -> t.field("category").value(category))._toQuery());
+            if (brand    != null) bq.filter(TermQuery.of(t -> t.field("brand").value(brand))._toQuery());
+            if (featured != null) bq.filter(TermQuery.of(t -> t.field("featured").value(featured))._toQuery());
+            if (vendorId != null) bq.filter(TermQuery.of(t -> t.field("vendorId").value(fVendorId))._toQuery());
+            if (minPrice != null || maxPrice != null) {
+                final Double minVal = minPrice != null ? minPrice.doubleValue() : null;
+                final Double maxVal = maxPrice != null ? maxPrice.doubleValue() : null;
+                bq.filter(co.elastic.clients.elasticsearch._types.query_dsl.RangeQuery.of(r -> r.number(n -> {
+                    n.field("price");
+                    if (minVal != null) n.gte(minVal);
+                    if (maxVal != null) n.lte(maxVal);
+                    return n;
+                }))._toQuery());
+            }
+
+            NativeQuery esQuery = NativeQuery.builder()
+                    .withQuery(bq.build()._toQuery())
+                    .withPageable(pageable)
+                    .build();
+
+            SearchHits<ProductDocument> hits = elasticsearchOperations.search(esQuery, ProductDocument.class);
+            List<Long> ids = hits.stream().map(h -> h.getContent().getId()).toList();
+
+            List<Product> products = productRepository.findAllByIdInAndMarketplaceId(ids, marketplaceId);
+            Map<Long, Product> productMap = products.stream().collect(Collectors.toMap(Product::getId, p -> p));
+
+            Map<Long, MarketplaceVendor> vendorMap = buildVendorMap(marketplaceId, products);
+
+            List<MarketplaceCatalogProductResponse> content = ids.stream()
+                    .filter(productMap::containsKey)
+                    .map(id -> toCatalogResponse(productMap.get(id), vendorMap.get(productMap.get(id).getCompany().getId())))
+                    .toList();
+
+            return new PagedResponse<>(new PageImpl<>(content, pageable, hits.getTotalHits()));
+
+        } catch (Exception e) {
+            log.warn("[CATALOG SEARCH] Elasticsearch unavailable, falling back to database: {}", e.getMessage());
+        }
+
+        // --- JPA fallback ---
+        List<Product> products = productRepository.findMarketplaceListed(marketplaceId);
+        Map<Long, MarketplaceVendor> vendorMap = buildVendorMap(marketplaceId, products);
+        List<MarketplaceCatalogProductResponse> all = products.stream()
+                .map(p -> toCatalogResponse(p, vendorMap.get(p.getCompany().getId())))
+                .toList();
+        int start = (int) pageable.getOffset();
+        int end   = Math.min(start + pageable.getPageSize(), all.size());
+        List<MarketplaceCatalogProductResponse> pageContent = start < all.size() ? all.subList(start, end) : List.of();
+        return new PagedResponse<>(new PageImpl<>(pageContent, pageable, all.size()));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public MarketplaceCatalogProductResponse getMarketplaceProduct(long marketplaceId, long productId) {
+        Product product = productRepository.findByIdAndMarketplaceId(productId, marketplaceId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found in this marketplace"));
+        Map<Long, MarketplaceVendor> vendorMap = buildVendorMap(marketplaceId, List.of(product));
+        return toCatalogResponse(product, vendorMap.get(product.getCompany().getId()));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public VendorStorefrontResponse getVendorStorefront(long marketplaceId, long vendorId) {
+        MarketplaceVendor vendor = marketplaceVendorRepository.findByIdAndMarketplaceId(vendorId, marketplaceId)
+                .orElseThrow(() -> new ResourceNotFoundException("Vendor not found in this marketplace"));
+
+        long vendorCompanyId = vendor.getVendorCompany().getId();
+        List<Product> allVendorProducts = productRepository.findMarketplaceListed(marketplaceId).stream()
+                .filter(p -> p.getCompany().getId() == vendorCompanyId)
+                .toList();
+
+        List<MarketplaceCatalogProductResponse> featured = allVendorProducts.stream()
+                .filter(Product::isFeatured)
+                .limit(10)
+                .map(p -> toCatalogResponse(p, vendor))
+                .toList();
+
+        return new VendorStorefrontResponse(
+                vendor.getId(),
+                marketplaceId,
+                vendor.getVendorCompany().getName(),
+                vendor.getVendorCompany().getDescription(),
+                vendor.getVendorCompany().getLogoUrl(),
+                vendor.getTier().name(),
+                vendor.getStatus().name(),
+                featured,
+                allVendorProducts.size()
+        );
+    }
+
+    @Override
+    @Transactional
+    public ProductResponse updateMarketplaceListing(long companyId, long productId, long ownerId,
+                                                     UpdateMarketplaceListingRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Product product = productRepository.findByIdAndCompanyId(productId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
+
+        if (!marketplaceVendorRepository.existsByMarketplaceIdAndVendorCompanyId(request.getMarketplaceId(), companyId)) {
+            throw new ForbiddenException("Your company is not an approved vendor in this marketplace");
+        }
+
+        product.setMarketplaceId(request.getListed() ? request.getMarketplaceId() : null);
+        product.setMarketplaceListed(Boolean.TRUE.equals(request.getListed()));
+
+        Product saved = productRepository.save(product);
+        eventPublisher.publishEvent(new ProductIndexEvent(saved, saved.getCompany().getId()));
+        return toResponse(saved);
+    }
+
     // --- Helpers ---
 
     private void assertCompanyExists(long companyId) {
@@ -720,6 +875,55 @@ public class ProductServiceImpl implements ProductService {
 
     private ProductAttributeResponse toAttrResponse(ProductAttribute attr) {
         return new ProductAttributeResponse(attr.getId(), attr.getName(), attr.getValue(), attr.getDisplayOrder());
+    }
+
+    private Map<Long, MarketplaceVendor> buildVendorMap(long marketplaceId, List<Product> products) {
+        Set<Long> companyIds = products.stream()
+                .map(p -> p.getCompany().getId())
+                .collect(Collectors.toSet());
+        if (companyIds.isEmpty()) return Map.of();
+        return marketplaceVendorRepository
+                .findByMarketplaceIdAndVendorCompanyIdIn(marketplaceId, companyIds)
+                .stream()
+                .collect(Collectors.toMap(mv -> mv.getVendorCompany().getId(), mv -> mv));
+    }
+
+    private MarketplaceCatalogProductResponse toCatalogResponse(Product product, MarketplaceVendor vendor) {
+        List<ProductImageResponse> images = product.getImages().stream()
+                .map(this::toImageResponse)
+                .toList();
+        List<ProductVariantResponse> variants = product.getVariants().stream()
+                .map(this::toVariantResponse)
+                .toList();
+        String vendorName = vendor != null ? vendor.getVendorCompany().getName() : null;
+        String vendorTier = vendor != null ? vendor.getTier().name() : null;
+        Long vendorId     = vendor != null ? vendor.getId() : null;
+        return new MarketplaceCatalogProductResponse(
+                product.getId(),
+                product.getCompany().getId(),
+                product.getMarketplaceId(),
+                vendorId,
+                vendorName,
+                vendorTier,
+                product.getName(),
+                product.getDescription(),
+                product.getSku(),
+                product.getPrice(),
+                product.getCompareAtPrice(),
+                product.getCurrency(),
+                product.getCategory(),
+                product.getBrand(),
+                product.getTags(),
+                product.getThumbnailUrl(),
+                images,
+                variants,
+                product.getStock(),
+                product.getStatus().name(),
+                product.isFeatured(),
+                product.isPurchasable(),
+                product.getCreatedAt(),
+                product.getUpdatedAt()
+        );
     }
 
     private ProductResponse toResponse(Product product) {

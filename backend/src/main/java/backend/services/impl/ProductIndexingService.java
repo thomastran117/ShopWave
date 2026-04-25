@@ -167,7 +167,7 @@ public class ProductIndexingService implements ApplicationRunner {
     // -------------------------------------------------------------------------
 
     public void reindexCompany(long companyId) {
-        productRepository.findAllByCompanyId(companyId)
+        productRepository.findAllByCompanyIdWithCompany(companyId)
                 .forEach(p -> submit(new IndexingTask.IndexProduct(p, companyId)));
         bundleRepository.findAllByCompanyId(companyId)
                 .forEach(b -> submit(new IndexingTask.IndexBundle(b)));
@@ -175,7 +175,7 @@ public class ProductIndexingService implements ApplicationRunner {
     }
 
     public void reindexAll() {
-        productRepository.findAll()
+        productRepository.findAllWithCompany()
                 .forEach(p -> submit(new IndexingTask.IndexProduct(p, p.getCompany().getId())));
         bundleRepository.findAll()
                 .forEach(b -> submit(new IndexingTask.IndexBundle(b)));
@@ -199,7 +199,7 @@ public class ProductIndexingService implements ApplicationRunner {
 
         try {
             if (productSearchRepository.count() == 0) {
-                productRepository.findAll()
+                productRepository.findAllWithCompany()
                         .forEach(p -> submit(new IndexingTask.IndexProduct(p, p.getCompany().getId())));
                 log.info("[SEARCH INDEX] Queued existing products for initial indexing");
             }
@@ -353,9 +353,17 @@ public class ProductIndexingService implements ApplicationRunner {
         boolean hasActiveDiscount = bestSaving.compareTo(BigDecimal.ZERO) > 0;
         BigDecimal discountedPrice = hasActiveDiscount ? p.getPrice().subtract(bestSaving) : null;
 
+        // vendorName: safe access — may not be loaded in async worker threads
+        String vendorName = null;
+        try { vendorName = p.getCompany().getName(); } catch (Exception ignored) {}
+
         return new ProductDocument(
                 p.getId(),
                 companyId,
+                p.getMarketplaceId(),
+                companyId,
+                vendorName,
+                p.isMarketplaceListed(),
                 p.getName(),
                 p.getDescription(),
                 p.getSku(),

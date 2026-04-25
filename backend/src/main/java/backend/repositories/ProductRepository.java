@@ -25,6 +25,28 @@ import java.util.Optional;
 public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpecificationExecutor<Product> {
     Optional<Product> findByIdAndCompanyId(long id, long companyId);
 
+    // -------------------------------------------------------------------------
+    // Marketplace catalog queries
+    // -------------------------------------------------------------------------
+
+    @Query("SELECT p FROM Product p JOIN FETCH p.company WHERE p.marketplaceId = :marketplaceId AND p.marketplaceListed = true AND p.status = 'ACTIVE'")
+    List<Product> findMarketplaceListed(@Param("marketplaceId") Long marketplaceId);
+
+    Optional<Product> findByIdAndMarketplaceId(long id, long marketplaceId);
+
+    List<Product> findAllByIdInAndMarketplaceId(Collection<Long> ids, long marketplaceId);
+
+    // -------------------------------------------------------------------------
+    // JOIN FETCH queries used by indexing workers to avoid LazyInitializationException
+    // on p.getCompany().getName() outside a JPA session
+    // -------------------------------------------------------------------------
+
+    @Query("SELECT p FROM Product p JOIN FETCH p.company")
+    List<Product> findAllWithCompany();
+
+    @Query("SELECT p FROM Product p JOIN FETCH p.company WHERE p.company.id = :companyId")
+    List<Product> findAllByCompanyIdWithCompany(@Param("companyId") long companyId);
+
     /** Acquires a pessimistic write lock on the product row — use inside @Transactional to serialize concurrent mutations. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM Product p WHERE p.id = :id AND p.company.id = :companyId")

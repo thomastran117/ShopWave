@@ -17,7 +17,8 @@ import java.math.BigDecimal;
 @AllArgsConstructor
 @Table(name = "order_items", indexes = {
         @Index(name = "idx_order_item_order", columnList = "order_id"),
-        @Index(name = "idx_order_item_fulfillment_loc", columnList = "fulfillment_location_id")
+        @Index(name = "idx_order_item_fulfillment_loc", columnList = "fulfillment_location_id"),
+        @Index(name = "idx_order_item_vendor", columnList = "vendor_id")
 })
 public class OrderItem {
 
@@ -97,4 +98,12 @@ public class OrderItem {
     /** Snapshot of bundle name at order time. */
     @Column(name = "bundle_name", nullable = true, length = 255)
     private String bundleName;
+
+    /**
+     * Denormalized FK to the MarketplaceVendor that owns this line item's product.
+     * Null for standalone (non-marketplace) orders. Set at order creation time from
+     * product.company so historic attribution survives product ownership changes.
+     */
+    @Column(name = "vendor_id", nullable = true)
+    private Long vendorId;
 }
