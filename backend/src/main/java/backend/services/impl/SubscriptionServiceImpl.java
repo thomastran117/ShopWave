@@ -25,6 +25,7 @@ import backend.models.core.SubscriptionItem;
 import backend.models.core.User;
 import backend.models.enums.BillingInterval;
 import backend.models.enums.SubscriptionStatus;
+import backend.repositories.OrderRepository;
 import backend.repositories.ProductRepository;
 import backend.repositories.ProductVariantRepository;
 import backend.repositories.SavedPaymentMethodRepository;
@@ -37,6 +38,7 @@ import backend.services.intf.PaymentService.PaymentMethodInfo;
 import backend.services.intf.PaymentService.PriceResult;
 import backend.services.intf.PaymentService.SetupIntentResult;
 import backend.services.intf.PaymentService.SubscriptionResult;
+import backend.services.intf.LoyaltyService;
 import backend.services.intf.SubscriptionService;
 
 import java.math.BigDecimal;
@@ -58,6 +60,8 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     private final ProductVariantRepository variantRepository;
     private final PaymentService paymentService;
     private final OrderService orderService;
+    private final OrderRepository orderRepository;
+    private final LoyaltyService loyaltyService;
 
     public SubscriptionServiceImpl(
             SubscriptionRepository subscriptionRepository,
@@ -66,7 +70,9 @@ public class SubscriptionServiceImpl implements SubscriptionService {
             ProductRepository productRepository,
             ProductVariantRepository variantRepository,
             PaymentService paymentService,
-            OrderService orderService) {
+            OrderService orderService,
+            OrderRepository orderRepository,
+            LoyaltyService loyaltyService) {
         this.subscriptionRepository = subscriptionRepository;
         this.savedPaymentMethodRepository = savedPaymentMethodRepository;
         this.userRepository = userRepository;
@@ -74,6 +80,8 @@ public class SubscriptionServiceImpl implements SubscriptionService {
         this.variantRepository = variantRepository;
         this.paymentService = paymentService;
         this.orderService = orderService;
+        this.orderRepository = orderRepository;
+        this.loyaltyService = loyaltyService;
     }
 
     // -------------------------------------------------------------------------
@@ -419,6 +427,14 @@ public class SubscriptionServiceImpl implements SubscriptionService {
             log.error("Failed to create renewal order for subscription {} invoice {}: {}",
                     sub.getId(), stripeInvoiceId, e.getMessage(), e);
             return;
+        }
+
+        try {
+            orderRepository.findByStripeInvoiceId(stripeInvoiceId).ifPresent(renewalOrder ->
+                    loyaltyService.recordOrderEarn(renewalOrder, sub.getCompany().getId()));
+        } catch (Exception e) {
+            log.error("[LOYALTY] Failed to record earn for renewal (subscription {}, invoice {}): {}",
+                    sub.getId(), stripeInvoiceId, e.getMessage());
         }
 
         sub.setStatus(SubscriptionStatus.ACTIVE);

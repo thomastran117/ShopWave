@@ -12,6 +12,7 @@ import backend.models.enums.CompensationStatus;
 import backend.models.enums.OrderStatus;
 import backend.repositories.OrderCompensationRepository;
 import backend.repositories.OrderRepository;
+import backend.services.intf.LoyaltyService;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -40,14 +41,17 @@ public class OrderCompensationScheduler {
     private final OrderRepository orderRepository;
     private final OrderCompensationRepository compensationRepository;
     private final OrderServiceImpl orderService;
+    private final LoyaltyService loyaltyService;
 
     public OrderCompensationScheduler(
             OrderRepository orderRepository,
             OrderCompensationRepository compensationRepository,
-            OrderServiceImpl orderService) {
+            OrderServiceImpl orderService,
+            LoyaltyService loyaltyService) {
         this.orderRepository = orderRepository;
         this.compensationRepository = compensationRepository;
         this.orderService = orderService;
+        this.loyaltyService = loyaltyService;
     }
 
     @Scheduled(fixedDelayString = "${app.order.compensation.interval-ms:300000}")

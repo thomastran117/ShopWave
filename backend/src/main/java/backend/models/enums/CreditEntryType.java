@@ -5,5 +5,6 @@ public enum CreditEntryType {
     MANUAL_ADJUSTMENT,
     REDEEMED,
     EXPIRED,
-    REVERSED
+    REVERSED,
+    LOYALTY_CASHBACK
 }

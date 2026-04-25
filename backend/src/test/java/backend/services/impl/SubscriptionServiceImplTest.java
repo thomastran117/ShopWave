@@ -15,8 +15,10 @@ import backend.models.enums.SubscriptionStatus;
 import backend.repositories.ProductRepository;
 import backend.repositories.ProductVariantRepository;
 import backend.repositories.SavedPaymentMethodRepository;
+import backend.repositories.OrderRepository;
 import backend.repositories.SubscriptionRepository;
 import backend.repositories.UserRepository;
+import backend.services.intf.LoyaltyService;
 import backend.services.intf.OrderService;
 import backend.services.intf.PaymentService;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,6 +42,8 @@ class SubscriptionServiceImplTest {
     private ProductVariantRepository variantRepository;
     private PaymentService paymentService;
     private OrderService orderService;
+    private OrderRepository orderRepository;
+    private LoyaltyService loyaltyService;
     private SubscriptionServiceImpl service;
 
     @BeforeEach
@@ -51,6 +55,8 @@ class SubscriptionServiceImplTest {
         variantRepository = mock(ProductVariantRepository.class);
         paymentService = mock(PaymentService.class);
         orderService = mock(OrderService.class);
+        orderRepository = mock(OrderRepository.class);
+        loyaltyService = mock(LoyaltyService.class);
 
         service = new SubscriptionServiceImpl(
                 subscriptionRepository,
@@ -59,7 +65,9 @@ class SubscriptionServiceImplTest {
                 productRepository,
                 variantRepository,
                 paymentService,
-                orderService);
+                orderService,
+                orderRepository,
+                loyaltyService);
     }
 
     // ─── create ─────────────────────────────────────────────────────────────

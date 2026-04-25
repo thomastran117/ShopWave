@@ -13,6 +13,7 @@ import backend.models.enums.UserRole;
 import backend.models.enums.UserStatus;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -78,6 +79,10 @@ public class User {
      */
     @Column(nullable = true, length = 100, unique = true)
     private String stripeCustomerId;
+
+    /** Date of birth. Used by the LoyaltyScheduler for birthday rewards. Null if not provided. */
+    @Column(nullable = true, name = "birth_date")
+    private LocalDate birthDate;
 
     /**
      * Customer segments this user belongs to (VIP, WHOLESALE, …).

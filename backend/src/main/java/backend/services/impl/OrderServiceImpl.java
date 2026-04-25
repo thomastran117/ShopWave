@@ -69,6 +69,7 @@ import backend.repositories.MarketplaceVendorRepository;
 import backend.repositories.OrderItemRepository;
 import backend.repositories.SubOrderRepository;
 import backend.services.intf.CommissionEngine;
+import backend.services.intf.LoyaltyService;
 import backend.repositories.CouponPerUserCountRepository;
 import backend.repositories.CouponRedemptionRepository;
 import backend.repositories.CompanyRepository;
@@ -167,6 +168,7 @@ public class OrderServiceImpl implements OrderService {
     private final CommissionEngine commissionEngine;
     private final CommissionRecordRepository commissionRecordRepository;
     private final VendorBalanceRepository vendorBalanceRepository;
+    private final LoyaltyService loyaltyService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
     private ReturnService returnService;
 
@@ -204,7 +206,8 @@ public class OrderServiceImpl implements OrderService {
             OrderItemRepository orderItemRepository,
             CommissionEngine commissionEngine,
             CommissionRecordRepository commissionRecordRepository,
-            VendorBalanceRepository vendorBalanceRepository) {
+            VendorBalanceRepository vendorBalanceRepository,
+            LoyaltyService loyaltyService) {
         this.orderRepository = orderRepository;
         this.compensationRepository = compensationRepository;
         this.productRepository = productRepository;
@@ -239,6 +242,7 @@ public class OrderServiceImpl implements OrderService {
         this.commissionEngine = commissionEngine;
         this.commissionRecordRepository = commissionRecordRepository;
         this.vendorBalanceRepository = vendorBalanceRepository;
+        this.loyaltyService = loyaltyService;
     }
 
     /** Setter injection breaks the circular dependency: ReturnService → OrderServiceImpl → ReturnService. */
@@ -326,6 +330,7 @@ public class OrderServiceImpl implements OrderService {
         List<long[]> decrementedProducts = new ArrayList<>();
         List<long[]> decrementedVariants = new ArrayList<>();
         List<long[]> decrementedLocationStocks = new ArrayList<>();
+        Long savedOrderId = null; // set after order is persisted; used for loyalty point restore on failure
         // [product, variant (null for product-level), prevStock, newStock]
         record PurchaseRecord(Product prod, ProductVariant var, int prevStock, int newStock) {}
         List<PurchaseRecord> purchaseRecords = new ArrayList<>();
@@ -605,6 +610,23 @@ public class OrderServiceImpl implements OrderService {
             BigDecimal promotionSavings = pricing.promotionSavings();
             BigDecimal finalTotal = pricing.finalTotal().add(bundleSubtotal);
 
+            // --- Loyalty point redemption: pre-validate and compute discount before Stripe charge ---
+            // The actual atomic deduction is deferred until after the order entity is saved (orderId needed).
+            int loyaltyPointsToRedeem = request.getLoyaltyPointsToRedeem() != null
+                    ? request.getLoyaltyPointsToRedeem() : 0;
+            long loyaltyDiscountCents = 0L;
+            long loyaltyCompanyId = 0L;
+            if (loyaltyPointsToRedeem > 0) {
+                loyaltyCompanyId = resolveOrderCompanyId(orderItems);
+                var quote = loyaltyService.getRedemptionQuote(userId, loyaltyCompanyId, loyaltyPointsToRedeem);
+                if (!quote.isValid()) {
+                    throw new BadRequestException("Cannot redeem loyalty points: " + quote.getInvalidReason());
+                }
+                loyaltyDiscountCents = quote.getDiscountCents();
+                finalTotal = finalTotal.subtract(BigDecimal.valueOf(loyaltyDiscountCents).movePointLeft(2))
+                        .max(BigDecimal.ZERO);
+            }
+
             long amountInCents = finalTotal.multiply(BigDecimal.valueOf(100))
                     .setScale(0, RoundingMode.HALF_UP)
                     .longValueExact();
@@ -629,6 +651,16 @@ public class OrderServiceImpl implements OrderService {
             order.setItems(orderItems);
 
             order = orderRepository.save(order);
+
+            savedOrderId = order.getId();
+
+            // --- Atomically deduct loyalty points now that the order has an ID ---
+            if (loyaltyPointsToRedeem > 0) {
+                loyaltyService.applyRedemption(userId, loyaltyCompanyId, order.getId(), loyaltyPointsToRedeem);
+                order.setLoyaltyPointsApplied(loyaltyPointsToRedeem);
+                order.setLoyaltyDiscountCents(loyaltyDiscountCents);
+                order = orderRepository.save(order);
+            }
 
             // --- Create per-vendor SubOrders for marketplace carts ---
             if (hasMarketplaceItems) {
@@ -764,6 +796,11 @@ public class OrderServiceImpl implements OrderService {
             throw e;
         } catch (Exception e) {
             safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
+            if (savedOrderId != null) {
+                try { loyaltyService.restoreRedeemedPoints(savedOrderId); } catch (Exception ex) {
+                    log.error("Failed to restore loyalty points for order {}: {}", savedOrderId, ex.getMessage());
+                }
+            }
             throw e;
         } finally {
             releaseLocks(acquiredLocks, lockToken);
@@ -863,6 +900,12 @@ public class OrderServiceImpl implements OrderService {
             if (order.isMarketplaceOrder()) {
                 recordSubOrderCommission(order);
             }
+            try {
+                long companyId = resolveOrderCompanyId(order.getItems());
+                loyaltyService.recordOrderEarn(order, companyId);
+            } catch (Exception e) {
+                log.error("[LOYALTY] Failed to record earn for order {}: {}", order.getId(), e.getMessage());
+            }
         });
     }
 
@@ -946,6 +989,12 @@ public class OrderServiceImpl implements OrderService {
             order.setCancellationReason(backend.models.enums.CancellationReason.STALE_TIMEOUT);
         }
         orderRepository.save(order);
+
+        try {
+            loyaltyService.restoreRedeemedPoints(order.getId());
+        } catch (Exception e) {
+            log.error("Failed to restore loyalty points for compensated order {}: {}", order.getId(), e.getMessage());
+        }
     }
 
     /**
@@ -2209,6 +2258,24 @@ public class OrderServiceImpl implements OrderService {
             List<Long> itemIds = vendorItems.stream().map(OrderItem::getId).toList();
             orderItemRepository.setSubOrderId(saved.getId(), itemIds);
         }
+    }
+
+    /**
+     * Resolves the company ID to use for the loyalty program for a given set of order items.
+     * For standalone orders, uses the first product's company. For marketplace orders, uses the marketplace company.
+     */
+    private long resolveOrderCompanyId(List<OrderItem> items) {
+        if (items == null || items.isEmpty()) return 0L;
+        for (OrderItem item : items) {
+            if (item.getProduct() != null) {
+                // If there's a marketplace context, the marketplace company owns the loyalty program
+                if (item.getProduct().getMarketplaceId() != null) {
+                    return item.getProduct().getMarketplaceId();
+                }
+                return item.getProduct().getCompany().getId();
+            }
+        }
+        return 0L;
     }
 
     /**

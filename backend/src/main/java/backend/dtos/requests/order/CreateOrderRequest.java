@@ -43,6 +43,10 @@ public class CreateOrderRequest {
     @Size(max = 64)
     private String riskVerificationToken;
 
+    /** Loyalty points to redeem for a discount on this order. Null or 0 = don't use points. */
+    @Min(value = 0, message = "Loyalty points to redeem cannot be negative")
+    private Integer loyaltyPointsToRedeem;
+
     @Getter
     @Setter
     public static class OrderItemRequest {
