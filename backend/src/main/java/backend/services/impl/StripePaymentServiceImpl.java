@@ -6,6 +6,8 @@ import com.stripe.exception.CardException;
 import com.stripe.exception.RateLimitException;
 import com.stripe.exception.SignatureVerificationException;
 import com.stripe.exception.StripeException;
+import com.stripe.model.Account;
+import com.stripe.model.AccountLink;
 import com.stripe.model.Charge;
 import com.stripe.model.Customer;
 import com.stripe.model.Event;
@@ -18,6 +20,8 @@ import com.stripe.model.SetupIntent;
 import com.stripe.model.StripeObject;
 import com.stripe.model.Subscription;
 import com.stripe.net.Webhook;
+import com.stripe.param.AccountCreateParams;
+import com.stripe.param.AccountLinkCreateParams;
 import com.stripe.param.CustomerCreateParams;
 import com.stripe.param.PaymentIntentCancelParams;
 import com.stripe.param.PaymentIntentCreateParams;
@@ -533,6 +537,70 @@ public class StripePaymentServiceImpl implements PaymentService {
             case MONTH -> ChronoUnit.MONTHS;
             case YEAR  -> ChronoUnit.YEARS;
         };
+    }
+
+    // -------------------------------------------------------------------------
+    // Stripe Connect Express
+    // -------------------------------------------------------------------------
+
+    @Override
+    public ConnectAccountResult createConnectAccount(String email, String companyName, Map<String, String> metadata) {
+        return executeWithRetry(() -> {
+            AccountCreateParams.Builder params = AccountCreateParams.builder()
+                    .setType(AccountCreateParams.Type.EXPRESS)
+                    .setEmail(email)
+                    .setBusinessProfile(
+                            AccountCreateParams.BusinessProfile.builder()
+                                    .setName(companyName)
+                                    .build()
+                    )
+                    .setCapabilities(
+                            AccountCreateParams.Capabilities.builder()
+                                    .setTransfers(AccountCreateParams.Capabilities.Transfers.builder().setRequested(true).build())
+                                    .build()
+                    );
+
+            if (metadata != null && !metadata.isEmpty()) {
+                params.putAllMetadata(metadata);
+            }
+
+            Account account = Account.create(params.build());
+            return toConnectAccountResult(account);
+        });
+    }
+
+    @Override
+    public ConnectOnboardingLinkResult generateConnectOnboardingLink(
+            String stripeConnectAccountId, String returnUrl, String refreshUrl) {
+        return executeWithRetry(() -> {
+            AccountLinkCreateParams params = AccountLinkCreateParams.builder()
+                    .setAccount(stripeConnectAccountId)
+                    .setType(AccountLinkCreateParams.Type.ACCOUNT_ONBOARDING)
+                    .setReturnUrl(returnUrl)
+                    .setRefreshUrl(refreshUrl)
+                    .build();
+
+            AccountLink link = AccountLink.create(params);
+            java.time.Instant expiresAt = link.getExpiresAt() != null
+                    ? java.time.Instant.ofEpochSecond(link.getExpiresAt())
+                    : null;
+            return new ConnectOnboardingLinkResult(link.getUrl(), expiresAt);
+        });
+    }
+
+    @Override
+    public ConnectAccountResult getConnectAccountStatus(String stripeConnectAccountId) {
+        return executeWithRetry(() -> {
+            Account account = Account.retrieve(stripeConnectAccountId);
+            return toConnectAccountResult(account);
+        });
+    }
+
+    private ConnectAccountResult toConnectAccountResult(Account account) {
+        boolean chargesEnabled  = Boolean.TRUE.equals(account.getChargesEnabled());
+        boolean payoutsEnabled  = Boolean.TRUE.equals(account.getPayoutsEnabled());
+        boolean detailsSubmitted = Boolean.TRUE.equals(account.getDetailsSubmitted());
+        return new ConnectAccountResult(account.getId(), chargesEnabled, payoutsEnabled, detailsSubmitted);
     }
 
     private RuntimeException mapStripeException(StripeException e) {

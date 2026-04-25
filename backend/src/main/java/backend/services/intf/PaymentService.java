@@ -254,4 +254,56 @@ public interface PaymentService {
      * to re-sync local state from Stripe (the source of truth for billing).
      */
     SubscriptionResult retrieveSubscription(String stripeSubscriptionId);
+
+    // -------------------------------------------------------------------------
+    // Stripe Connect Express (marketplace vendor payouts)
+    // -------------------------------------------------------------------------
+
+    /**
+     * A newly created or retrieved Stripe Connect Express account.
+     *
+     * @param accountId            Stripe Connect account ID (acct_...)
+     * @param chargesEnabled       whether the account can accept charges
+     * @param payoutsEnabled       whether the account can receive payouts
+     * @param detailsSubmitted     whether the vendor has submitted their Stripe KYC details
+     */
+    record ConnectAccountResult(
+            String accountId,
+            boolean chargesEnabled,
+            boolean payoutsEnabled,
+            boolean detailsSubmitted
+    ) {}
+
+    /**
+     * A Stripe-hosted AccountLink URL for the vendor to complete Connect Express onboarding.
+     *
+     * @param url       redirect the vendor to this URL to complete KYC / banking setup
+     * @param expiresAt when the link expires (typically ~5 minutes)
+     */
+    record ConnectOnboardingLinkResult(String url, java.time.Instant expiresAt) {}
+
+    /**
+     * Creates a Stripe Connect Express account for a vendor.
+     *
+     * @param email       vendor business email
+     * @param companyName vendor legal company name
+     * @param metadata    optional key-value metadata to attach
+     */
+    ConnectAccountResult createConnectAccount(String email, String companyName, Map<String, String> metadata);
+
+    /**
+     * Generates a Stripe-hosted onboarding link for the vendor to complete KYC / banking.
+     *
+     * @param stripeConnectAccountId the vendor's Stripe Connect account ID
+     * @param returnUrl              URL to redirect to after the vendor completes / exits onboarding
+     * @param refreshUrl             URL to redirect to if the link expires before submission
+     */
+    ConnectOnboardingLinkResult generateConnectOnboardingLink(
+            String stripeConnectAccountId, String returnUrl, String refreshUrl);
+
+    /**
+     * Fetches the current status of a Stripe Connect account. Use this to sync
+     * {@code chargesEnabled} / {@code payoutsEnabled} from Stripe after {@code account.updated} webhooks.
+     */
+    ConnectAccountResult getConnectAccountStatus(String stripeConnectAccountId);
 }
