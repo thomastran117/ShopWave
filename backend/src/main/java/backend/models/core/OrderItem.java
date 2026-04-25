@@ -106,4 +106,8 @@ public class OrderItem {
      */
     @Column(name = "vendor_id", nullable = true)
     private Long vendorId;
+
+    /** FK to the SubOrder this item belongs to. Null for non-marketplace orders. */
+    @Column(name = "sub_order_id", nullable = true)
+    private Long subOrderId;
 }

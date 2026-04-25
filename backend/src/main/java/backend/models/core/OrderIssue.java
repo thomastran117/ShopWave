@@ -72,6 +72,10 @@ public class OrderIssue {
     @Column(nullable = true)
     private Long customerCreditId;
 
+    /** Loose FK to sub_orders.id — set for issues on marketplace vendor sub-orders. */
+    @Column(nullable = true)
+    private Long subOrderId;
+
     @CreatedDate
     @Column(nullable = false, updatable = false)
     private Instant createdAt;

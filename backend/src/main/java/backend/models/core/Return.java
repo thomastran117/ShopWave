@@ -115,4 +115,8 @@ public class Return {
 
     @Column(nullable = true)
     private Instant completedAt;
+
+    /** Loose FK to sub_orders.id — set for returns on marketplace vendor sub-orders. */
+    @Column(nullable = true)
+    private Long subOrderId;
 }

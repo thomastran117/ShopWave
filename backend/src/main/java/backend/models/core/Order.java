@@ -44,6 +44,13 @@ public class Order {
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItem> items = new ArrayList<>();
 
+    @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private List<SubOrder> subOrders = new ArrayList<>();
+
+    /** True when at least one item in this order belongs to a marketplace vendor. */
+    @Column(nullable = false)
+    private boolean marketplaceOrder = false;
+
     @Column(nullable = false, precision = 14, scale = 2)
     private BigDecimal totalAmount;
 

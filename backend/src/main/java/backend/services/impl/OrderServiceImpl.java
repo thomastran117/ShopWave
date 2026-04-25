@@ -25,11 +25,15 @@ import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
 import backend.exceptions.http.RiskStepUpRequiredException;
 import backend.models.core.BundleItem;
+import backend.models.core.CommissionRecord;
 import backend.models.core.InventoryAdjustment;
 import backend.models.core.LocationStock;
+import backend.models.core.MarketplaceVendor;
 import backend.models.core.Order;
 import backend.models.core.OrderCompensation;
 import backend.models.core.OrderItem;
+import backend.models.core.SubOrder;
+import backend.models.enums.SubOrderStatus;
 import backend.models.core.Product;
 import backend.models.core.ProductBundle;
 import backend.models.core.ProductVariant;
@@ -58,7 +62,12 @@ import backend.models.enums.RiskAssessmentKind;
 import backend.models.enums.RiskMode;
 import backend.models.enums.RiskReviewStatus;
 import backend.repositories.BundleRepository;
+import backend.repositories.CommissionRecordRepository;
 import backend.repositories.CouponRepository;
+import backend.repositories.MarketplaceVendorRepository;
+import backend.repositories.OrderItemRepository;
+import backend.repositories.SubOrderRepository;
+import backend.services.intf.CommissionEngine;
 import backend.repositories.CouponPerUserCountRepository;
 import backend.repositories.CouponRedemptionRepository;
 import backend.repositories.CompanyRepository;
@@ -106,6 +115,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class OrderServiceImpl implements OrderService {
@@ -150,6 +160,11 @@ public class OrderServiceImpl implements OrderService {
     private final RiskProperties riskProperties;
     private final DeviceService deviceService;
     private final EmailVerificationService emailVerificationService;
+    private final MarketplaceVendorRepository marketplaceVendorRepository;
+    private final SubOrderRepository subOrderRepository;
+    private final OrderItemRepository orderItemRepository;
+    private final CommissionEngine commissionEngine;
+    private final CommissionRecordRepository commissionRecordRepository;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
     private ReturnService returnService;
 
@@ -181,7 +196,12 @@ public class OrderServiceImpl implements OrderService {
             FailedPaymentAttemptRepository failedPaymentAttemptRepository,
             RiskProperties riskProperties,
             DeviceService deviceService,
-            EmailVerificationService emailVerificationService) {
+            EmailVerificationService emailVerificationService,
+            MarketplaceVendorRepository marketplaceVendorRepository,
+            SubOrderRepository subOrderRepository,
+            OrderItemRepository orderItemRepository,
+            CommissionEngine commissionEngine,
+            CommissionRecordRepository commissionRecordRepository) {
         this.orderRepository = orderRepository;
         this.compensationRepository = compensationRepository;
         this.productRepository = productRepository;
@@ -210,6 +230,11 @@ public class OrderServiceImpl implements OrderService {
         this.riskProperties = riskProperties;
         this.deviceService = deviceService;
         this.emailVerificationService = emailVerificationService;
+        this.marketplaceVendorRepository = marketplaceVendorRepository;
+        this.subOrderRepository = subOrderRepository;
+        this.orderItemRepository = orderItemRepository;
+        this.commissionEngine = commissionEngine;
+        this.commissionRecordRepository = commissionRecordRepository;
     }
 
     /** Setter injection breaks the circular dependency: ReturnService → OrderServiceImpl → ReturnService. */
@@ -580,6 +605,10 @@ public class OrderServiceImpl implements OrderService {
                     .setScale(0, RoundingMode.HALF_UP)
                     .longValueExact();
 
+            // --- Marketplace: stamp vendorId on items BEFORE cascade-save so it's persisted
+            //     atomically with the order. SubOrders are wired up after the order is saved.
+            boolean hasMarketplaceItems = stampVendorIds(orderItems);
+
             Order order = new Order();
             order.setUser(user);
             order.setTotalAmount(finalTotal);
@@ -596,6 +625,13 @@ public class OrderServiceImpl implements OrderService {
             order.setItems(orderItems);
 
             order = orderRepository.save(order);
+
+            // --- Create per-vendor SubOrders for marketplace carts ---
+            if (hasMarketplaceItems) {
+                order.setMarketplaceOrder(true);
+                createSubOrders(order, orderItems);
+                orderRepository.save(order);
+            }
 
             // Atomically increment coupon usedCount and record redemption
             if (appliedCoupon != null) {
@@ -820,6 +856,9 @@ public class OrderServiceImpl implements OrderService {
             order.setPaidAt(Instant.now());
             orderRepository.save(order);
             releaseReservation(order.getId());
+            if (order.isMarketplaceOrder()) {
+                recordSubOrderCommission(order);
+            }
         });
     }
 
@@ -2066,7 +2105,15 @@ public class OrderServiceImpl implements OrderService {
             order.getItems().add(item);
         }
 
+        boolean hasMarketplaceItems = stampVendorIds(order.getItems());
         Order saved = orderRepository.save(order);
+
+        if (hasMarketplaceItems) {
+            saved.setMarketplaceOrder(true);
+            createSubOrders(saved, saved.getItems());
+            saved = orderRepository.save(saved);
+            recordSubOrderCommission(saved);
+        }
 
         try {
             User user = subscription.getUser();
@@ -2077,5 +2124,118 @@ public class OrderServiceImpl implements OrderService {
         }
 
         return saved;
+    }
+
+    // -------------------------------------------------------------------------
+    // Marketplace helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * For each item whose product is listed on a marketplace, resolves the owning
+     * MarketplaceVendor and stamps {@code item.vendorId}. Uses a single batch query
+     * per marketplace to avoid N+1 lookups. Returns true if any marketplace items exist.
+     */
+    private boolean stampVendorIds(List<OrderItem> items) {
+        // Group product company IDs by marketplace
+        Map<Long, Set<Long>> marketplaceToCompanyIds = new HashMap<>();
+        for (OrderItem item : items) {
+            if (item.getProduct() != null && item.getProduct().getMarketplaceId() != null) {
+                marketplaceToCompanyIds
+                        .computeIfAbsent(item.getProduct().getMarketplaceId(), k -> new HashSet<>())
+                        .add(item.getProduct().getCompany().getId());
+            }
+        }
+        if (marketplaceToCompanyIds.isEmpty()) return false;
+
+        // Batch-lookup vendors; key = "marketplaceId:companyId"
+        Map<String, Long> companyKeyToVendorId = new HashMap<>();
+        for (Map.Entry<Long, Set<Long>> entry : marketplaceToCompanyIds.entrySet()) {
+            long mId = entry.getKey();
+            marketplaceVendorRepository
+                    .findByMarketplaceIdAndVendorCompanyIdIn(mId, entry.getValue())
+                    .forEach(mv -> companyKeyToVendorId.put(
+                            mId + ":" + mv.getVendorCompany().getId(), mv.getId()));
+        }
+
+        for (OrderItem item : items) {
+            if (item.getProduct() != null && item.getProduct().getMarketplaceId() != null) {
+                String key = item.getProduct().getMarketplaceId() + ":" + item.getProduct().getCompany().getId();
+                item.setVendorId(companyKeyToVendorId.get(key));
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Groups items by vendorId and creates one {@link SubOrder} per vendor.
+     * Updates each item's {@code subOrderId} via a batch repository call.
+     * Items with no vendorId (standalone products in a mixed cart) are skipped.
+     */
+    private void createSubOrders(Order order, List<OrderItem> items) {
+        Map<Long, List<OrderItem>> byVendor = items.stream()
+                .filter(i -> i.getVendorId() != null)
+                .collect(Collectors.groupingBy(OrderItem::getVendorId));
+
+        for (Map.Entry<Long, List<OrderItem>> entry : byVendor.entrySet()) {
+            Long mvId = entry.getKey();
+            List<OrderItem> vendorItems = entry.getValue();
+
+            MarketplaceVendor vendor = marketplaceVendorRepository.findById(mvId).orElse(null);
+            if (vendor == null) {
+                log.warn("[MARKETPLACE] MarketplaceVendor {} not found — skipping SubOrder creation for order {}",
+                        mvId, order.getId());
+                continue;
+            }
+
+            BigDecimal subtotal = vendorItems.stream()
+                    .map(i -> i.getUnitPrice().multiply(BigDecimal.valueOf(i.getQuantity())))
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            SubOrder subOrder = new SubOrder();
+            subOrder.setOrder(order);
+            subOrder.setMarketplaceVendor(vendor);
+            subOrder.setMarketplaceId(vendor.getMarketplace().getId());
+            subOrder.setStatus(SubOrderStatus.PENDING);
+            subOrder.setSubtotal(subtotal);
+            subOrder.setTotalAmount(subtotal);
+            subOrder.setCurrency(order.getCurrency());
+
+            SubOrder saved = subOrderRepository.save(subOrder);
+
+            List<Long> itemIds = vendorItems.stream().map(OrderItem::getId).toList();
+            orderItemRepository.setSubOrderId(saved.getId(), itemIds);
+        }
+    }
+
+    /**
+     * Computes and persists a {@link CommissionRecord} for each sub-order on a
+     * just-paid marketplace order. Failures are logged but do not abort the transaction.
+     */
+    private void recordSubOrderCommission(Order order) {
+        List<SubOrder> subOrders = subOrderRepository.findAllByOrderId(order.getId());
+        Instant paidAt = order.getPaidAt();
+        for (SubOrder subOrder : subOrders) {
+            subOrder.setPaidAt(paidAt);
+            try {
+                CommissionEngine.CommissionResult result = commissionEngine.compute(subOrder);
+                subOrder.setCommissionAmount(result.commissionAmount());
+                subOrder.setNetVendorAmount(result.netVendorAmount());
+                subOrderRepository.save(subOrder);
+
+                CommissionRecord record = new CommissionRecord();
+                record.setSubOrder(subOrder);
+                record.setVendorId(subOrder.getMarketplaceVendor().getId());
+                record.setMarketplaceId(subOrder.getMarketplaceId());
+                record.setCommissionRate(result.commissionRate());
+                record.setGrossAmount(result.grossAmount());
+                record.setCommissionAmount(result.commissionAmount());
+                record.setNetVendorAmount(result.netVendorAmount());
+                record.setCurrency(result.currency());
+                commissionRecordRepository.save(record);
+            } catch (Exception e) {
+                log.warn("[COMMISSION] Failed to record commission for sub_order {} on order {}: {}",
+                        subOrder.getId(), order.getId(), e.getMessage());
+            }
+        }
     }
 }
