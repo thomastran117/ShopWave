@@ -758,6 +758,15 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public OrderResponse cancelOrder(long orderId, long userId) {
+        return cancelOrderInternal(orderId, userId, backend.models.enums.CancellationReason.CUSTOMER_REQUEST);
+    }
+
+    /**
+     * Same flow as the public {@link #cancelOrder} but lets internal callers
+     * (risk reject, payment failure escalation, etc.) tag the cancellation
+     * with the correct {@link backend.models.enums.CancellationReason}.
+     */
+    OrderResponse cancelOrderInternal(long orderId, long userId, backend.models.enums.CancellationReason reason) {
         Order order = orderRepository.findByIdAndUserId(orderId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
 
@@ -768,6 +777,8 @@ public class OrderServiceImpl implements OrderService {
         }
 
         order.setStatus(OrderStatus.CANCELLED);
+        order.setCancelledAt(Instant.now());
+        order.setCancellationReason(reason);
 
         if (order.getPaymentIntentId() != null) {
             try {
@@ -806,6 +817,7 @@ public class OrderServiceImpl implements OrderService {
         orderRepository.findByPaymentIntentId(paymentIntentId).ifPresent(order -> {
             // Always PAID — backordered items are tracked via FulfillmentStatus.BACKORDERED per item.
             order.setStatus(OrderStatus.PAID);
+            order.setPaidAt(Instant.now());
             orderRepository.save(order);
             releaseReservation(order.getId());
         });
@@ -821,6 +833,8 @@ public class OrderServiceImpl implements OrderService {
 
             order.setStatus(OrderStatus.FAILED);
             order.setFailureReason("Payment failed via webhook");
+            order.setCancelledAt(Instant.now());
+            order.setCancellationReason(backend.models.enums.CancellationReason.PAYMENT_FAILED);
 
             // Feed the failed-payment velocity signal. The webhook itself has no IP;
             // recover it from the risk assessment recorded at checkout time.
@@ -885,6 +899,8 @@ public class OrderServiceImpl implements OrderService {
         if (order.getStatus() == OrderStatus.RESERVED) {
             order.setStatus(OrderStatus.FAILED);
             order.setFailureReason("Compensated by scheduler — stale reserved order");
+            order.setCancelledAt(Instant.now());
+            order.setCancellationReason(backend.models.enums.CancellationReason.STALE_TIMEOUT);
         }
         orderRepository.save(order);
     }
@@ -1528,6 +1544,7 @@ public class OrderServiceImpl implements OrderService {
             }
         }
         order.setStatus(OrderStatus.PACKED);
+        order.setPackedAt(Instant.now());
         return toCompanyOrderResponse(orderRepository.save(order), companyId);
     }
 
@@ -1876,7 +1893,8 @@ public class OrderServiceImpl implements OrderService {
         }
 
         // Delegate stock-restore + order-cancel to the existing cancel pipeline.
-        OrderResponse cancelled = cancelOrder(orderId, order.getUser().getId());
+        OrderResponse cancelled = cancelOrderInternal(orderId, order.getUser().getId(),
+                backend.models.enums.CancellationReason.RISK_REJECTED);
 
         review.setStatus(RiskReviewStatus.REJECTED);
         review.setDecidedByUserId(ownerId);
@@ -2014,6 +2032,7 @@ public class OrderServiceImpl implements OrderService {
         order.setSubscription(subscription);
         order.setRenewal(true);
         order.setStripeInvoiceId(stripeInvoiceId);
+        order.setPaidAt(Instant.now());
         order.setCompensated(true); // No reservation lifecycle: this order is born paid.
 
         for (SubscriptionItem si : subscription.getItems()) {

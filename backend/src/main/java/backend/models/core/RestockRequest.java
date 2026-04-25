@@ -57,6 +57,10 @@ public class RestockRequest {
     @Column(nullable = true)
     private LocalDate expectedArrivalDate;
 
+    /** Set when status transitions to RECEIVED. Used by the SLA dashboard for supplier-lateness. */
+    @Column(nullable = true)
+    private Instant receivedAt;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private RestockStatus status = RestockStatus.PENDING;

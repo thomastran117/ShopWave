@@ -71,4 +71,29 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     List<Order> findPaidOrdersWithBackorderedVariant(
             @Param("variantId") long variantId,
             @Param("backordered") FulfillmentStatus backordered);
+
+    // -------------------------------------------------------------------------
+    // SLA / Operations Dashboard support
+    // -------------------------------------------------------------------------
+
+    /**
+     * Total distinct orders for the company in the window — denominator for backorder rate.
+     * Counts orders by their {@code createdAt} timestamp.
+     */
+    @Query("SELECT COUNT(DISTINCT o) FROM Order o JOIN o.items i " +
+           "WHERE i.product.company.id = :companyId " +
+           "AND o.createdAt BETWEEN :from AND :to")
+    long countOrdersInWindow(@Param("companyId") long companyId,
+                             @Param("from") Instant from, @Param("to") Instant to);
+
+    /**
+     * Distinct orders in the window that contained at least one BACKORDERED item — numerator
+     * for backorder rate on the SLA dashboard.
+     */
+    @Query("SELECT COUNT(DISTINCT o) FROM Order o JOIN o.items i " +
+           "WHERE i.product.company.id = :companyId " +
+           "AND o.createdAt BETWEEN :from AND :to " +
+           "AND i.fulfillmentStatus = backend.models.enums.FulfillmentStatus.BACKORDERED")
+    long countOrdersWithBackorderedItemsInWindow(@Param("companyId") long companyId,
+                                                 @Param("from") Instant from, @Param("to") Instant to);
 }

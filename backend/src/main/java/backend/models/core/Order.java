@@ -9,6 +9,7 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
+import backend.models.enums.CancellationReason;
 import backend.models.enums.OrderStatus;
 import backend.models.enums.RiskAction;
 
@@ -85,6 +86,27 @@ public class Order {
 
     @Column(nullable = false)
     private boolean compensated = false;
+
+    // -------------------------------------------------------------------------
+    // SLA timestamps
+    // -------------------------------------------------------------------------
+
+    /** When Stripe webhook confirmed payment. Null while RESERVED. */
+    @Column(nullable = true)
+    private Instant paidAt;
+
+    /** When the merchant marked the order as PACKED. Null until that transition. */
+    @Column(nullable = true)
+    private Instant packedAt;
+
+    /** When the order was cancelled (customer, payment failure, risk reject, or scheduler). */
+    @Column(nullable = true)
+    private Instant cancelledAt;
+
+    /** Why the order was cancelled. Null on non-cancelled orders. */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = true, length = 25)
+    private CancellationReason cancellationReason;
 
     // -------------------------------------------------------------------------
     // Fulfillment tracking

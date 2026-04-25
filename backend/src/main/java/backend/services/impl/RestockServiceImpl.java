@@ -313,6 +313,7 @@ public class RestockServiceImpl implements RestockService {
             // Update restock request
             rr.setStatus(RestockStatus.RECEIVED);
             rr.setReceivedQty(receivedQty);
+            rr.setReceivedAt(java.time.Instant.now());
 
             // Trigger backorder fulfillment FIFO
             orderService.fulfillPendingBackorders(productId, variantId, receivedQty, locationId);
