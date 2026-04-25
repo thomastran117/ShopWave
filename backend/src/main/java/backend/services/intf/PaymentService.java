@@ -306,4 +306,34 @@ public interface PaymentService {
      * {@code chargesEnabled} / {@code payoutsEnabled} from Stripe after {@code account.updated} webhooks.
      */
     ConnectAccountResult getConnectAccountStatus(String stripeConnectAccountId);
+
+    // -------------------------------------------------------------------------
+    // Stripe Connect transfers (vendor payouts)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Result of a Stripe transfer to a connected account.
+     *
+     * @param transferId    Stripe transfer ID (tr_...)
+     * @param amountCents   amount transferred in smallest currency unit
+     * @param currency      ISO 4217 lowercase currency code
+     * @param status        Stripe transfer status (e.g. "pending", "paid")
+     */
+    record TransferResult(String transferId, long amountCents, String currency, String status) {}
+
+    /**
+     * Creates a Stripe transfer from the platform account to a connected vendor account.
+     *
+     * @param destinationAccountId  the vendor's Stripe Connect account ID (acct_...)
+     * @param amountCents           amount to transfer in smallest currency unit
+     * @param currency              ISO 4217 lowercase currency code
+     * @param transferGroup         groups related charges and transfers (e.g. "order_123")
+     * @param metadata              optional key-value metadata
+     */
+    TransferResult createTransfer(
+            String destinationAccountId,
+            long amountCents,
+            String currency,
+            String transferGroup,
+            Map<String, String> metadata);
 }

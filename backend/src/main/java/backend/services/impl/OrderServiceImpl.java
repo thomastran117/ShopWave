@@ -64,6 +64,7 @@ import backend.models.enums.RiskReviewStatus;
 import backend.repositories.BundleRepository;
 import backend.repositories.CommissionRecordRepository;
 import backend.repositories.CouponRepository;
+import backend.repositories.VendorBalanceRepository;
 import backend.repositories.MarketplaceVendorRepository;
 import backend.repositories.OrderItemRepository;
 import backend.repositories.SubOrderRepository;
@@ -165,6 +166,7 @@ public class OrderServiceImpl implements OrderService {
     private final OrderItemRepository orderItemRepository;
     private final CommissionEngine commissionEngine;
     private final CommissionRecordRepository commissionRecordRepository;
+    private final VendorBalanceRepository vendorBalanceRepository;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
     private ReturnService returnService;
 
@@ -201,7 +203,8 @@ public class OrderServiceImpl implements OrderService {
             SubOrderRepository subOrderRepository,
             OrderItemRepository orderItemRepository,
             CommissionEngine commissionEngine,
-            CommissionRecordRepository commissionRecordRepository) {
+            CommissionRecordRepository commissionRecordRepository,
+            VendorBalanceRepository vendorBalanceRepository) {
         this.orderRepository = orderRepository;
         this.compensationRepository = compensationRepository;
         this.productRepository = productRepository;
@@ -235,6 +238,7 @@ public class OrderServiceImpl implements OrderService {
         this.orderItemRepository = orderItemRepository;
         this.commissionEngine = commissionEngine;
         this.commissionRecordRepository = commissionRecordRepository;
+        this.vendorBalanceRepository = vendorBalanceRepository;
     }
 
     /** Setter injection breaks the circular dependency: ReturnService → OrderServiceImpl → ReturnService. */
@@ -2232,6 +2236,17 @@ public class OrderServiceImpl implements OrderService {
                 record.setNetVendorAmount(result.netVendorAmount());
                 record.setCurrency(result.currency());
                 commissionRecordRepository.save(record);
+
+                // Credit VendorBalance.pendingCents atomically (hold period releases via scheduler)
+                long pendingCents = result.netVendorAmount()
+                        .multiply(BigDecimal.valueOf(100)).longValue();
+                long grossCents = result.grossAmount()
+                        .multiply(BigDecimal.valueOf(100)).longValue();
+                long commissionCents = result.commissionAmount()
+                        .multiply(BigDecimal.valueOf(100)).longValue();
+                vendorBalanceRepository.upsertPending(
+                        subOrder.getMarketplaceVendor().getId(),
+                        pendingCents, grossCents, commissionCents, result.currency());
             } catch (Exception e) {
                 log.warn("[COMMISSION] Failed to record commission for sub_order {} on order {}: {}",
                         subOrder.getId(), order.getId(), e.getMessage());

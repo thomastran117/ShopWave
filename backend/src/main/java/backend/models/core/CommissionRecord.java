@@ -58,6 +58,13 @@ public class CommissionRecord {
     @Column(nullable = false, length = 3)
     private String currency;
 
+    /**
+     * True once the scheduler has moved this record's netVendorAmount from
+     * VendorBalance.pendingCents to availableCents after the hold period expires.
+     */
+    @Column(nullable = false)
+    private boolean holdReleased = false;
+
     @CreatedDate
     @Column(nullable = false, updatable = false)
     private Instant computedAt;

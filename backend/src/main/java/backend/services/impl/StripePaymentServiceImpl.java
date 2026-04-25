@@ -9,6 +9,8 @@ import com.stripe.exception.StripeException;
 import com.stripe.model.Account;
 import com.stripe.model.AccountLink;
 import com.stripe.model.Charge;
+import com.stripe.model.Transfer;
+import com.stripe.param.TransferCreateParams;
 import com.stripe.model.Customer;
 import com.stripe.model.Event;
 import com.stripe.model.Invoice;
@@ -259,6 +261,21 @@ public class StripePaymentServiceImpl implements PaymentService {
                 Map<String, String> meta = new HashMap<>();
                 if (si.getCustomer() != null)      meta.put("customerId", si.getCustomer());
                 if (si.getPaymentMethod() != null) meta.put("paymentMethodId", si.getPaymentMethod());
+                return meta;
+            } else if ("account.updated".equals(eventType) && stripeObject instanceof Account a) {
+                Map<String, String> meta = new HashMap<>();
+                meta.put("chargesEnabled",   String.valueOf(Boolean.TRUE.equals(a.getChargesEnabled())));
+                meta.put("payoutsEnabled",   String.valueOf(Boolean.TRUE.equals(a.getPayoutsEnabled())));
+                meta.put("detailsSubmitted", String.valueOf(Boolean.TRUE.equals(a.getDetailsSubmitted())));
+                return meta;
+            } else if (eventType.startsWith("transfer.") && stripeObject instanceof Transfer t) {
+                Map<String, String> meta = new HashMap<>();
+                if (t.getAmount()   != null) meta.put("amountCents", String.valueOf(t.getAmount()));
+                if (t.getCurrency() != null) meta.put("currency", t.getCurrency());
+                if (t.getTransferGroup() != null) meta.put("transferGroup", t.getTransferGroup());
+                if (t.getMetadata() != null) {
+                    t.getMetadata().forEach((k, v) -> meta.putIfAbsent(k, v));
+                }
                 return meta;
             }
         } catch (Exception e) {
@@ -593,6 +610,31 @@ public class StripePaymentServiceImpl implements PaymentService {
         return executeWithRetry(() -> {
             Account account = Account.retrieve(stripeConnectAccountId);
             return toConnectAccountResult(account);
+        });
+    }
+
+    @Override
+    public TransferResult createTransfer(String destinationAccountId, long amountCents,
+                                         String currency, String transferGroup,
+                                         Map<String, String> metadata) {
+        return executeWithRetry(() -> {
+            TransferCreateParams.Builder params = TransferCreateParams.builder()
+                    .setAmount(amountCents)
+                    .setCurrency(currency.toLowerCase())
+                    .setDestination(destinationAccountId)
+                    .setTransferGroup(transferGroup);
+
+            if (metadata != null && !metadata.isEmpty()) {
+                params.putAllMetadata(metadata);
+            }
+
+            Transfer transfer = Transfer.create(params.build());
+            return new TransferResult(
+                    transfer.getId(),
+                    transfer.getAmount() != null ? transfer.getAmount() : 0L,
+                    transfer.getCurrency(),
+                    "pending"
+            );
         });
     }
 

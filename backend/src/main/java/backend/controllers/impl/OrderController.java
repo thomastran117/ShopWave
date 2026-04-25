@@ -20,6 +20,8 @@ import backend.services.intf.PaymentService;
 import backend.services.intf.ReplacementOrderService;
 import backend.services.intf.ReturnService;
 import backend.services.intf.SubscriptionService;
+import backend.services.intf.VendorOnboardingService;
+import backend.services.intf.VendorPayoutService;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -34,15 +36,21 @@ public class OrderController {
     private final ReturnService returnService;
     private final ReplacementOrderService replacementOrderService;
     private final SubscriptionService subscriptionService;
+    private final VendorPayoutService vendorPayoutService;
+    private final VendorOnboardingService vendorOnboardingService;
 
     public OrderController(OrderService orderService, PaymentService paymentService,
                            ReturnService returnService, ReplacementOrderService replacementOrderService,
-                           SubscriptionService subscriptionService) {
+                           SubscriptionService subscriptionService,
+                           VendorPayoutService vendorPayoutService,
+                           VendorOnboardingService vendorOnboardingService) {
         this.orderService = orderService;
         this.paymentService = paymentService;
         this.returnService = returnService;
         this.replacementOrderService = replacementOrderService;
         this.subscriptionService = subscriptionService;
+        this.vendorPayoutService = vendorPayoutService;
+        this.vendorOnboardingService = vendorOnboardingService;
     }
 
     @PostMapping
@@ -152,6 +160,22 @@ public class OrderController {
                     String paymentMethodId = event.metadata().get("paymentMethodId");
                     if (customerId != null && paymentMethodId != null) {
                         subscriptionService.handleSetupIntentSucceeded(customerId, paymentMethodId);
+                    }
+                }
+                case "account.updated" -> {
+                    if (event.objectId() != null) {
+                        vendorOnboardingService.syncStripeConnectStatus(event.objectId());
+                    }
+                }
+                case "transfer.paid" -> {
+                    if (event.objectId() != null) {
+                        vendorPayoutService.handleTransferPaid(event.objectId());
+                    }
+                }
+                case "transfer.failed" -> {
+                    if (event.objectId() != null) {
+                        String reason = event.metadata().getOrDefault("failureReason", "Transfer failed");
+                        vendorPayoutService.handleTransferFailed(event.objectId(), reason);
                     }
                 }
                 default -> { }
