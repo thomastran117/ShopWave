@@ -25,6 +25,8 @@ import java.util.List;
         @Index(name = "idx_vendor_payout_vendor", columnList = "vendor_id"),
         @Index(name = "idx_vendor_payout_status", columnList = "vendor_id, status"),
         @Index(name = "idx_vendor_payout_stripe_transfer", columnList = "stripe_transfer_id")
+}, uniqueConstraints = {
+        @UniqueConstraint(name = "uq_vendor_payout_stripe_transfer_id", columnNames = "stripe_transfer_id")
 })
 @EntityListeners(AuditingEntityListener.class)
 public class VendorPayout {

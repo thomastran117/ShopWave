@@ -113,6 +113,8 @@ import backend.services.pricing.CartLine;
 import backend.services.pricing.LineBreakdown;
 import backend.services.pricing.PricingResult;
 
+import org.springframework.dao.DataIntegrityViolationException;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
@@ -892,6 +894,10 @@ public class OrderServiceImpl implements OrderService {
     @Transactional
     public void handlePaymentSuccess(String paymentIntentId) {
         orderRepository.findByPaymentIntentId(paymentIntentId).ifPresent(order -> {
+            if (order.getStatus() == OrderStatus.PAID) {
+                log.debug("payment_intent.succeeded replay ignored — order {} already PAID", order.getId());
+                return;
+            }
             // Always PAID — backordered items are tracked via FulfillmentStatus.BACKORDERED per item.
             order.setStatus(OrderStatus.PAID);
             order.setPaidAt(Instant.now());
@@ -913,6 +919,10 @@ public class OrderServiceImpl implements OrderService {
     @Transactional
     public void handlePaymentFailure(String paymentIntentId) {
         orderRepository.findByPaymentIntentId(paymentIntentId).ifPresent(order -> {
+            if (order.getStatus() == OrderStatus.PAID) {
+                log.warn("payment_intent.payment_failed ignored — order {} is already PAID", order.getId());
+                return;
+            }
             if (orderRepository.markCompensated(order.getId()) == 0) return;
             order.setCompensated(true); // keep entity in sync with DB
             releaseReservation(order.getId());
@@ -1003,6 +1013,10 @@ public class OrderServiceImpl implements OrderService {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void retryCompensation(OrderCompensation compensation) {
+        if (compensationRepository.claimForRetry(compensation.getId()) == 0) {
+            log.debug("Compensation {} already claimed by another worker — skipping", compensation.getId());
+            return;
+        }
         compensation.setAttempts(compensation.getAttempts() + 1);
 
         try {
@@ -2159,7 +2173,16 @@ public class OrderServiceImpl implements OrderService {
         }
 
         boolean hasMarketplaceItems = stampVendorIds(order.getItems());
-        Order saved = orderRepository.save(order);
+        Order saved;
+        try {
+            saved = orderRepository.save(order);
+        } catch (DataIntegrityViolationException e) {
+            // Concurrent invoice.paid delivery — the unique constraint on stripe_invoice_id
+            // rejected the duplicate insert. Treat as idempotent success.
+            return orderRepository.findByStripeInvoiceId(stripeInvoiceId)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Renewal order save failed on duplicate invoice but existing row not found: " + stripeInvoiceId, e));
+        }
 
         if (hasMarketplaceItems) {
             saved.setMarketplaceOrder(true);

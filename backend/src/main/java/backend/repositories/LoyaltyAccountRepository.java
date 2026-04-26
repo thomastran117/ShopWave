@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.Optional;
 
 @Repository
@@ -35,4 +36,18 @@ public interface LoyaltyAccountRepository extends JpaRepository<LoyaltyAccount, 
     @Modifying
     @Query("UPDATE LoyaltyAccount a SET a.pointsBalance = a.pointsBalance + :delta WHERE a.id = :id")
     void addToBalance(@Param("id") long id, @Param("delta") long delta);
+
+    /**
+     * Atomically promotes or demotes the account tier only if it has actually changed.
+     * Handles NULL tier (no tier yet) on both sides. Returns 1 if updated, 0 if already current.
+     * Using an atomic update instead of an entity save prevents two concurrent earn transactions
+     * from overwriting each other's tier decision.
+     */
+    @Modifying
+    @Query("UPDATE LoyaltyAccount a SET a.currentTierId = :tierId, a.tierUpdatedAt = :now " +
+           "WHERE a.id = :id AND (" +
+           "  (:tierId IS NULL AND a.currentTierId IS NOT NULL) OR " +
+           "  (:tierId IS NOT NULL AND a.currentTierId != :tierId)" +
+           ")")
+    int updateTierIfChanged(@Param("id") long id, @Param("tierId") Long tierId, @Param("now") Instant now);
 }

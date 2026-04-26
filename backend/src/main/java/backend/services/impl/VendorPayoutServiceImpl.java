@@ -173,6 +173,10 @@ public class VendorPayoutServiceImpl implements VendorPayoutService {
     @Transactional
     public void handleTransferPaid(String stripeTransferId) {
         payoutRepository.findByStripeTransferId(stripeTransferId).ifPresent(payout -> {
+            if (payout.getStatus() != PayoutStatus.PROCESSING) {
+                log.warn("[PAYOUT] Ignoring transfer.paid for payout {} already in status {}", payout.getId(), payout.getStatus());
+                return;
+            }
             payout.setStatus(PayoutStatus.PAID);
             payout.setPaidAt(Instant.now());
             payoutRepository.save(payout);
@@ -188,6 +192,10 @@ public class VendorPayoutServiceImpl implements VendorPayoutService {
     @Transactional
     public void handleTransferFailed(String stripeTransferId, String failureReason) {
         payoutRepository.findByStripeTransferId(stripeTransferId).ifPresent(payout -> {
+            if (payout.getStatus() != PayoutStatus.PROCESSING) {
+                log.warn("[PAYOUT] Ignoring transfer.failed for payout {} already in status {}", payout.getId(), payout.getStatus());
+                return;
+            }
             payout.setStatus(PayoutStatus.FAILED);
             payout.setFailureReason(failureReason);
             payoutRepository.save(payout);
@@ -286,8 +294,13 @@ public class VendorPayoutServiceImpl implements VendorPayoutService {
                            "payoutId", String.valueOf(payout.getId()))
             );
             payout.setStripeTransferId(transfer.transferId());
-            balanceRepository.moveToInTransit(payout.getVendorId(), amountCents);
-            log.info("[PAYOUT] Transfer {} dispatched for vendor {}", transfer.transferId(), payout.getVendorId());
+            int moved = balanceRepository.moveToInTransit(payout.getVendorId(), amountCents);
+            if (moved == 0) {
+                log.error("[PAYOUT] ACCOUNTING MISMATCH: transfer {} created for vendor {} but balance move failed — manual reconciliation required",
+                        transfer.transferId(), payout.getVendorId());
+            } else {
+                log.info("[PAYOUT] Transfer {} dispatched for vendor {}", transfer.transferId(), payout.getVendorId());
+            }
         } catch (Exception e) {
             payout.setStatus(PayoutStatus.FAILED);
             payout.setFailureReason("Transfer creation failed: " + e.getMessage());

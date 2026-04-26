@@ -2,6 +2,7 @@ package backend.repositories;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -34,4 +35,22 @@ public interface CustomerCreditRepository extends JpaRepository<CustomerCredit, 
            "WHERE c.expiresAt IS NOT NULL AND c.expiresAt <= :now " +
            "AND c.type NOT IN ('EXPIRED', 'REVERSED', 'REDEEMED')")
     List<CustomerCredit> findExpiredCredits(@Param("now") Instant now);
+
+    /**
+     * Atomically claims a credit entry for reversal by flipping its type to REVERSED.
+     * Returns 1 if this caller won the race, 0 if it was already reversed or expired.
+     */
+    @Modifying
+    @Query("UPDATE CustomerCredit c SET c.type = backend.models.enums.CreditEntryType.REVERSED " +
+           "WHERE c.id = :id AND c.type NOT IN (backend.models.enums.CreditEntryType.REVERSED, backend.models.enums.CreditEntryType.EXPIRED)")
+    int claimForReversal(@Param("id") long id);
+
+    /**
+     * Atomically claims a credit entry for expiry by flipping its type to EXPIRED.
+     * Returns 1 if this caller won the race, 0 if it was already expired or reversed.
+     */
+    @Modifying
+    @Query("UPDATE CustomerCredit c SET c.type = backend.models.enums.CreditEntryType.EXPIRED " +
+           "WHERE c.id = :id AND c.type NOT IN (backend.models.enums.CreditEntryType.EXPIRED, backend.models.enums.CreditEntryType.REVERSED, backend.models.enums.CreditEntryType.REDEEMED)")
+    int claimForExpiry(@Param("id") long id);
 }

@@ -62,6 +62,10 @@ public class LoyaltyTransaction {
     @Column(nullable = true, name = "expires_at")
     private Instant expiresAt;
 
+    /** True once this earn row has been claimed by an expiry run. Prevents re-expiry on future scheduler runs. */
+    @Column(nullable = false)
+    private boolean expired = false;
+
     @Column(nullable = true, length = 500)
     private String reason;
 

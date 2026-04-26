@@ -202,7 +202,7 @@ public class ReturnServiceImpl implements ReturnService {
         Company company = companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
 
-        Return ret = returnRepository.findByIdAndCompanyId(returnId, companyId)
+        Return ret = returnRepository.findByIdAndCompanyIdForUpdate(returnId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Return not found with id: " + returnId));
 
         if (ret.getStatus() != ReturnStatus.REQUESTED) {
@@ -450,8 +450,12 @@ public class ReturnServiceImpl implements ReturnService {
                 ret.setRefundFailureReason(null);
                 computeOrderStatusAfterReturn(order);
             } else {
+                long provisional = ret.getRefundedAmountCents() != null ? ret.getRefundedAmountCents() : 0L;
+                order.setRefundedAmountCents(Math.max(0, order.getRefundedAmountCents() - provisional));
+                ret.setRefundedAmountCents(0L);
                 ret.setRefundFailureReason("Stripe webhook reported failure for refund " + stripeRefundId);
                 recordReturnCompensation(order, ret);
+                computeOrderStatusAfterReturn(order);
             }
 
             returnRepository.save(ret);
@@ -633,13 +637,23 @@ public class ReturnServiceImpl implements ReturnService {
             productRepository.restoreStock(item.getProduct().getId(), qty);
         }
 
-        // Restore location-level stock (this was missing from the old initiateReturn())
-        if (item.getFulfillmentLocation() != null && item.getProduct() != null) {
-            long variantRef = item.getVariant() != null ? item.getVariant().getId() : 0L;
-            locationStockRepository
-                    .findByLocationIdAndProductIdAndVariantRef(
-                            item.getFulfillmentLocation().getId(), item.getProduct().getId(), variantRef)
-                    .ifPresent(ls -> locationStockRepository.restoreStock(ls.getId(), qty));
+        // Restore location-level stock. If this fails, reverse the product/variant restore
+        // above so the two levels stay consistent rather than committing a partial state.
+        try {
+            if (item.getFulfillmentLocation() != null && item.getProduct() != null) {
+                long variantRef = item.getVariant() != null ? item.getVariant().getId() : 0L;
+                locationStockRepository
+                        .findByLocationIdAndProductIdAndVariantRef(
+                                item.getFulfillmentLocation().getId(), item.getProduct().getId(), variantRef)
+                        .ifPresent(ls -> locationStockRepository.restoreStock(ls.getId(), qty));
+            }
+        } catch (Exception e) {
+            if (item.getVariant() != null) {
+                variantRepository.decrementStock(item.getVariant().getId(), qty);
+            } else if (item.getProduct() != null) {
+                productRepository.decrementStock(item.getProduct().getId(), qty);
+            }
+            throw e;
         }
 
         recordReturnAdjustment(item, ri.getReturnRequest().getOrder().getId(), qty);

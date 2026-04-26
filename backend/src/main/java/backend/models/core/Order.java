@@ -29,6 +29,9 @@ import java.util.List;
         @Index(name = "idx_order_replacement_of", columnList = "replacement_of_order_id"),
         @Index(name = "idx_order_stripe_invoice", columnList = "stripe_invoice_id"),
         @Index(name = "idx_order_subscription", columnList = "subscription_id")
+}, uniqueConstraints = {
+        @UniqueConstraint(name = "uq_order_payment_intent_id", columnNames = "payment_intent_id"),
+        @UniqueConstraint(name = "uq_order_stripe_invoice_id", columnNames = "stripe_invoice_id")
 })
 @EntityListeners(AuditingEntityListener.class)
 public class Order {

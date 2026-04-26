@@ -23,6 +23,8 @@ import java.util.List;
 @Table(name = "returns", indexes = {
         @Index(name = "idx_return_order", columnList = "order_id"),
         @Index(name = "idx_return_stripe_refund", columnList = "stripe_refund_id")
+}, uniqueConstraints = {
+        @UniqueConstraint(name = "uq_return_stripe_refund_id", columnNames = "stripe_refund_id")
 })
 @EntityListeners(AuditingEntityListener.class)
 public class Return {

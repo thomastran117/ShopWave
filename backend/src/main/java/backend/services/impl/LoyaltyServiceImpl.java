@@ -233,6 +233,10 @@ public class LoyaltyServiceImpl implements LoyaltyService {
     @Override
     @Transactional
     public void restoreRedeemedPoints(long orderId) {
+        if (transactionRepository.existsBySourceOrderIdAndType(orderId, LoyaltyTransactionType.RESTORE_ORDER)) {
+            log.debug("[LOYALTY] Restore already recorded for order {} — skipping", orderId);
+            return;
+        }
         transactionRepository.findFirstBySourceOrderIdAndType(orderId, LoyaltyTransactionType.REDEEM_ORDER)
                 .ifPresent(redemptionTx -> {
                     long delta = Math.abs(redemptionTx.getPointsDelta());
@@ -242,7 +246,7 @@ public class LoyaltyServiceImpl implements LoyaltyService {
                     restore.setAccount(redemptionTx.getAccount());
                     restore.setUserId(redemptionTx.getUserId());
                     restore.setCompanyId(redemptionTx.getCompanyId());
-                    restore.setType(LoyaltyTransactionType.ADJUST);
+                    restore.setType(LoyaltyTransactionType.RESTORE_ORDER);
                     restore.setPointsDelta(delta);
                     restore.setValueCents(Math.abs(redemptionTx.getValueCents()));
                     restore.setSourceOrderId(orderId);
@@ -407,10 +411,17 @@ public class LoyaltyServiceImpl implements LoyaltyService {
 
     @Transactional
     public void expireAccountPoints(LoyaltyAccount account) {
-        List<LoyaltyTransaction> expired = transactionRepository.findExpiredEarns(account.getId(), Instant.now());
-        if (expired.isEmpty()) return;
+        List<LoyaltyTransaction> earns = transactionRepository.findExpiredEarns(account.getId(), Instant.now());
+        if (earns.isEmpty()) return;
 
-        long totalToExpire = expired.stream().mapToLong(t -> t.getPointsDelta()).sum();
+        long totalToExpire = 0;
+        for (LoyaltyTransaction earn : earns) {
+            if (transactionRepository.claimForExpiry(earn.getId()) == 0) {
+                continue; // concurrent scheduler run already claimed this row
+            }
+            totalToExpire += earn.getPointsDelta();
+        }
+
         if (totalToExpire <= 0) return;
 
         long deduction = Math.min(totalToExpire, account.getPointsBalance());
@@ -500,10 +511,10 @@ public class LoyaltyServiceImpl implements LoyaltyService {
             }
         }
         if (!java.util.Objects.equals(account.getCurrentTierId(), newTierId)) {
-            account.setCurrentTierId(newTierId);
-            account.setTierUpdatedAt(Instant.now());
-            accountRepository.save(account);
-            log.info("[LOYALTY] Account {} tier updated to {}", account.getId(), newTierId);
+            int updated = accountRepository.updateTierIfChanged(account.getId(), newTierId, Instant.now());
+            if (updated > 0) {
+                log.info("[LOYALTY] Account {} tier updated to {}", account.getId(), newTierId);
+            }
         }
     }
 

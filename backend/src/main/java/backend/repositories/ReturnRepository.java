@@ -1,9 +1,12 @@
 package backend.repositories;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+
+import jakarta.persistence.LockModeType;
 
 import backend.models.core.Return;
 
@@ -41,6 +44,15 @@ public interface ReturnRepository extends JpaRepository<Return, Long> {
            "JOIN r.items ri JOIN ri.orderItem oi " +
            "WHERE r.id = :returnId AND oi.product.company.id = :companyId")
     Optional<Return> findByIdAndCompanyId(@Param("returnId") long returnId, @Param("companyId") long companyId);
+
+    /**
+     * Same scope as {@link #findByIdAndCompanyId} but acquires a pessimistic write lock,
+     * serialising concurrent approval/rejection attempts on the same return row.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT r FROM Return r JOIN r.items ri JOIN ri.orderItem oi " +
+           "WHERE r.id = :returnId AND oi.product.company.id = :companyId")
+    Optional<Return> findByIdAndCompanyIdForUpdate(@Param("returnId") long returnId, @Param("companyId") long companyId);
 
     /** Total lifetime return count for a user — feeds ReturnPatternEvaluator's return-rate signal. */
     @Query("SELECT COUNT(r) FROM Return r WHERE r.order.user.id = :userId")

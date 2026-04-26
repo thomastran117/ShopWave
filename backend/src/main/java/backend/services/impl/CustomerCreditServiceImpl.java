@@ -107,7 +107,7 @@ public class CustomerCreditServiceImpl implements CustomerCreditService {
         CustomerCredit original = creditRepository.findById(creditEntryId)
                 .orElseThrow(() -> new ResourceNotFoundException("Credit entry not found: " + creditEntryId));
 
-        if (original.getType() == CreditEntryType.REVERSED || original.getType() == CreditEntryType.EXPIRED) {
+        if (creditRepository.claimForReversal(original.getId()) == 0) {
             throw new BadRequestException("Cannot reverse an already reversed or expired credit entry");
         }
 
@@ -123,9 +123,6 @@ public class CustomerCreditServiceImpl implements CustomerCreditService {
 
         creditRepository.save(reversal);
 
-        original.setType(CreditEntryType.REVERSED);
-        creditRepository.save(original);
-
         log.info("Staff {} reversed credit entry {} for user {}", actorUserId, creditEntryId, original.getUser().getId());
         return toResponse(reversal);
     }
@@ -135,19 +132,21 @@ public class CustomerCreditServiceImpl implements CustomerCreditService {
     @Scheduled(cron = "0 0 2 * * *")
     public void expireCredits() {
         List<CustomerCredit> expired = creditRepository.findExpiredCredits(Instant.now());
+        int count = 0;
         for (CustomerCredit credit : expired) {
+            if (creditRepository.claimForExpiry(credit.getId()) == 0) {
+                continue; // already claimed by a concurrent scheduler run
+            }
             CustomerCredit expiry = new CustomerCredit();
             expiry.setUser(credit.getUser());
             expiry.setAmountCents(-credit.getAmountCents());
             expiry.setType(CreditEntryType.EXPIRED);
             expiry.setReason("Credit expired — original entry #" + credit.getId());
             creditRepository.save(expiry);
-
-            credit.setType(CreditEntryType.EXPIRED);
-            creditRepository.save(credit);
+            count++;
         }
-        if (!expired.isEmpty()) {
-            log.info("Expired {} customer credit entries", expired.size());
+        if (count > 0) {
+            log.info("Expired {} customer credit entries", count);
         }
     }
 
