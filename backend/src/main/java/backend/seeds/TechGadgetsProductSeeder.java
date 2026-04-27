@@ -341,6 +341,424 @@ public class TechGadgetsProductSeeder {
                     h.pv(p, "Matte Black", "TECH-DPF-BLK", new BigDecimal("79.99"), 40);
                 }));
 
+        // --- 30 additional products ---
+
+        list.add(h.product(co, "Wireless Gaming Headset 7.1",
+                "Virtual 7.1 surround sound with retractable noise-cancelling boom mic. 30-hour wireless battery.",
+                "TECH-GHS-001", "89.99", "119.99", "Electronics", "SoundCore",
+                "https://placehold.co/800x800/1c2833/ffffff?text=Gaming+Headset",
+                100, 10, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/1c2833/ffffff?text=Gaming+Headset",
+                        "https://placehold.co/800x800/17202a/ffffff?text=Headset+Mic"),
+                h.attrs("Surround", "Virtual 7.1 surround",
+                        "Battery", "30-hour wireless",
+                        "Mic", "Retractable flip-to-mute",
+                        "Connection", "2.4GHz USB dongle + 3.5mm"),
+                h.options1("Color", "Midnight Black", "Arctic White"),
+                p -> {
+                    h.pv(p, "Midnight Black", "TECH-GHS-BLK", new BigDecimal("89.99"), 50);
+                    h.pv(p, "Arctic White",   "TECH-GHS-WHT", new BigDecimal("89.99"), 45);
+                }));
+
+        list.add(h.productSingle(co, "Soundbar 2.1 with Subwoofer",
+                "200W 2.1 soundbar with wireless subwoofer, Dolby Atmos, and HDMI eARC. Wall-mountable.",
+                "TECH-SBR-001", "199.99", "249.99", "Electronics", "SoundCore",
+                "https://placehold.co/800x800/1a1a2e/ffffff?text=Soundbar",
+                55, 5, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/1a1a2e/ffffff?text=Soundbar",
+                        "https://placehold.co/800x800/16213e/ffffff?text=Soundbar+Sub"),
+                h.attrs("Output", "200W total (140W bar + 60W sub)",
+                        "Audio", "Dolby Atmos, DTS:X",
+                        "Connections", "HDMI eARC, Optical, Bluetooth 5.0",
+                        "Dimensions", "90cm bar + wireless sub")));
+
+        list.add(h.product(co, "Drawing Tablet 10\"",
+                "10\" active area graphics tablet with 8192 pressure levels, tilt support, and 8 express keys.",
+                "TECH-DRW-001", "79.99", "99.99", "Electronics", "PixelForce",
+                "https://placehold.co/800x800/2c3e50/ffffff?text=Drawing+Tablet",
+                75, 8, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/2c3e50/ffffff?text=Drawing+Tablet",
+                        "https://placehold.co/800x800/273746/ffffff?text=Tablet+Pen"),
+                h.attrs("Active Area", "10\" × 6.25\"",
+                        "Pressure", "8192 levels",
+                        "Tilt", "±60°",
+                        "Express Keys", "8 customizable"),
+                h.options1("Size", "10\" Standard", "13\" Large"),
+                p -> {
+                    h.pv(p, "10\" Standard", "TECH-DRW-10", new BigDecimal("79.99"),  40);
+                    h.pv(p, "13\" Large",    "TECH-DRW-13", new BigDecimal("129.99"), 30);
+                }));
+
+        list.add(h.productSingle(co, "Ergonomic Trackball Mouse",
+                "Scroll-ring trackball with 6 programmable buttons and USB-C charging. Eliminates wrist strain.",
+                "TECH-TBL-001", "69.99", "89.99", "Electronics", "ErgoPro",
+                "https://placehold.co/800x800/1e272e/ffffff?text=Trackball+Mouse",
+                80, 8, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/1e272e/ffffff?text=Trackball+Mouse",
+                        "https://placehold.co/800x800/17202a/ffffff?text=Trackball+Side"),
+                h.attrs("Tracking", "Optical trackball, 400–2000 DPI",
+                        "Buttons", "6 programmable",
+                        "Connectivity", "Bluetooth + 2.4GHz dual",
+                        "Battery", "70 days per charge")));
+
+        list.add(h.productSingle(co, "XXL Gaming Desk Mat",
+                "900×400mm stitched-edge desk mat with non-slip rubber base. Smooth micro-weave surface.",
+                "TECH-DMP-001", "29.99", "39.99", "Electronics", "PixelForce",
+                "https://placehold.co/800x800/1a1a2e/ffffff?text=Desk+Mat",
+                200, 20, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/1a1a2e/ffffff?text=Desk+Mat",
+                        "https://placehold.co/800x800/16213e/ffffff?text=Mat+Edge"),
+                h.attrs("Size", "900 × 400 × 3mm",
+                        "Surface", "Micro-weave cloth",
+                        "Base", "Non-slip natural rubber",
+                        "Edge", "Stitched for durability")));
+
+        list.add(h.product(co, "GaN Charger 4-Port 140W",
+                "140W USB-C GaN charger with 2× USB-C (100W + 30W) and 2× USB-A (18W). Smart power distribution.",
+                "TECH-GAN-001", "59.99", "79.99", "Electronics", "ChargeFast",
+                "https://placehold.co/800x800/212f3c/ffffff?text=GaN+Charger",
+                150, 15, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/212f3c/ffffff?text=GaN+Charger",
+                        "https://placehold.co/800x800/1c2833/ffffff?text=Charger+Ports"),
+                h.attrs("Total Output", "140W",
+                        "Ports", "2× USB-C + 2× USB-A",
+                        "Top Port", "100W USB-C PD 3.1",
+                        "Technology", "GaN III"),
+                h.options1("Color", "Matte Black", "Frost White"),
+                p -> {
+                    h.pv(p, "Matte Black",  "TECH-GAN-BLK", new BigDecimal("59.99"), 75);
+                    h.pv(p, "Frost White",  "TECH-GAN-WHT", new BigDecimal("59.99"), 70);
+                }));
+
+        list.add(h.productSingle(co, "Laptop Power Bank 26800mAh",
+                "26800mAh power bank with 100W USB-C PD output. Charges a MacBook Pro from 0–100% twice.",
+                "TECH-PWB-001", "79.99", "99.99", "Electronics", "ChargeFast",
+                "https://placehold.co/800x800/1b2631/ffffff?text=Power+Bank",
+                90, 10, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/1b2631/ffffff?text=Power+Bank",
+                        "https://placehold.co/800x800/17202a/ffffff?text=Bank+Ports"),
+                h.attrs("Capacity", "26800mAh / 99Wh",
+                        "USB-C Output", "100W PD",
+                        "USB-A Output", "18W QC 3.0",
+                        "Recharge Time", "2.5h with 100W input")));
+
+        list.add(h.product(co, "Portable Monitor 15.6\"",
+                "1080p IPS portable monitor with USB-C single-cable connectivity and kickstand case.",
+                "TECH-PMN-001", "169.99", "219.99", "Electronics", "NexPort",
+                "https://placehold.co/800x800/2e4057/ffffff?text=Portable+Monitor",
+                55, 5, true, false, false, null, null,
+                h.images("https://placehold.co/800x800/2e4057/ffffff?text=Portable+Monitor",
+                        "https://placehold.co/800x800/273746/ffffff?text=Monitor+Side"),
+                h.attrs("Display", "15.6\" IPS FHD 1920×1080",
+                        "Brightness", "350 nits",
+                        "Connectivity", "2× USB-C (full-function), Mini HDMI",
+                        "Weight", "800g"),
+                h.options1("Finish", "Matte Anti-Glare", "Glossy"),
+                p -> {
+                    h.pv(p, "Matte Anti-Glare", "TECH-PMN-MAT", new BigDecimal("169.99"), 28);
+                    h.pv(p, "Glossy",           "TECH-PMN-GLS", new BigDecimal("169.99"), 22);
+                }));
+
+        list.add(h.productSingle(co, "Monitor Light Bar",
+                "Asymmetric LED light bar clips to monitor. Lights desk without glare on screen. Touch-sensitive dial.",
+                "TECH-MLB-001", "39.99", "54.99", "Electronics", "GlowTech",
+                "https://placehold.co/800x800/1e272e/ffffff?text=Monitor+Light",
+                120, 12, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/1e272e/ffffff?text=Monitor+Light",
+                        "https://placehold.co/800x800/17202a/ffffff?text=Light+Glow"),
+                h.attrs("Light", "Asymmetric, no screen glare",
+                        "Color Temp", "2700K–6500K adjustable",
+                        "Brightness", "Stepless dimming",
+                        "Control", "Touch dial on cable")));
+
+        list.add(h.productSingle(co, "Smart Video Doorbell",
+                "2K HDR video with color night vision, two-way audio, and local + cloud storage. Works with Alexa.",
+                "TECH-SVD-001", "129.99", "159.99", "Electronics", "HomeIQ",
+                "https://placehold.co/800x800/2c3e50/ffffff?text=Smart+Doorbell",
+                65, 6, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/2c3e50/ffffff?text=Smart+Doorbell",
+                        "https://placehold.co/800x800/273746/ffffff?text=Doorbell+App"),
+                h.attrs("Video", "2K HDR, 160° FOV",
+                        "Night Vision", "Color, up to 5m",
+                        "Audio", "Two-way with noise cancellation",
+                        "Storage", "Local microSD + cloud subscription")));
+
+        list.add(h.product(co, "Smart Thermostat Learning",
+                "AI learning thermostat with remote scheduling, energy reports, and compatibility with most HVAC systems.",
+                "TECH-STH-001", "149.99", "199.99", "Electronics", "HomeIQ",
+                "https://placehold.co/800x800/ecf0f1/333333?text=Smart+Thermostat",
+                60, 5, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/ecf0f1/333333?text=Smart+Thermostat",
+                        "https://placehold.co/800x800/d5dbdb/333333?text=Thermostat+App"),
+                h.attrs("Display", "3.5\" color touch",
+                        "Connectivity", "Wi-Fi 2.4/5GHz + Bluetooth",
+                        "Compatibility", "95% of HVAC systems",
+                        "Savings", "Up to 23% on heating & cooling"),
+                h.options1("Color", "Platinum", "Copper", "Black"),
+                p -> {
+                    h.pv(p, "Platinum", "TECH-STH-PLT", new BigDecimal("149.99"), 25);
+                    h.pv(p, "Copper",   "TECH-STH-CPR", new BigDecimal("149.99"), 18);
+                    h.pv(p, "Black",    "TECH-STH-BLK", new BigDecimal("149.99"), 15);
+                }));
+
+        list.add(h.productSingle(co, "Smart Door Lock Fingerprint",
+                "Wi-Fi smart lock with fingerprint, PIN, card, app, and key backup. 250 fingerprint capacity.",
+                "TECH-SDL-001", "179.99", "229.99", "Electronics", "HomeIQ",
+                "https://placehold.co/800x800/1a252f/ffffff?text=Smart+Lock",
+                45, 4, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/1a252f/ffffff?text=Smart+Lock",
+                        "https://placehold.co/800x800/17202a/ffffff?text=Lock+Panel"),
+                h.attrs("Access Methods", "Fingerprint, PIN, NFC card, app, key",
+                        "Capacity", "250 fingerprints, 100 PINs",
+                        "Battery", "4× AA, 1-year life",
+                        "Connectivity", "Wi-Fi + Bluetooth")));
+
+        list.add(h.product(co, "Smart LED Bulbs 4-Pack A19",
+                "800lm tunable white + RGB smart bulb. Voice and app control, no hub required.",
+                "TECH-SLB-001", "34.99", "44.99", "Electronics", "HomeIQ",
+                "https://placehold.co/800x800/fef9e7/333333?text=Smart+Bulbs",
+                200, 20, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/fef9e7/333333?text=Smart+Bulbs",
+                        "https://placehold.co/800x800/fdf2d0/333333?text=Bulb+Colors"),
+                h.attrs("Pack", "4 × A19 bulbs",
+                        "Lumens", "800lm (60W equivalent)",
+                        "Colors", "16M RGBW + tunable white 2700–6500K",
+                        "Control", "App, Alexa, Google, Siri Shortcuts"),
+                h.options1("Pack Size", "4-Pack", "8-Pack"),
+                p -> {
+                    h.pv(p, "4-Pack", "TECH-SLB-4P", new BigDecimal("34.99"), 100);
+                    h.pv(p, "8-Pack", "TECH-SLB-8P", new BigDecimal("59.99"),  80);
+                }));
+
+        list.add(h.productSingle(co, "Smart Body Composition Scale",
+                "13-metric Bluetooth scale measuring weight, BMI, body fat, muscle mass, bone density, and more.",
+                "TECH-SBS-001", "34.99", "49.99", "Electronics", "HomeIQ",
+                "https://placehold.co/800x800/ecf0f1/333333?text=Smart+Scale",
+                150, 15, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/ecf0f1/333333?text=Smart+Scale",
+                        "https://placehold.co/800x800/d5dbdb/333333?text=Scale+App"),
+                h.attrs("Metrics", "13: weight, BMI, body fat, muscle, bone, hydration…",
+                        "Capacity", "180kg",
+                        "Precision", "50g increments",
+                        "Users", "Unlimited via app")));
+
+        list.add(h.productSingle(co, "USB-C Docking Station 12-in-1",
+                "12-in-1 dock with dual 4K HDMI, 100W PD, 4× USB-A, 2× USB-C, SD/microSD, Ethernet, and audio.",
+                "TECH-DCK-001", "129.99", "169.99", "Electronics", "NexPort",
+                "https://placehold.co/800x800/212f3c/ffffff?text=Dock+Station",
+                70, 7, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/212f3c/ffffff?text=Dock+Station",
+                        "https://placehold.co/800x800/1c2833/ffffff?text=Dock+Ports"),
+                h.attrs("Ports", "2× HDMI 4K, 4× USB-A, 2× USB-C, SD, microSD, GbE, audio",
+                        "Power Delivery", "100W pass-through",
+                        "Video", "Dual 4K@60Hz",
+                        "Compatible", "Thunderbolt 3/4, USB4")));
+
+        list.add(h.product(co, "External HDD 4TB",
+                "4TB USB 3.0 portable hard drive with auto-backup software and hardware encryption.",
+                "TECH-HDD-001", "89.99", "109.99", "Electronics", "FlashVault",
+                "https://placehold.co/800x800/1a252f/ffffff?text=External+HDD",
+                90, 10, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/1a252f/ffffff?text=External+HDD",
+                        "https://placehold.co/800x800/17202a/ffffff?text=HDD+Side"),
+                h.attrs("Capacity", "4TB",
+                        "Interface", "USB 3.0 (USB-C cable included)",
+                        "Speed", "Up to 130 MB/s",
+                        "Encryption", "256-bit AES hardware"),
+                h.options1("Color", "Space Black", "Silver"),
+                p -> {
+                    h.pv(p, "Space Black", "TECH-HDD-BLK", new BigDecimal("89.99"), 45);
+                    h.pv(p, "Silver",      "TECH-HDD-SLV", new BigDecimal("89.99"), 40);
+                }));
+
+        list.add(h.productSingle(co, "8-Port Gigabit Network Switch",
+                "Unmanaged 8-port Gigabit switch with plug-and-play setup and fanless silent operation.",
+                "TECH-NSW-001", "29.99", "39.99", "Electronics", "NetBlast",
+                "https://placehold.co/800x800/1e272e/ffffff?text=Network+Switch",
+                120, 12, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/1e272e/ffffff?text=Network+Switch",
+                        "https://placehold.co/800x800/17202a/ffffff?text=Switch+Ports"),
+                h.attrs("Ports", "8× Gigabit RJ45",
+                        "Switching Capacity", "16 Gbps",
+                        "Setup", "Plug-and-play, no software",
+                        "Cooling", "Fanless, silent")));
+
+        list.add(h.productSingle(co, "PoE IP Security Camera 4K",
+                "Outdoor 4K PoE IP camera with starlight sensor, 30m IR night vision, and IP67 weatherproofing.",
+                "TECH-CAM-001", "79.99", "99.99", "Electronics", "HomeIQ",
+                "https://placehold.co/800x800/1c2833/ffffff?text=Security+Cam",
+                80, 8, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/1c2833/ffffff?text=Security+Cam",
+                        "https://placehold.co/800x800/17202a/ffffff?text=Cam+Mount"),
+                h.attrs("Resolution", "4K (8MP) @ 20fps",
+                        "Night Vision", "30m IR",
+                        "Protection", "IP67 weatherproof",
+                        "Connection", "PoE (802.3af) or 12V DC")));
+
+        list.add(h.productSingle(co, "HDMI Capture Card 4K",
+                "4K@30fps HDMI capture card with USB 3.0. Zero-lag passthrough for streaming and recording.",
+                "TECH-CAP-001", "69.99", "89.99", "Electronics", "ClearCast",
+                "https://placehold.co/800x800/1a252f/ffffff?text=Capture+Card",
+                85, 8, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/1a252f/ffffff?text=Capture+Card",
+                        "https://placehold.co/800x800/17202a/ffffff?text=Card+Ports"),
+                h.attrs("Capture", "4K@30fps or 1080p@60fps",
+                        "Passthrough", "4K@60fps zero-lag",
+                        "Interface", "USB 3.0",
+                        "Compatible", "OBS, XSplit, Teams, Zoom")));
+
+        list.add(h.product(co, "Ring Light 18\" Pro",
+                "18\" bi-color ring light with phone holder, hot shoe, and 3200K–5600K stepless adjustment.",
+                "TECH-RLT-001", "54.99", "74.99", "Electronics", "GlowTech",
+                "https://placehold.co/800x800/fef9e7/333333?text=Ring+Light",
+                75, 8, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/fef9e7/333333?text=Ring+Light",
+                        "https://placehold.co/800x800/fdf2d0/333333?text=Light+Setup"),
+                h.attrs("Diameter", "18\" (46cm)",
+                        "Color Temp", "3200K–5600K",
+                        "Brightness", "10 levels via controller",
+                        "Includes", "Stand, phone holder, hot shoe, 3× color filter"),
+                h.options1("Kit", "Light Only", "Light + Stand Kit"),
+                p -> {
+                    h.pv(p, "Light Only",       "TECH-RLT-LGT", new BigDecimal("54.99"), 38);
+                    h.pv(p, "Light + Stand Kit", "TECH-RLT-KIT", new BigDecimal("79.99"), 32);
+                }));
+
+        list.add(h.productSingle(co, "Collapsible Green Screen",
+                "5×7ft chromakey backdrop on spring-loaded collapsible frame. Sets up in 10 seconds.",
+                "TECH-GRS-001", "59.99", "79.99", "Electronics", "ClearCast",
+                "https://placehold.co/800x800/27ae60/ffffff?text=Green+Screen",
+                60, 6, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/27ae60/ffffff?text=Green+Screen",
+                        "https://placehold.co/800x800/229954/ffffff?text=Screen+Folded"),
+                h.attrs("Size", "5 × 7 ft (152 × 213cm)",
+                        "Material", "Wrinkle-free muslin",
+                        "Frame", "Spring collapsible, no assembly",
+                        "Storage", "Carry bag included")));
+
+        list.add(h.productSingle(co, "Smart Power Strip 6-Outlet",
+                "Wi-Fi smart power strip with 6 individually controlled outlets and 4 USB ports (2× USB-C).",
+                "TECH-SPS-001", "44.99", "59.99", "Electronics", "HomeIQ",
+                "https://placehold.co/800x800/1e272e/ffffff?text=Smart+Strip",
+                110, 10, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/1e272e/ffffff?text=Smart+Strip",
+                        "https://placehold.co/800x800/17202a/ffffff?text=Strip+App"),
+                h.attrs("Outlets", "6 individually switchable AC",
+                        "USB Ports", "2× USB-A + 2× USB-C",
+                        "Surge Protection", "2700J",
+                        "Control", "App, Alexa, Google")));
+
+        list.add(h.productSingle(co, "Mini PC Fanless Intel N100",
+                "Fanless mini PC with Intel N100, 16GB RAM, 512GB NVMe, dual HDMI 4K, and Windows 11 Pro.",
+                "TECH-MPC-001", "219.99", "279.99", "Electronics", "NetBlast",
+                "https://placehold.co/800x800/1a252f/ffffff?text=Mini+PC",
+                40, 4, true, false, false, null, null,
+                h.images("https://placehold.co/800x800/1a252f/ffffff?text=Mini+PC",
+                        "https://placehold.co/800x800/17202a/ffffff?text=Mini+PC+Back"),
+                h.attrs("CPU", "Intel N100 (4-core, up to 3.4GHz)",
+                        "RAM / Storage", "16GB DDR4 + 512GB NVMe",
+                        "Video", "Dual HDMI 4K@60Hz",
+                        "OS", "Windows 11 Pro")));
+
+        list.add(h.product(co, "Portable Projector 1080p",
+                "Native 1080p LED projector with 700 ANSI lumens, built-in Android TV, and 60W Bluetooth speaker.",
+                "TECH-PRJ-001", "299.99", "379.99", "Electronics", "PixelForce",
+                "https://placehold.co/800x800/2c3e50/ffffff?text=Projector",
+                35, 3, true, false, false, null, null,
+                h.images("https://placehold.co/800x800/2c3e50/ffffff?text=Projector",
+                        "https://placehold.co/800x800/273746/ffffff?text=Projector+Beam"),
+                h.attrs("Resolution", "1920×1080 native",
+                        "Brightness", "700 ANSI lumens",
+                        "OS", "Android TV 11",
+                        "Speaker", "Dual 10W Hi-Fi"),
+                h.options1("Color", "Charcoal", "Arctic White"),
+                p -> {
+                    h.pv(p, "Charcoal",     "TECH-PRJ-CHR", new BigDecimal("299.99"), 18);
+                    h.pv(p, "Arctic White", "TECH-PRJ-WHT", new BigDecimal("299.99"), 15);
+                }));
+
+        list.add(h.productSingle(co, "Raspberry Pi 5 Starter Kit",
+                "Complete Raspberry Pi 5 (8GB) kit with official case, 27W power supply, SD card, and heatsink.",
+                "TECH-RPI-001", "119.99", "149.99", "Electronics", "NetBlast",
+                "https://placehold.co/800x800/cc0000/ffffff?text=Raspberry+Pi",
+                50, 5, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/cc0000/ffffff?text=Raspberry+Pi",
+                        "https://placehold.co/800x800/b30000/ffffff?text=Pi+Board"),
+                h.attrs("Board", "Raspberry Pi 5 8GB RAM",
+                        "Kit Includes", "Official case, 27W PSU, 32GB SD, heatsink, HDMI cable",
+                        "Connectivity", "Wi-Fi 6, Bluetooth 5.0, 2× USB 3, 2× USB 2, 2× micro HDMI",
+                        "OS", "Raspberry Pi OS (pre-installed)")));
+
+        list.add(h.productSingle(co, "VR Headset Standalone",
+                "All-in-one VR headset with 4K display, inside-out tracking, and 50+ supported games. 3-hour battery.",
+                "TECH-VRS-001", "399.99", "479.99", "Electronics", "PixelForce",
+                "https://placehold.co/800x800/1c2833/ffffff?text=VR+Headset",
+                30, 3, true, false, false, null, null,
+                h.images("https://placehold.co/800x800/1c2833/ffffff?text=VR+Headset",
+                        "https://placehold.co/800x800/17202a/ffffff?text=VR+Controllers"),
+                h.attrs("Display", "4K LCD (2K per eye) 90Hz",
+                        "Tracking", "6DOF inside-out, no external sensors",
+                        "Storage", "128GB",
+                        "Battery", "3 hours gaming")));
+
+        list.add(h.product(co, "Streaming Microphone Arm Kit",
+                "Professional scissor boom arm with desk clamp, shock mount, and pop filter. Supports up to 1.5kg.",
+                "TECH-MAK-001", "49.99", "69.99", "Electronics", "ClearCast",
+                "https://placehold.co/800x800/1b2631/ffffff?text=Mic+Arm+Kit",
+                90, 9, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/1b2631/ffffff?text=Mic+Arm+Kit",
+                        "https://placehold.co/800x800/17202a/ffffff?text=Arm+Extended"),
+                h.attrs("Reach", "80cm max extension",
+                        "Load", "Up to 1.5kg",
+                        "Clamp", "Desk clamp, 2.5cm–6cm depth",
+                        "Kit Includes", "Arm, shock mount, pop filter, cable clips"),
+                h.options1("Color", "Matte Black", "All White"),
+                p -> {
+                    h.pv(p, "Matte Black", "TECH-MAK-BLK", new BigDecimal("49.99"), 45);
+                    h.pv(p, "All White",   "TECH-MAK-WHT", new BigDecimal("49.99"), 40);
+                }));
+
+        list.add(h.productSingle(co, "Network Attached Storage 2-Bay",
+                "2-bay NAS with Intel Celeron J4125, 4GB RAM, and diskless design. Supports RAID 0/1.",
+                "TECH-NAS-001", "299.99", "379.99", "Electronics", "FlashVault",
+                "https://placehold.co/800x800/2c3e50/ffffff?text=NAS+Drive",
+                25, 3, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/2c3e50/ffffff?text=NAS+Drive",
+                        "https://placehold.co/800x800/273746/ffffff?text=NAS+Bays"),
+                h.attrs("CPU", "Intel Celeron J4125 quad-core",
+                        "RAM", "4GB DDR4 (expandable to 8GB)",
+                        "Bays", "2× 3.5\"/2.5\" SATA",
+                        "Connectivity", "2× 2.5GbE, 2× USB 3.2, 1× USB-C")));
+
+        list.add(h.product(co, "Smart Garage Door Controller",
+                "Wi-Fi garage door controller works with most garage door openers built after 1993. Alexa & Google compatible.",
+                "TECH-GDC-001", "29.99", "39.99", "Electronics", "HomeIQ",
+                "https://placehold.co/800x800/1e272e/ffffff?text=Garage+Controller",
+                100, 10, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/1e272e/ffffff?text=Garage+Controller",
+                        "https://placehold.co/800x800/17202a/ffffff?text=Garage+App"),
+                h.attrs("Compatible", "Works with 95% of openers since 1993",
+                        "Features", "Remote open/close, status alerts, activity log",
+                        "Connectivity", "Wi-Fi 2.4GHz",
+                        "Installation", "No tools required"),
+                h.options1("Pack", "1 Door", "2 Doors"),
+                p -> {
+                    h.pv(p, "1 Door",  "TECH-GDC-1D", new BigDecimal("29.99"), 55);
+                    h.pv(p, "2 Doors", "TECH-GDC-2D", new BigDecimal("49.99"), 40);
+                }));
+
+        list.add(h.productSingle(co, "4-Port KVM Switch HDMI",
+                "4-port KVM switch sharing 4K@60Hz HDMI monitor, keyboard, and mouse across 4 PCs. Hotkey switching.",
+                "TECH-KVM-001", "59.99", "79.99", "Electronics", "NexPort",
+                "https://placehold.co/800x800/212f3c/ffffff?text=KVM+Switch",
+                55, 5, false, false, false, null, null,
+                h.images("https://placehold.co/800x800/212f3c/ffffff?text=KVM+Switch",
+                        "https://placehold.co/800x800/1c2833/ffffff?text=KVM+Ports"),
+                h.attrs("Ports", "4× HDMI computers, 1× HDMI monitor",
+                        "Resolution", "4K@60Hz",
+                        "USB", "2× USB 2.0 shared",
+                        "Switching", "Hotkey, button, or auto-detect")));
+
         return list;
     }
 }
