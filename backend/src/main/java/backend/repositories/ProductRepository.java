@@ -59,6 +59,7 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
     Optional<Product> findByIdWithCompanyOwner(@Param("id") long id);
     List<Product> findAllByIdInAndCompanyId(Collection<Long> ids, long companyId);
     boolean existsBySkuAndCompanyId(String sku, long companyId);
+    Optional<Product> findBySkuAndCompanyId(String sku, long companyId);
 
     /**
      * Atomically decrements stock. Returns 1 (success) when stock >= quantity, 0 otherwise.
