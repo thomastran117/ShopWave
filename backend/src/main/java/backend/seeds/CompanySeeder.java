@@ -19,7 +19,9 @@ public class CompanySeeder {
     private final CompanyRepository companyRepository;
     private final InventoryLocationRepository inventoryLocationRepository;
 
-    public record SeededCompanies(Company tech, Company style, Company wellness) {}
+    public record SeededCompanies(
+            Company tech, Company style, Company wellness, Company home, Company sport
+    ) {}
 
     public SeededCompanies seed(SeededUsers users) {
         Company tech = company(users.techMerchant(), "TechGadgets Co.", "Electronics & Technology",
@@ -37,14 +39,28 @@ public class CompanySeeder {
                 "+15125550300", "info@wellnessworld.dev",
                 "https://wellnessworld.dev", "Science-backed health, beauty, and wellness products.", 2019, 30);
 
+        Company home = company(users.homeMerchant(), "HomeNest Co.", "Home Furnishing & Décor",
+                "233 S Wacker Dr", "Chicago", "US", "60606",
+                "+13125550400", "hello@homenest.dev",
+                "https://homenest.dev", "Modern home essentials — smart devices, kitchen, and living décor.", 2021, 18);
+
+        Company sport = company(users.sportMerchant(), "SportZone", "Sports & Outdoor Equipment",
+                "1600 Glenarm Pl", "Denver", "US", "80202",
+                "+17205550500", "gear@sportzone.dev",
+                "https://sportzone.dev", "Performance gear for athletes — training, nutrition, and outdoor sports.", 2017, 35);
+
         invLoc(tech,     "Main Warehouse",       "TECH-MAIN",    "500 Market St",    "San Francisco", "US");
         invLoc(tech,     "East Coast Hub",        "TECH-EAST",    "101 Commerce Dr",  "Newark",        "US");
         invLoc(style,    "Downtown Fulfillment",  "STYLE-NYC",    "350 Fifth Ave",    "New York",      "US");
         invLoc(style,    "West Coast Center",     "STYLE-LA",     "800 Alameda St",   "Los Angeles",   "US");
         invLoc(wellness, "Central Distribution",  "WELL-CENTRAL", "220 Congress Ave", "Austin",        "US");
         invLoc(wellness, "South Hub",             "WELL-SOUTH",   "400 Commerce St",  "Houston",       "US");
+        invLoc(home,     "Midwest Warehouse",     "HOME-CHI",     "233 S Wacker Dr",  "Chicago",       "US");
+        invLoc(home,     "Southeast Hub",         "HOME-ATL",     "75 Marietta St",   "Atlanta",       "US");
+        invLoc(sport,    "Mountain HQ",           "SPORT-DEN",    "1600 Glenarm Pl",  "Denver",        "US");
+        invLoc(sport,    "Pacific Northwest Hub", "SPORT-SEA",    "600 Pike St",      "Seattle",       "US");
 
-        return new SeededCompanies(tech, style, wellness);
+        return new SeededCompanies(tech, style, wellness, home, sport);
     }
 
     private Company company(User owner, String name, String industry, String address,

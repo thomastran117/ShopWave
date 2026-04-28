@@ -27,6 +27,8 @@ public class DevDataSeeder implements ApplicationRunner {
     private final TechGadgetsProductSeeder techSeeder;
     private final StyleHubProductSeeder styleSeeder;
     private final WellnessWorldProductSeeder wellnessSeeder;
+    private final HomeNestProductSeeder homeSeeder;
+    private final SportZoneProductSeeder sportSeeder;
     private final ReviewSeeder reviewSeeder;
     private final LoyaltySeeder loyaltySeeder;
 
@@ -41,6 +43,8 @@ public class DevDataSeeder implements ApplicationRunner {
         var techProducts     = techSeeder.seed(companies.tech());
         var styleProducts    = styleSeeder.seed(companies.style());
         var wellnessProducts = wellnessSeeder.seed(companies.wellness());
+        homeSeeder.seed(companies.home());
+        sportSeeder.seed(companies.sport());
 
         reviewSeeder.seed(techProducts, styleProducts, wellnessProducts, users);
         loyaltySeeder.seed(users, companies);
