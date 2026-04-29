@@ -31,6 +31,7 @@ public class DevDataSeeder implements ApplicationRunner {
     private final SportZoneProductSeeder sportSeeder;
     private final ReviewSeeder reviewSeeder;
     private final LoyaltySeeder loyaltySeeder;
+    private final PricingEngineSeeder pricingSeeder;
 
     @Override
     @Transactional
@@ -48,6 +49,7 @@ public class DevDataSeeder implements ApplicationRunner {
 
         reviewSeeder.seed(techProducts, styleProducts, wellnessProducts, homeProducts, sportProducts, users);
         loyaltySeeder.seed(users, companies);
+        pricingSeeder.seed(companies, techProducts, styleProducts, wellnessProducts, homeProducts, sportProducts);
 
         log.info("[DevDataSeeder] Seeded {} users, {} companies, {} products",
                 userRepository.count(), companyRepository.count(), productRepository.count());
