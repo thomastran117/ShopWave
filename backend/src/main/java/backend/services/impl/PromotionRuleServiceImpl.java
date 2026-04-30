@@ -20,9 +20,11 @@ import backend.exceptions.http.ResourceNotFoundException;
 import backend.models.core.Company;
 import backend.models.core.CustomerSegment;
 import backend.models.core.Product;
+import backend.models.core.ProductBundle;
 import backend.models.core.PromotionRule;
 import backend.models.enums.DiscountStatus;
 import backend.models.enums.PromotionRuleType;
+import backend.repositories.BundleRepository;
 import backend.repositories.CompanyRepository;
 import backend.repositories.CustomerSegmentRepository;
 import backend.repositories.ProductRepository;
@@ -42,6 +44,7 @@ public class PromotionRuleServiceImpl implements PromotionRuleService {
     private final PromotionRuleRepository ruleRepository;
     private final CompanyRepository companyRepository;
     private final ProductRepository productRepository;
+    private final BundleRepository bundleRepository;
     private final CustomerSegmentRepository segmentRepository;
     private final PromotionConfigValidator configValidator;
     private final ObjectMapper objectMapper;
@@ -50,12 +53,14 @@ public class PromotionRuleServiceImpl implements PromotionRuleService {
             PromotionRuleRepository ruleRepository,
             CompanyRepository companyRepository,
             ProductRepository productRepository,
+            BundleRepository bundleRepository,
             CustomerSegmentRepository segmentRepository,
             PromotionConfigValidator configValidator,
             ObjectMapper objectMapper) {
         this.ruleRepository = ruleRepository;
         this.companyRepository = companyRepository;
         this.productRepository = productRepository;
+        this.bundleRepository = bundleRepository;
         this.segmentRepository = segmentRepository;
         this.configValidator = configValidator;
         this.objectMapper = objectMapper;
@@ -106,6 +111,7 @@ public class PromotionRuleServiceImpl implements PromotionRuleService {
         rule.setMaxUsesPerUser(request.getMaxUsesPerUser());
         rule.setFundedByCompany(resolveFunder(request.getFundedByCompanyId()));
         rule.setTargetProducts(resolveProducts(request.getTargetProductIds(), companyId));
+        rule.setTargetBundles(resolveBundles(request.getTargetBundleIds(), companyId));
         rule.setTargetSegments(resolveSegments(request.getTargetSegmentIds()));
 
         return toResponse(ruleRepository.save(rule));
@@ -162,6 +168,9 @@ public class PromotionRuleServiceImpl implements PromotionRuleService {
         if (request.getTargetProductIds() != null) {
             rule.setTargetProducts(resolveProducts(request.getTargetProductIds(), companyId));
         }
+        if (request.getTargetBundleIds() != null) {
+            rule.setTargetBundles(resolveBundles(request.getTargetBundleIds(), companyId));
+        }
         if (request.getTargetSegmentIds() != null) {
             rule.setTargetSegments(resolveSegments(request.getTargetSegmentIds()));
         }
@@ -179,6 +188,7 @@ public class PromotionRuleServiceImpl implements PromotionRuleService {
                 .orElseThrow(() -> new ResourceNotFoundException("Promotion rule not found with id: " + ruleId));
 
         rule.getTargetProducts().clear();
+        rule.getTargetBundles().clear();
         rule.getTargetSegments().clear();
         ruleRepository.delete(rule);
     }
@@ -216,6 +226,16 @@ public class PromotionRuleServiceImpl implements PromotionRuleService {
         return new HashSet<>(found);
     }
 
+    private Set<ProductBundle> resolveBundles(List<Long> ids, long companyId) {
+        if (ids == null || ids.isEmpty()) return new HashSet<>();
+        List<Long> deduped = new ArrayList<>(new HashSet<>(ids));
+        List<ProductBundle> found = bundleRepository.findAllByIdInAndCompanyId(deduped, companyId);
+        if (found.size() != deduped.size()) {
+            throw new BadRequestException("One or more bundle IDs are invalid or do not belong to this company");
+        }
+        return new HashSet<>(found);
+    }
+
     private Set<CustomerSegment> resolveSegments(List<Long> ids) {
         if (ids == null || ids.isEmpty()) return new HashSet<>();
         List<Long> deduped = new ArrayList<>(new HashSet<>(ids));
@@ -240,6 +260,7 @@ public class PromotionRuleServiceImpl implements PromotionRuleService {
         }
 
         List<Long> productIds = r.getTargetProducts().stream().map(Product::getId).sorted().toList();
+        List<Long> bundleIds  = r.getTargetBundles().stream().map(ProductBundle::getId).sorted().toList();
         List<Long> segmentIds = r.getTargetSegments().stream().map(CustomerSegment::getId).sorted().toList();
         Long fundedById = r.getFundedByCompany() != null ? r.getFundedByCompany().getId() : null;
 
@@ -261,6 +282,7 @@ public class PromotionRuleServiceImpl implements PromotionRuleService {
                 r.getMaxUsesPerUser(),
                 fundedById,
                 productIds,
+                bundleIds,
                 segmentIds,
                 r.getCreatedAt(),
                 r.getUpdatedAt());

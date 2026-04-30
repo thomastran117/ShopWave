@@ -53,6 +53,9 @@ public class UpdatePromotionRuleRequest {
     /** When provided, fully replaces the product set. */
     private List<Long> targetProductIds;
 
+    /** When provided, fully replaces the bundle set. */
+    private List<Long> targetBundleIds;
+
     /** When provided, fully replaces the segment set. */
     private List<Long> targetSegmentIds;
 }

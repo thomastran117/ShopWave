@@ -374,9 +374,6 @@ public class OrderServiceImpl implements OrderService {
             Double buyerLng = request.getBuyerLongitude();
 
             List<OrderItem> orderItems = new ArrayList<>();
-            // Running total for items the pricing engine does not handle (bundles). Product items
-            // are priced via PricingEngine.quote() after the stock-decrement loop completes.
-            BigDecimal bundleSubtotal = BigDecimal.ZERO;
 
             for (Long productId : productIds) {
                 Product product = productMap.get(productId);
@@ -468,7 +465,6 @@ public class OrderServiceImpl implements OrderService {
                 bundleItem.setQuantity(bundleQty);
                 bundleItem.setUnitPrice(bundle.getPrice());
                 bundleItem.setProductName(bundle.getName());
-                bundleSubtotal = bundleSubtotal.add(bundle.getPrice().multiply(BigDecimal.valueOf(bundleQty)));
 
                 for (BundleItem bi : bundle.getItems()) {
                     if (bi.getProduct().getStatus() != ProductStatus.ACTIVE || !bi.getProduct().isPurchasable()) {
@@ -512,24 +508,35 @@ public class OrderServiceImpl implements OrderService {
 
             String currency = request.getCurrency() != null ? request.getCurrency().toLowerCase() : "usd";
 
-            // --- Build cart lines from product items for the pricing engine. Bundles are priced at
-            //     list price outside the engine (they contribute to order total via bundleSubtotal).
+            // --- Build cart lines for the pricing engine (products + bundles).
             List<CartLine> cartLines = new ArrayList<>();
-            List<OrderItem> productItemsInLineOrder = new ArrayList<>();
+            List<OrderItem> itemsInLineOrder = new ArrayList<>();
             int lineIdx = 0;
             for (OrderItem item : orderItems) {
-                if (item.getProduct() == null) continue; // bundle
-                BigDecimal basePrice = item.getVariant() != null
-                        ? item.getVariant().getPrice()
-                        : item.getProduct().getPrice();
-                cartLines.add(new CartLine(
-                        lineIdx++,
-                        item.getProduct().getId(),
-                        item.getVariant() != null ? item.getVariant().getId() : null,
-                        item.getQuantity(),
-                        basePrice,
-                        item.getProduct().getCompany().getId()));
-                productItemsInLineOrder.add(item);
+                if (item.getProduct() != null) {
+                    BigDecimal basePrice = item.getVariant() != null
+                            ? item.getVariant().getPrice()
+                            : item.getProduct().getPrice();
+                    cartLines.add(new CartLine(
+                            lineIdx++,
+                            item.getProduct().getId(),
+                            item.getVariant() != null ? item.getVariant().getId() : null,
+                            item.getQuantity(),
+                            basePrice,
+                            item.getProduct().getCompany().getId(),
+                            null));
+                    itemsInLineOrder.add(item);
+                } else if (item.getBundle() != null) {
+                    cartLines.add(new CartLine(
+                            lineIdx++,
+                            null,
+                            null,
+                            item.getQuantity(),
+                            item.getUnitPrice(),
+                            item.getBundle().getCompany().getId(),
+                            item.getBundle().getId()));
+                    itemsInLineOrder.add(item);
+                }
             }
 
             // --- Coupon pre-validation: hard-fail on existence, status, window, per-user cap.
@@ -586,9 +593,9 @@ public class OrderServiceImpl implements OrderService {
                 throw new BadRequestException(reason);
             }
 
-            // Map per-line engine output back onto product OrderItems.
+            // Map per-line engine output back onto OrderItems (products and bundles).
             for (LineBreakdown lb : pricing.lines()) {
-                OrderItem item = productItemsInLineOrder.get(lb.index());
+                OrderItem item = itemsInLineOrder.get(lb.index());
                 BigDecimal basePrice = lb.unitBasePrice();
                 BigDecimal perUnit = lb.quantity() > 0
                         ? lb.savings().divide(BigDecimal.valueOf(lb.quantity()), 2, RoundingMode.HALF_UP)
@@ -610,7 +617,7 @@ public class OrderServiceImpl implements OrderService {
 
             BigDecimal couponDiscountAmount = pricing.couponSavings();
             BigDecimal promotionSavings = pricing.promotionSavings();
-            BigDecimal finalTotal = pricing.finalTotal().add(bundleSubtotal);
+            BigDecimal finalTotal = pricing.finalTotal();
 
             // --- Loyalty point redemption: pre-validate and compute discount before Stripe charge ---
             // The actual atomic deduction is deferred until after the order entity is saved (orderId needed).

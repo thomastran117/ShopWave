@@ -4,6 +4,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import backend.models.core.Coupon;
+import backend.models.core.Product;
+import backend.models.core.ProductBundle;
 import backend.models.core.PromotionRule;
 import backend.models.enums.DiscountStatus;
 import backend.models.enums.DiscountType;
@@ -218,6 +220,7 @@ public class PricingEngineImpl implements PricingEngine {
                 && rule.getTargetProducts() != null
                 && !rule.getTargetProducts().isEmpty()) {
             Set<Long> cartProductIds = lines.stream()
+                    .filter(l -> l.productId() != null)
                     .map(WorkingLine::productId)
                     .collect(Collectors.toSet());
             boolean allPresent = rule.getTargetProducts().stream()
@@ -280,14 +283,24 @@ public class PricingEngineImpl implements PricingEngine {
         List<WorkingLine> companyLines = allLines.stream()
                 .filter(l -> l.companyId() == rule.getCompany().getId())
                 .toList();
-        if (rule.getTargetProducts() == null || rule.getTargetProducts().isEmpty()) {
+
+        boolean hasProductTargets = rule.getTargetProducts() != null && !rule.getTargetProducts().isEmpty();
+        boolean hasBundleTargets  = rule.getTargetBundles()  != null && !rule.getTargetBundles().isEmpty();
+
+        if (!hasProductTargets && !hasBundleTargets) {
             return companyLines;
         }
-        Set<Long> targetIds = rule.getTargetProducts().stream()
-                .map(p -> p.getId())
-                .collect(Collectors.toSet());
+
+        Set<Long> productIds = hasProductTargets
+                ? rule.getTargetProducts().stream().map(Product::getId).collect(Collectors.toSet())
+                : Set.of();
+        Set<Long> bundleIds = hasBundleTargets
+                ? rule.getTargetBundles().stream().map(ProductBundle::getId).collect(Collectors.toSet())
+                : Set.of();
+
         return companyLines.stream()
-                .filter(l -> targetIds.contains(l.productId()))
+                .filter(l -> (l.productId() != null && productIds.contains(l.productId()))
+                          || (l.bundleId()  != null && bundleIds.contains(l.bundleId())))
                 .toList();
     }
 

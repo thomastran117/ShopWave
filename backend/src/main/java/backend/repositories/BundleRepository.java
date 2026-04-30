@@ -11,6 +11,7 @@ import java.util.Optional;
 
 public interface BundleRepository extends JpaRepository<ProductBundle, Long> {
     Optional<ProductBundle> findByIdAndCompanyId(long id, long companyId);
+    List<ProductBundle> findAllByIdInAndCompanyId(List<Long> ids, long companyId);
     List<ProductBundle> findAllByCompanyId(long companyId);
     Page<ProductBundle> findAllByCompanyId(long companyId, Pageable pageable);
     Page<ProductBundle> findAllByCompanyIdAndStatus(long companyId, ProductStatus status, Pageable pageable);

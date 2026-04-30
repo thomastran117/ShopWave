@@ -64,6 +64,9 @@ public class CreatePromotionRuleRequest {
     /** Empty or null = applies to entire company catalogue. */
     private List<Long> targetProductIds;
 
+    /** Empty or null = not bundle-scoped. */
+    private List<Long> targetBundleIds;
+
     /** Empty or null = applies to all users including anonymous. */
     private List<Long> targetSegmentIds;
 }

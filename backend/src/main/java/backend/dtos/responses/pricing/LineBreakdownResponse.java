@@ -5,11 +5,12 @@ import java.util.List;
 
 public record LineBreakdownResponse(
         int index,
-        long productId,
+        Long productId,
         Long variantId,
         int quantity,
         BigDecimal unitBasePrice,
         BigDecimal savings,
         BigDecimal effectiveLineTotal,
-        List<Long> appliedRuleIds
+        List<Long> appliedRuleIds,
+        Long bundleId
 ) {}

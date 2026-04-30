@@ -11,7 +11,10 @@ import backend.dtos.responses.pricing.PricingQuoteResponse;
 import backend.exceptions.http.BadRequestException;
 import backend.exceptions.http.ResourceNotFoundException;
 import backend.models.core.Product;
+import backend.models.core.ProductBundle;
 import backend.models.core.ProductVariant;
+import backend.models.enums.ProductStatus;
+import backend.repositories.BundleRepository;
 import backend.repositories.ProductRepository;
 import backend.repositories.ProductVariantRepository;
 import backend.repositories.UserRepository;
@@ -36,16 +39,19 @@ public class PricingQuoteServiceImpl implements PricingQuoteService {
     private final PricingEngine pricingEngine;
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
+    private final BundleRepository bundleRepository;
     private final UserRepository userRepository;
 
     public PricingQuoteServiceImpl(
             PricingEngine pricingEngine,
             ProductRepository productRepository,
             ProductVariantRepository variantRepository,
+            BundleRepository bundleRepository,
             UserRepository userRepository) {
         this.pricingEngine = pricingEngine;
         this.productRepository = productRepository;
         this.variantRepository = variantRepository;
+        this.bundleRepository = bundleRepository;
         this.userRepository = userRepository;
     }
 
@@ -59,25 +65,43 @@ public class PricingQuoteServiceImpl implements PricingQuoteService {
         List<CartLine> cartLines = new ArrayList<>(request.getItems().size());
         for (int i = 0; i < request.getItems().size(); i++) {
             Item item = request.getItems().get(i);
-            Product product = productRepository.findById(item.getProductId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Product not found: " + item.getProductId()));
 
-            BigDecimal unitPrice;
-            Long variantId = item.getVariantId();
-            if (variantId != null) {
-                ProductVariant variant = variantRepository.findByIdAndProductId(variantId, product.getId())
-                        .orElseThrow(() -> new ResourceNotFoundException("Variant not found: " + variantId));
-                unitPrice = variant.getPrice();
+            if (item.getBundleId() != null) {
+                ProductBundle bundle = bundleRepository.findById(item.getBundleId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Bundle not found: " + item.getBundleId()));
+                if (bundle.getStatus() != ProductStatus.ACTIVE || !bundle.isListed()) {
+                    throw new BadRequestException("Bundle " + item.getBundleId() + " is not available for purchase");
+                }
+                cartLines.add(new CartLine(
+                        i,
+                        null,
+                        null,
+                        item.getQuantity(),
+                        bundle.getPrice(),
+                        bundle.getCompany().getId(),
+                        bundle.getId()));
             } else {
-                unitPrice = product.getPrice();
+                Product product = productRepository.findById(item.getProductId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Product not found: " + item.getProductId()));
+
+                BigDecimal unitPrice;
+                Long variantId = item.getVariantId();
+                if (variantId != null) {
+                    ProductVariant variant = variantRepository.findByIdAndProductId(variantId, product.getId())
+                            .orElseThrow(() -> new ResourceNotFoundException("Variant not found: " + variantId));
+                    unitPrice = variant.getPrice();
+                } else {
+                    unitPrice = product.getPrice();
+                }
+                cartLines.add(new CartLine(
+                        i,
+                        product.getId(),
+                        variantId,
+                        item.getQuantity(),
+                        unitPrice,
+                        product.getCompany().getId(),
+                        null));
             }
-            cartLines.add(new CartLine(
-                    i,
-                    product.getId(),
-                    variantId,
-                    item.getQuantity(),
-                    unitPrice,
-                    product.getCompany().getId()));
         }
 
         Set<Long> segmentIds = userId != null
@@ -109,7 +133,8 @@ public class PricingQuoteServiceImpl implements PricingQuoteService {
                     lb.unitBasePrice(),
                     lb.savings(),
                     lb.effectiveLineTotal(),
-                    lb.appliedRuleIds()));
+                    lb.appliedRuleIds(),
+                    lb.bundleId()));
         }
         List<AppliedPromotionResponse> applied = new ArrayList<>(r.appliedPromotions().size());
         for (AppliedPromotion ap : r.appliedPromotions()) {

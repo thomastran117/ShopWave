@@ -27,6 +27,7 @@ public record PromotionRuleResponse(
         Integer maxUsesPerUser,
         Long fundedByCompanyId,
         List<Long> targetProductIds,
+        List<Long> targetBundleIds,
         List<Long> targetSegmentIds,
         Instant createdAt,
         Instant updatedAt

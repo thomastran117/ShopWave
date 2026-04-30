@@ -3,6 +3,7 @@ package backend.seeds;
 import backend.models.core.*;
 import backend.models.enums.*;
 import backend.repositories.*;
+import backend.seeds.BundleSeeder.SeededBundles;
 import backend.seeds.CompanySeeder.SeededCompanies;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Profile;
@@ -38,13 +39,15 @@ public class PricingEngineSeeder {
 
     public void seed(SeededCompanies co,
                      List<Product> tech, List<Product> style, List<Product> wellness,
-                     List<Product> home, List<Product> sport) {
+                     List<Product> home, List<Product> sport,
+                     SeededBundles bundles) {
         seedLoyaltyPrograms(co);
         seedTech(co.tech(), tech);
         seedStyle(co.style(), style);
         seedWellness(co.wellness(), wellness);
         seedHome(co.home(), home);
         seedSport(co.sport(), sport);
+        seedBundleRules(co, bundles);
         seedCoupons(co);
     }
 
@@ -370,6 +373,53 @@ public class PricingEngineSeeder {
     }
 
     // =========================================================================
+    // Bundle-scoped promotion rules — 1 per company
+    //
+    //  TechGadgets  — 10% off "Work From Home Pro" bundle
+    //  StyleHub     — 15% off "Weekend Casual Set" bundle
+    //  WellnessWorld— 10% off "Morning Routine Starter" bundle
+    //  HomeNest     — $20 off "Smart Home Security Pack" bundle
+    //  SportZone    — 10% off "Runner's Complete Kit" bundle
+    // =========================================================================
+
+    private void seedBundleRules(SeededCompanies co, SeededBundles bundles) {
+        ruleForBundle(co.tech(), "Work From Home Pro — 10% Bundle Discount",
+                "Save 10% when you buy the Work From Home Pro bundle.",
+                PromotionRuleType.PERCENTAGE_OFF,
+                "{\"percent\":10.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
+                true, 20, null,
+                bundles.tech());
+
+        ruleForBundle(co.style(), "Weekend Casual Set — 15% Bundle Discount",
+                "Save 15% when you buy the Weekend Casual Set bundle.",
+                PromotionRuleType.PERCENTAGE_OFF,
+                "{\"percent\":15.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
+                true, 20, null,
+                bundles.style());
+
+        ruleForBundle(co.wellness(), "Morning Routine Starter — 10% Bundle Discount",
+                "Save 10% when you buy the Morning Routine Starter bundle.",
+                PromotionRuleType.PERCENTAGE_OFF,
+                "{\"percent\":10.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
+                true, 20, null,
+                bundles.wellness());
+
+        ruleForBundle(co.home(), "Smart Home Security Pack — $20 Off",
+                "$20 off when you buy the Smart Home Security Pack bundle.",
+                PromotionRuleType.FIXED_OFF,
+                "{\"amount\":20.00,\"appliesTo\":\"ORDER\"}",
+                true, 20, null,
+                bundles.home());
+
+        ruleForBundle(co.sport(), "Runner's Complete Kit — 10% Bundle Discount",
+                "Save 10% when you buy the Runner's Complete Kit bundle.",
+                PromotionRuleType.PERCENTAGE_OFF,
+                "{\"percent\":10.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
+                true, 20, null,
+                bundles.sport());
+    }
+
+    // =========================================================================
     // Coupons — 2 per company
     // =========================================================================
 
@@ -451,6 +501,27 @@ public class PricingEngineSeeder {
         r.setMaxUses(maxUses);
         r.setMaxUsesPerUser(maxUsesPerUser);
         r.setTargetProducts(targets);
+        promotionRuleRepository.save(r);
+    }
+
+    private void ruleForBundle(Company co, String name, String description,
+                               PromotionRuleType type, String configJson,
+                               boolean stackable, int priority,
+                               BigDecimal minCart,
+                               ProductBundle targetBundle) {
+        if (promotionRuleRepository.findAllByCompanyId(co.getId(), Pageable.ofSize(100))
+                .stream().anyMatch(r -> r.getName().equals(name))) return;
+        PromotionRule r = new PromotionRule();
+        r.setCompany(co);
+        r.setName(name);
+        r.setDescription(description);
+        r.setRuleType(type);
+        r.setConfigJson(configJson);
+        r.setStatus(DiscountStatus.ACTIVE);
+        r.setStackable(stackable);
+        r.setPriority(priority);
+        r.setMinCartAmount(minCart);
+        r.setTargetBundles(new java.util.HashSet<>(java.util.Set.of(targetBundle)));
         promotionRuleRepository.save(r);
     }
 

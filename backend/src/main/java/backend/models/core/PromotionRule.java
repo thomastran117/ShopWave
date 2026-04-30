@@ -118,6 +118,21 @@ public class PromotionRule {
     private Set<Product> targetProducts = new HashSet<>();
 
     /**
+     * Bundle set this rule applies to. Empty = not bundle-scoped (fires on products via targetProducts).
+     * When non-empty, the rule fires only when the cart contains a matching bundle line.
+     * A rule with both targetProducts and targetBundles fires on either (union).
+     * No cascade — deleting a rule does not delete bundles.
+     */
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+            name = "promotion_rule_bundles",
+            joinColumns = @JoinColumn(name = "promotion_rule_id"),
+            inverseJoinColumns = @JoinColumn(name = "bundle_id")
+    )
+    @BatchSize(size = 50)
+    private Set<ProductBundle> targetBundles = new HashSet<>();
+
+    /**
      * Segments whose members are eligible. Empty = all users including anonymous.
      * Anonymous callers only see rules with an empty segment set.
      */

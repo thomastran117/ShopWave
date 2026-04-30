@@ -34,11 +34,12 @@ public final class WorkingLine {
 
     public CartLine source()                  { return source; }
     public int index()                        { return source.index(); }
-    public long productId()                   { return source.productId(); }
+    public Long productId()                   { return source.productId(); }
     public Long variantId()                   { return source.variantId(); }
     public int quantity()                     { return source.quantity(); }
     public BigDecimal unitBasePrice()         { return source.unitBasePrice(); }
     public long companyId()                   { return source.companyId(); }
+    public Long bundleId()                    { return source.bundleId(); }
     public BigDecimal remaining()             { return remaining; }
     public BigDecimal savings()               { return savings; }
     public int bogoTriggerConsumed()          { return bogoTriggerConsumed; }
@@ -69,7 +70,8 @@ public final class WorkingLine {
                 source.unitBasePrice(),
                 savings,
                 remaining,
-                new ArrayList<>(appliedRuleIds)
+                new ArrayList<>(appliedRuleIds),
+                source.bundleId()
         );
     }
 }

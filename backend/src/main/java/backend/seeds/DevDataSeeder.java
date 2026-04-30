@@ -50,8 +50,8 @@ public class DevDataSeeder implements ApplicationRunner {
 
         reviewSeeder.seed(techProducts, styleProducts, wellnessProducts, homeProducts, sportProducts, users);
         loyaltySeeder.seed(users, companies);
-        pricingSeeder.seed(companies, techProducts, styleProducts, wellnessProducts, homeProducts, sportProducts);
-        bundleSeeder.seed(companies, techProducts, styleProducts, wellnessProducts, homeProducts, sportProducts);
+        var bundles = bundleSeeder.seed(companies, techProducts, styleProducts, wellnessProducts, homeProducts, sportProducts);
+        pricingSeeder.seed(companies, techProducts, styleProducts, wellnessProducts, homeProducts, sportProducts, bundles);
 
         log.info("[DevDataSeeder] Seeded {} users, {} companies, {} products",
                 userRepository.count(), companyRepository.count(), productRepository.count());

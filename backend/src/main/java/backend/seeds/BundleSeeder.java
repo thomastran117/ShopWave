@@ -20,26 +20,30 @@ import java.util.List;
  * Each bundle groups 3–5 complementary products at a discounted bundle price.
  * compareAtPrice = sum of individual product prices, making the saving visible.
  * Variant is null on all items (any variant eligible).
- *
- * Pricing engine integration at the bundle level (promotion rules scoped
- * directly to a ProductBundle) is tracked in:
- *   docs/issues/bundle-pricing-engine.md
  */
 @Component
 @Profile("dev")
 @RequiredArgsConstructor
 public class BundleSeeder {
 
+    public record SeededBundles(
+            ProductBundle tech,
+            ProductBundle style,
+            ProductBundle wellness,
+            ProductBundle home,
+            ProductBundle sport) {}
+
     private final BundleRepository bundleRepository;
 
-    public void seed(SeededCompanies co,
+    public SeededBundles seed(SeededCompanies co,
                      List<Product> tech, List<Product> style, List<Product> wellness,
                      List<Product> home, List<Product> sport) {
-        seedTech(co.tech(), tech);
-        seedStyle(co.style(), style);
-        seedWellness(co.wellness(), wellness);
-        seedHome(co.home(), home);
-        seedSport(co.sport(), sport);
+        ProductBundle techBundle     = seedTech(co.tech(), tech);
+        ProductBundle styleBundle    = seedStyle(co.style(), style);
+        ProductBundle wellnessBundle = seedWellness(co.wellness(), wellness);
+        ProductBundle homeBundle     = seedHome(co.home(), home);
+        ProductBundle sportBundle    = seedSport(co.sport(), sport);
+        return new SeededBundles(techBundle, styleBundle, wellnessBundle, homeBundle, sportBundle);
     }
 
     // =========================================================================
@@ -52,10 +56,11 @@ public class BundleSeeder {
     //    40=Green Screen  46=Mic Arm Kit
     // =========================================================================
 
-    private void seedTech(Company co, List<Product> p) {
-        if (!bundleRepository.findAllByCompanyId(co.getId()).isEmpty()) return;
+    private ProductBundle seedTech(Company co, List<Product> p) {
+        List<ProductBundle> existing = bundleRepository.findAllByCompanyId(co.getId());
+        if (!existing.isEmpty()) return existing.get(0);
 
-        bundle(co, "Work From Home Pro",
+        ProductBundle first = bundle(co, "Work From Home Pro",
                 "Everything for a professional home office — studio-quality video, clear audio, and an organised desk.",
                 "https://placehold.co/800x800/2e4057/ffffff?text=WFH+Pro",
                 new BigDecimal("219.99"), new BigDecimal("259.96"),
@@ -84,6 +89,8 @@ public class BundleSeeder {
                 "https://placehold.co/800x800/1b2631/ffffff?text=Creator+Stream",
                 new BigDecimal("229.99"), new BigDecimal("264.96"),
                 items(p, new int[]{39, 5, 46, 40}));
+
+        return first;
     }
 
     // =========================================================================
@@ -97,10 +104,11 @@ public class BundleSeeder {
     //    44=Turtleneck  45=Denim Shorts
     // =========================================================================
 
-    private void seedStyle(Company co, List<Product> p) {
-        if (!bundleRepository.findAllByCompanyId(co.getId()).isEmpty()) return;
+    private ProductBundle seedStyle(Company co, List<Product> p) {
+        List<ProductBundle> existing = bundleRepository.findAllByCompanyId(co.getId());
+        if (!existing.isEmpty()) return existing.get(0);
 
-        bundle(co, "Weekend Casual Set",
+        ProductBundle first = bundle(co, "Weekend Casual Set",
                 "The effortless weekend uniform — organic tee, tailored chinos, classic sneakers, and a washed cap.",
                 "https://placehold.co/800x800/f5cba7/333333?text=Weekend+Casual",
                 new BigDecimal("164.99"), new BigDecimal("194.96"),
@@ -129,6 +137,8 @@ public class BundleSeeder {
                 "https://placehold.co/800x800/e9c46a/333333?text=Festival+Look",
                 new BigDecimal("139.99"), new BigDecimal("169.96"),
                 items(p, new int[]{37, 45, 34, 4}));
+
+        return first;
     }
 
     // =========================================================================
@@ -141,10 +151,11 @@ public class BundleSeeder {
     //    32=Collagen Cream  33=HA Serum  35=SPF 50  43=Herbal Sleep Tea  48=Acupressure Mat
     // =========================================================================
 
-    private void seedWellness(Company co, List<Product> p) {
-        if (!bundleRepository.findAllByCompanyId(co.getId()).isEmpty()) return;
+    private ProductBundle seedWellness(Company co, List<Product> p) {
+        List<ProductBundle> existing = bundleRepository.findAllByCompanyId(co.getId());
+        if (!existing.isEmpty()) return existing.get(0);
 
-        bundle(co, "Morning Routine Starter",
+        ProductBundle first = bundle(co, "Morning Routine Starter",
                 "Kick-start every day — quality protein, essential vitamins, ceremonial matcha, and an insulated tumbler.",
                 "https://placehold.co/800x800/d6eaf8/333333?text=Morning+Routine",
                 new BigDecimal("124.99"), new BigDecimal("154.96"),
@@ -173,6 +184,8 @@ public class BundleSeeder {
                 "https://placehold.co/800x800/7dcea0/ffffff?text=Wellness+Sanctuary",
                 new BigDecimal("164.99"), new BigDecimal("194.96"),
                 items(p, new int[]{5, 8, 16, 4}));
+
+        return first;
     }
 
     // =========================================================================
@@ -186,10 +199,11 @@ public class BundleSeeder {
     //    43=LED Floor Lamp  45=Chunky Knit Throw  46=Plant Stand  49=Marble Tray
     // =========================================================================
 
-    private void seedHome(Company co, List<Product> p) {
-        if (!bundleRepository.findAllByCompanyId(co.getId()).isEmpty()) return;
+    private ProductBundle seedHome(Company co, List<Product> p) {
+        List<ProductBundle> existing = bundleRepository.findAllByCompanyId(co.getId());
+        if (!existing.isEmpty()) return existing.get(0);
 
-        bundle(co, "Smart Home Security Pack",
+        ProductBundle first = bundle(co, "Smart Home Security Pack",
                 "Full-coverage protection — 2K doorbell, pan-tilt camera, smoke & CO alarm, and water leak sensor.",
                 "https://placehold.co/800x800/2c3e50/ffffff?text=Security+Pack",
                 new BigDecimal("219.99"), new BigDecimal("259.96"),
@@ -218,6 +232,8 @@ public class BundleSeeder {
                 "https://placehold.co/800x800/f5f5f5/333333?text=Living+Room+Refresh",
                 new BigDecimal("209.99"), new BigDecimal("249.96"),
                 items(p, new int[]{43, 45, 42, 46}));
+
+        return first;
     }
 
     // =========================================================================
@@ -231,10 +247,11 @@ public class BundleSeeder {
     //    43=Waterproof Earbuds  44=Gym Gloves  45=Powerlifting Belt  48=Wrist Straps  49=Lacrosse Balls
     // =========================================================================
 
-    private void seedSport(Company co, List<Product> p) {
-        if (!bundleRepository.findAllByCompanyId(co.getId()).isEmpty()) return;
+    private ProductBundle seedSport(Company co, List<Product> p) {
+        List<ProductBundle> existing = bundleRepository.findAllByCompanyId(co.getId());
+        if (!existing.isEmpty()) return existing.get(0);
 
-        bundle(co, "Runner's Complete Kit",
+        ProductBundle first = bundle(co, "Runner's Complete Kit",
                 "Hit the road fully equipped — elite shorts, pro leggings, perforated cap, phone armband, and arch-support socks.",
                 "https://placehold.co/800x800/1abc9c/ffffff?text=Runners+Kit",
                 new BigDecimal("139.99"), new BigDecimal("166.95"),
@@ -263,13 +280,15 @@ public class BundleSeeder {
                 "https://placehold.co/800x800/212f3c/ffffff?text=Training+Day",
                 new BigDecimal("159.99"), new BigDecimal("187.96"),
                 items(p, new int[]{5, 7, 43, 41}));
+
+        return first;
     }
 
     // =========================================================================
     // Entity builders
     // =========================================================================
 
-    private void bundle(Company co, String name, String description,
+    private ProductBundle bundle(Company co, String name, String description,
                         String thumbnailUrl, BigDecimal price, BigDecimal compareAtPrice,
                         BundleItem[] bundleItems) {
         ProductBundle b = new ProductBundle();
@@ -286,7 +305,7 @@ public class BundleSeeder {
             bi.setBundle(b);
             b.getItems().add(bi);
         }
-        bundleRepository.save(b);
+        return bundleRepository.save(b);
     }
 
     private BundleItem[] items(List<Product> products, int[] indices) {

@@ -8,6 +8,7 @@ import backend.models.core.Company;
 import backend.models.core.Coupon;
 import backend.models.core.CustomerSegment;
 import backend.models.core.Product;
+import backend.models.core.ProductBundle;
 import backend.models.core.PromotionRule;
 import backend.models.enums.DiscountStatus;
 import backend.models.enums.DiscountType;
@@ -179,7 +180,7 @@ class PricingEngineImplTest {
         PricingResult result = engine.compute(ctx, List.of(rule), null);
         assertEquals(bd("20.00"), result.promotionSavings()); // product 2 (cheapest)
         // line for productId=2 should have savings == 20.00
-        LineBreakdown p2 = result.lines().stream().filter(l -> l.productId() == 2L).findFirst().orElseThrow();
+        LineBreakdown p2 = result.lines().stream().filter(l -> Long.valueOf(2L).equals(l.productId())).findFirst().orElseThrow();
         assertEquals(bd("20.00"), p2.savings());
     }
 
@@ -427,7 +428,11 @@ class PricingEngineImplTest {
     }
 
     private static CartLine line(int index, long productId, int qty, String unitPrice) {
-        return new CartLine(index, productId, null, qty, new BigDecimal(unitPrice), COMPANY_ID);
+        return new CartLine(index, productId, null, qty, new BigDecimal(unitPrice), COMPANY_ID, null);
+    }
+
+    private static CartLine bundleLine(int index, long bundleId, int qty, String unitPrice) {
+        return new CartLine(index, null, null, qty, new BigDecimal(unitPrice), COMPANY_ID, bundleId);
     }
 
     private static CartContext context(List<CartLine> lines, Long userId, Set<Long> segments) {
@@ -460,6 +465,7 @@ class PricingEngineImplTest {
         r.setStackable(stackable);
         r.setPriority(priority);
         r.setTargetProducts(new HashSet<>());
+        r.setTargetBundles(new HashSet<>());
         r.setTargetSegments(new HashSet<>());
         return r;
     }
@@ -522,6 +528,104 @@ class PricingEngineImplTest {
         co.setId(COMPANY_ID);
         c.setCompany(co);
         return c;
+    }
+
+    // -------------------- bundle-scoped rule tests --------------------
+
+    @Test
+    void bundleRule_firesOnBundleLine() {
+        long bundleId = 42L;
+        CartLine bl = bundleLine(0, bundleId, 1, "200.00");
+        CartContext ctx = context(List.of(bl), null, Set.of());
+
+        PromotionRule rule = percentageRule("10", null, "LINE", true, 50);
+        ProductBundle bundle = new ProductBundle();
+        bundle.setId(bundleId);
+        rule.setTargetBundles(new HashSet<>(Set.of(bundle)));
+
+        PricingResult result = engine.compute(ctx, List.of(rule), null);
+
+        assertEquals(bd("20.00"), result.promotionSavings());
+        assertEquals(bd("180.00"), result.finalTotal());
+    }
+
+    @Test
+    void bundleRule_doesNotFireOnSameProductsBoughtSeparately() {
+        long bundleId = 42L;
+        // same products as if the bundle were expanded, but no bundleId set
+        CartLine productLine = line(0, 100L, 1, "200.00");
+        CartContext ctx = context(List.of(productLine), null, Set.of());
+
+        PromotionRule rule = percentageRule("10", null, "LINE", true, 50);
+        ProductBundle bundle = new ProductBundle();
+        bundle.setId(bundleId);
+        rule.setTargetBundles(new HashSet<>(Set.of(bundle)));
+
+        PricingResult result = engine.compute(ctx, List.of(rule), null);
+
+        assertEquals(bd("0.00"), result.promotionSavings());
+        assertEquals(bd("200.00"), result.finalTotal());
+    }
+
+    @Test
+    void ruleWithBothTargets_matchesUnion() {
+        long bundleId = 42L;
+        long productId = 77L;
+
+        CartLine bl = bundleLine(0, bundleId, 1, "100.00");
+        CartLine pl = line(1, productId, 1, "50.00");
+        CartContext ctx = context(List.of(bl, pl), null, Set.of());
+
+        PromotionRule rule = percentageRule("20", null, "LINE", true, 50);
+        ProductBundle bundle = new ProductBundle();
+        bundle.setId(bundleId);
+        rule.setTargetBundles(new HashSet<>(Set.of(bundle)));
+        Product p = new Product();
+        p.setId(productId);
+        rule.setTargetProducts(new HashSet<>(Set.of(p)));
+
+        PricingResult result = engine.compute(ctx, List.of(rule), null);
+
+        // 20% of 100 + 20% of 50 = 30
+        assertEquals(bd("30.00"), result.promotionSavings());
+    }
+
+    @Test
+    void existingRules_withEmptyTargetBundles_behavesUnchanged() {
+        CartLine pl = line(0, 1L, 2, "50.00");
+        CartContext ctx = context(List.of(pl), null, Set.of());
+
+        PromotionRule rule = percentageRule("10", null, "LINE", true, 50);
+        // targetBundles is empty (set by baseRule) — applies to entire catalogue
+
+        PricingResult result = engine.compute(ctx, List.of(rule), null);
+
+        assertEquals(bd("10.00"), result.promotionSavings());
+        assertEquals(bd("90.00"), result.finalTotal());
+    }
+
+    @Test
+    void bundleRuleDoesNotTouchUnrelatedProductLines() {
+        long bundleId = 42L;
+        CartLine bl = bundleLine(0, bundleId, 1, "200.00");
+        CartLine pl = line(1, 99L, 1, "100.00"); // unrelated product
+
+        CartContext ctx = context(List.of(bl, pl), null, Set.of());
+
+        PromotionRule bundleRule = percentageRule("10", null, "LINE", true, 50);
+        ProductBundle bundle = new ProductBundle();
+        bundle.setId(bundleId);
+        bundleRule.setTargetBundles(new HashSet<>(Set.of(bundle)));
+
+        PricingResult result = engine.compute(ctx, List.of(bundleRule), null);
+
+        // Only the bundle line is discounted (10% of 200 = 20)
+        assertEquals(bd("20.00"), result.promotionSavings());
+        // Product line is untouched
+        LineBreakdown productBreakdown = result.lines().stream()
+                .filter(l -> Long.valueOf(99L).equals(l.productId()))
+                .findFirst().orElseThrow();
+        assertEquals(bd("0.00"), productBreakdown.savings());
     }
 
 }

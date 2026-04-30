@@ -54,8 +54,9 @@ public interface PromotionRuleRepository extends JpaRepository<PromotionRule, Lo
 
     /**
      * Active, in-window rules for a product: either explicitly targeting the product or
-     * applying to the whole company catalogue (empty targetProducts). Used by search
-     * indexing to populate {@code hasActiveDiscount} / {@code discountedPrice}.
+     * applying to the whole company catalogue (empty targetProducts and targetBundles).
+     * Bundle-scoped rules are excluded so they don't surface as product-level discounts.
+     * Used by search indexing to populate {@code hasActiveDiscount} / {@code discountedPrice}.
      */
     @Query("""
             SELECT DISTINCT r FROM PromotionRule r LEFT JOIN r.targetProducts p
@@ -64,10 +65,31 @@ public interface PromotionRuleRepository extends JpaRepository<PromotionRule, Lo
               AND (:now >= r.startDate OR r.startDate IS NULL)
               AND (:now <  r.endDate   OR r.endDate   IS NULL)
               AND (r.targetProducts IS EMPTY OR p.id = :productId)
+              AND r.targetBundles IS EMPTY
             """)
     List<PromotionRule> findActiveRulesForProduct(
             @Param("companyId") long companyId,
             @Param("productId") long productId,
+            @Param("now") Instant now);
+
+    /**
+     * Active, in-window rules for a bundle: either explicitly targeting the bundle or
+     * applying to the whole company catalogue (empty targetProducts and targetBundles).
+     * Product-scoped rules are excluded so they don't surface as bundle-level discounts.
+     * Used by bundle indexing to populate {@code hasActiveDiscount} / {@code discountedPrice}.
+     */
+    @Query("""
+            SELECT DISTINCT r FROM PromotionRule r LEFT JOIN r.targetBundles tb
+            WHERE r.company.id = :companyId
+              AND r.status = backend.models.enums.DiscountStatus.ACTIVE
+              AND (:now >= r.startDate OR r.startDate IS NULL)
+              AND (:now <  r.endDate   OR r.endDate   IS NULL)
+              AND (r.targetBundles IS EMPTY OR tb.id = :bundleId)
+              AND r.targetProducts IS EMPTY
+            """)
+    List<PromotionRule> findActiveRulesForBundle(
+            @Param("companyId") long companyId,
+            @Param("bundleId") long bundleId,
             @Param("now") Instant now);
 
     /** Bulk-deletes expired rules. Called by an expiry scheduler analogous to DiscountExpiryScheduler. */
