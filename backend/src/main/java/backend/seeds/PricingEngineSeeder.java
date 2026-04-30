@@ -373,50 +373,221 @@ public class PricingEngineSeeder {
     }
 
     // =========================================================================
-    // Bundle-scoped promotion rules — 1 per company
+    // Bundle-scoped promotion rules — 5 per company (1 per bundle), 25 total
     //
-    //  TechGadgets  — 10% off "Work From Home Pro" bundle
-    //  StyleHub     — 15% off "Weekend Casual Set" bundle
-    //  WellnessWorld— 10% off "Morning Routine Starter" bundle
-    //  HomeNest     — $20 off "Smart Home Security Pack" bundle
-    //  SportZone    — 10% off "Runner's Complete Kit" bundle
+    //  Bundle list index order matches BundleSeeder creation order:
+    //
+    //  TechGadgets [0] Work From Home Pro      PERCENTAGE_OFF 10%
+    //              [1] Gaming Lair Setup        FIXED_OFF $15
+    //              [2] Smart Home Starter Kit   PERCENTAGE_OFF 12%
+    //              [3] Audiophile Collection    FREE_SHIPPING
+    //              [4] Creator Stream Bundle    PERCENTAGE_OFF 8%
+    //
+    //  StyleHub    [0] Weekend Casual Set       PERCENTAGE_OFF 15%
+    //              [1] Active Life Bundle       PERCENTAGE_OFF 10%
+    //              [2] Smart Business Look      FIXED_OFF $25
+    //              [3] Cosy Home Set            PERCENTAGE_OFF 10%
+    //              [4] Festival Looks Bundle    FREE_SHIPPING
+    //
+    //  Wellness    [0] Morning Routine Starter  PERCENTAGE_OFF 10%
+    //              [1] Skincare Ritual Bundle   PERCENTAGE_OFF 12%
+    //              [2] Recovery & Rest Pack     FREE_SHIPPING
+    //              [3] Sports Performance Stack PERCENTAGE_OFF 15%
+    //              [4] Home Wellness Sanctuary  FIXED_OFF $15
+    //
+    //  HomeNest    [0] Smart Home Security Pack FIXED_OFF $20
+    //              [1] Kitchen Starter Kit      PERCENTAGE_OFF 10%
+    //              [2] Bedroom Dream Setup      FREE_SHIPPING
+    //              [3] Home Fragrance Collection PERCENTAGE_OFF 8%
+    //              [4] Living Room Refresh      FIXED_OFF $20
+    //
+    //  SportZone   [0] Runner's Complete Kit    PERCENTAGE_OFF 10%
+    //              [1] Home Gym Starter         PERCENTAGE_OFF 12%
+    //              [2] Nutrition Fundamentals   FIXED_OFF $15
+    //              [3] Powerlifting Pack        FREE_SHIPPING
+    //              [4] Training Day Bundle      PERCENTAGE_OFF 10%
     // =========================================================================
 
     private void seedBundleRules(SeededCompanies co, SeededBundles bundles) {
+        // TechGadgets
         ruleForBundle(co.tech(), "Work From Home Pro — 10% Bundle Discount",
                 "Save 10% when you buy the Work From Home Pro bundle.",
                 PromotionRuleType.PERCENTAGE_OFF,
                 "{\"percent\":10.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
                 true, 20, null,
-                bundles.tech());
+                bundles.tech().get(0));
 
+        ruleForBundle(co.tech(), "Gaming Lair Setup — $15 Off",
+                "$15 off the Gaming Lair Setup bundle.",
+                PromotionRuleType.FIXED_OFF,
+                "{\"amount\":15.00,\"appliesTo\":\"ORDER\"}",
+                true, 20, null,
+                bundles.tech().get(1));
+
+        ruleForBundle(co.tech(), "Smart Home Starter Kit — 12% Bundle Discount",
+                "Save 12% when you buy the Smart Home Starter Kit bundle.",
+                PromotionRuleType.PERCENTAGE_OFF,
+                "{\"percent\":12.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
+                true, 20, null,
+                bundles.tech().get(2));
+
+        ruleForBundle(co.tech(), "Audiophile Collection — Free Shipping",
+                "Free shipping on the Audiophile Collection bundle.",
+                PromotionRuleType.FREE_SHIPPING,
+                "{\"maxShippingDiscount\":null,\"requiresAllTargetProducts\":false}",
+                true, 20, null,
+                bundles.tech().get(3));
+
+        ruleForBundle(co.tech(), "Creator Stream Bundle — 8% Bundle Discount",
+                "Save 8% when you buy the Creator Stream Bundle.",
+                PromotionRuleType.PERCENTAGE_OFF,
+                "{\"percent\":8.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
+                true, 20, null,
+                bundles.tech().get(4));
+
+        // StyleHub
         ruleForBundle(co.style(), "Weekend Casual Set — 15% Bundle Discount",
                 "Save 15% when you buy the Weekend Casual Set bundle.",
                 PromotionRuleType.PERCENTAGE_OFF,
                 "{\"percent\":15.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
                 true, 20, null,
-                bundles.style());
+                bundles.style().get(0));
 
+        ruleForBundle(co.style(), "Active Life Bundle — 10% Bundle Discount",
+                "Save 10% when you buy the Active Life Bundle.",
+                PromotionRuleType.PERCENTAGE_OFF,
+                "{\"percent\":10.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
+                true, 20, null,
+                bundles.style().get(1));
+
+        ruleForBundle(co.style(), "Smart Business Look — $25 Off",
+                "$25 off the Smart Business Look bundle.",
+                PromotionRuleType.FIXED_OFF,
+                "{\"amount\":25.00,\"appliesTo\":\"ORDER\"}",
+                true, 20, null,
+                bundles.style().get(2));
+
+        ruleForBundle(co.style(), "Cosy Home Set — 10% Bundle Discount",
+                "Save 10% when you buy the Cosy Home Set bundle.",
+                PromotionRuleType.PERCENTAGE_OFF,
+                "{\"percent\":10.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
+                true, 20, null,
+                bundles.style().get(3));
+
+        ruleForBundle(co.style(), "Festival Looks Bundle — Free Shipping",
+                "Free shipping on the Festival Looks Bundle.",
+                PromotionRuleType.FREE_SHIPPING,
+                "{\"maxShippingDiscount\":null,\"requiresAllTargetProducts\":false}",
+                true, 20, null,
+                bundles.style().get(4));
+
+        // WellnessWorld
         ruleForBundle(co.wellness(), "Morning Routine Starter — 10% Bundle Discount",
                 "Save 10% when you buy the Morning Routine Starter bundle.",
                 PromotionRuleType.PERCENTAGE_OFF,
                 "{\"percent\":10.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
                 true, 20, null,
-                bundles.wellness());
+                bundles.wellness().get(0));
 
+        ruleForBundle(co.wellness(), "Skincare Ritual Bundle — 12% Bundle Discount",
+                "Save 12% when you buy the Skincare Ritual Bundle.",
+                PromotionRuleType.PERCENTAGE_OFF,
+                "{\"percent\":12.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
+                true, 20, null,
+                bundles.wellness().get(1));
+
+        ruleForBundle(co.wellness(), "Recovery & Rest Pack — Free Shipping",
+                "Free shipping on the Recovery & Rest Pack bundle.",
+                PromotionRuleType.FREE_SHIPPING,
+                "{\"maxShippingDiscount\":null,\"requiresAllTargetProducts\":false}",
+                true, 20, null,
+                bundles.wellness().get(2));
+
+        ruleForBundle(co.wellness(), "Sports Performance Stack — 15% Bundle Discount",
+                "Save 15% when you buy the Sports Performance Stack bundle.",
+                PromotionRuleType.PERCENTAGE_OFF,
+                "{\"percent\":15.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
+                true, 20, null,
+                bundles.wellness().get(3));
+
+        ruleForBundle(co.wellness(), "Home Wellness Sanctuary — $15 Off",
+                "$15 off the Home Wellness Sanctuary bundle.",
+                PromotionRuleType.FIXED_OFF,
+                "{\"amount\":15.00,\"appliesTo\":\"ORDER\"}",
+                true, 20, null,
+                bundles.wellness().get(4));
+
+        // HomeNest
         ruleForBundle(co.home(), "Smart Home Security Pack — $20 Off",
                 "$20 off when you buy the Smart Home Security Pack bundle.",
                 PromotionRuleType.FIXED_OFF,
                 "{\"amount\":20.00,\"appliesTo\":\"ORDER\"}",
                 true, 20, null,
-                bundles.home());
+                bundles.home().get(0));
 
+        ruleForBundle(co.home(), "Kitchen Starter Kit — 10% Bundle Discount",
+                "Save 10% when you buy the Kitchen Starter Kit bundle.",
+                PromotionRuleType.PERCENTAGE_OFF,
+                "{\"percent\":10.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
+                true, 20, null,
+                bundles.home().get(1));
+
+        ruleForBundle(co.home(), "Bedroom Dream Setup — Free Shipping",
+                "Free shipping on the Bedroom Dream Setup bundle.",
+                PromotionRuleType.FREE_SHIPPING,
+                "{\"maxShippingDiscount\":null,\"requiresAllTargetProducts\":false}",
+                true, 20, null,
+                bundles.home().get(2));
+
+        ruleForBundle(co.home(), "Home Fragrance Collection — 8% Bundle Discount",
+                "Save 8% when you buy the Home Fragrance Collection bundle.",
+                PromotionRuleType.PERCENTAGE_OFF,
+                "{\"percent\":8.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
+                true, 20, null,
+                bundles.home().get(3));
+
+        ruleForBundle(co.home(), "Living Room Refresh — $20 Off",
+                "$20 off the Living Room Refresh bundle.",
+                PromotionRuleType.FIXED_OFF,
+                "{\"amount\":20.00,\"appliesTo\":\"ORDER\"}",
+                true, 20, null,
+                bundles.home().get(4));
+
+        // SportZone
         ruleForBundle(co.sport(), "Runner's Complete Kit — 10% Bundle Discount",
                 "Save 10% when you buy the Runner's Complete Kit bundle.",
                 PromotionRuleType.PERCENTAGE_OFF,
                 "{\"percent\":10.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
                 true, 20, null,
-                bundles.sport());
+                bundles.sport().get(0));
+
+        ruleForBundle(co.sport(), "Home Gym Starter — 12% Bundle Discount",
+                "Save 12% when you buy the Home Gym Starter bundle.",
+                PromotionRuleType.PERCENTAGE_OFF,
+                "{\"percent\":12.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
+                true, 20, null,
+                bundles.sport().get(1));
+
+        ruleForBundle(co.sport(), "Nutrition Fundamentals — $15 Off",
+                "$15 off the Nutrition Fundamentals bundle.",
+                PromotionRuleType.FIXED_OFF,
+                "{\"amount\":15.00,\"appliesTo\":\"ORDER\"}",
+                true, 20, null,
+                bundles.sport().get(2));
+
+        ruleForBundle(co.sport(), "Powerlifting Pack — Free Shipping",
+                "Free shipping on the Powerlifting Pack bundle.",
+                PromotionRuleType.FREE_SHIPPING,
+                "{\"maxShippingDiscount\":null,\"requiresAllTargetProducts\":false}",
+                true, 20, null,
+                bundles.sport().get(3));
+
+        ruleForBundle(co.sport(), "Training Day Bundle — 10% Bundle Discount",
+                "Save 10% when you buy the Training Day Bundle.",
+                PromotionRuleType.PERCENTAGE_OFF,
+                "{\"percent\":10.00,\"maxDiscount\":null,\"appliesTo\":\"LINE\"}",
+                true, 20, null,
+                bundles.sport().get(4));
     }
 
     // =========================================================================

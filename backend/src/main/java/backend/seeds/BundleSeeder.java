@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -27,23 +28,23 @@ import java.util.List;
 public class BundleSeeder {
 
     public record SeededBundles(
-            ProductBundle tech,
-            ProductBundle style,
-            ProductBundle wellness,
-            ProductBundle home,
-            ProductBundle sport) {}
+            List<ProductBundle> tech,
+            List<ProductBundle> style,
+            List<ProductBundle> wellness,
+            List<ProductBundle> home,
+            List<ProductBundle> sport) {}
 
     private final BundleRepository bundleRepository;
 
     public SeededBundles seed(SeededCompanies co,
                      List<Product> tech, List<Product> style, List<Product> wellness,
                      List<Product> home, List<Product> sport) {
-        ProductBundle techBundle     = seedTech(co.tech(), tech);
-        ProductBundle styleBundle    = seedStyle(co.style(), style);
-        ProductBundle wellnessBundle = seedWellness(co.wellness(), wellness);
-        ProductBundle homeBundle     = seedHome(co.home(), home);
-        ProductBundle sportBundle    = seedSport(co.sport(), sport);
-        return new SeededBundles(techBundle, styleBundle, wellnessBundle, homeBundle, sportBundle);
+        return new SeededBundles(
+                seedTech(co.tech(), tech),
+                seedStyle(co.style(), style),
+                seedWellness(co.wellness(), wellness),
+                seedHome(co.home(), home),
+                seedSport(co.sport(), sport));
     }
 
     // =========================================================================
@@ -56,41 +57,42 @@ public class BundleSeeder {
     //    40=Green Screen  46=Mic Arm Kit
     // =========================================================================
 
-    private ProductBundle seedTech(Company co, List<Product> p) {
+    private List<ProductBundle> seedTech(Company co, List<Product> p) {
         List<ProductBundle> existing = bundleRepository.findAllByCompanyId(co.getId());
-        if (!existing.isEmpty()) return existing.get(0);
+        if (!existing.isEmpty()) return existing;
 
-        ProductBundle first = bundle(co, "Work From Home Pro",
+        List<ProductBundle> result = new ArrayList<>();
+        result.add(bundle(co, "Work From Home Pro",
                 "Everything for a professional home office — studio-quality video, clear audio, and an organised desk.",
                 "https://placehold.co/800x800/2e4057/ffffff?text=WFH+Pro",
                 new BigDecimal("219.99"), new BigDecimal("259.96"),
-                items(p, new int[]{5, 12, 46, 24}));
+                items(p, new int[]{5, 12, 46, 24})));
 
-        bundle(co, "Gaming Lair Setup",
+        result.add(bundle(co, "Gaming Lair Setup",
                 "The complete gaming desk package — wireless headset, precision mouse, giant desk mat, and LED strip lighting.",
                 "https://placehold.co/800x800/1c2833/ffffff?text=Gaming+Lair",
                 new BigDecimal("184.99"), new BigDecimal("214.96"),
-                items(p, new int[]{20, 9, 24, 13}));
+                items(p, new int[]{20, 9, 24, 13})));
 
-        bundle(co, "Smart Home Starter Kit",
+        result.add(bundle(co, "Smart Home Starter Kit",
                 "Control, automate, and secure your home — hub, smart plugs, tunable bulbs, and climate control.",
                 "https://placehold.co/800x800/2c3e50/ffffff?text=Smart+Home+Kit",
                 new BigDecimal("309.99"), new BigDecimal("363.96"),
-                items(p, new int[]{8, 17, 32, 30}));
+                items(p, new int[]{8, 17, 32, 30})));
 
-        bundle(co, "Audiophile Collection",
+        result.add(bundle(co, "Audiophile Collection",
                 "Premium audio from every angle — over-ear ANC headphones, in-ear ANC earbuds, and condenser mic.",
                 "https://placehold.co/800x800/1a1a2e/ffffff?text=Audiophile",
                 new BigDecimal("279.99"), new BigDecimal("319.97"),
-                items(p, new int[]{0, 7, 12}));
+                items(p, new int[]{0, 7, 12})));
 
-        bundle(co, "Creator Stream Bundle",
+        result.add(bundle(co, "Creator Stream Bundle",
                 "Go live with confidence — professional ring light, 4K camera, boom arm, and studio backdrop.",
                 "https://placehold.co/800x800/1b2631/ffffff?text=Creator+Stream",
                 new BigDecimal("229.99"), new BigDecimal("264.96"),
-                items(p, new int[]{39, 5, 46, 40}));
+                items(p, new int[]{39, 5, 46, 40})));
 
-        return first;
+        return result;
     }
 
     // =========================================================================
@@ -104,41 +106,42 @@ public class BundleSeeder {
     //    44=Turtleneck  45=Denim Shorts
     // =========================================================================
 
-    private ProductBundle seedStyle(Company co, List<Product> p) {
+    private List<ProductBundle> seedStyle(Company co, List<Product> p) {
         List<ProductBundle> existing = bundleRepository.findAllByCompanyId(co.getId());
-        if (!existing.isEmpty()) return existing.get(0);
+        if (!existing.isEmpty()) return existing;
 
-        ProductBundle first = bundle(co, "Weekend Casual Set",
+        List<ProductBundle> result = new ArrayList<>();
+        result.add(bundle(co, "Weekend Casual Set",
                 "The effortless weekend uniform — organic tee, tailored chinos, classic sneakers, and a washed cap.",
                 "https://placehold.co/800x800/f5cba7/333333?text=Weekend+Casual",
                 new BigDecimal("164.99"), new BigDecimal("194.96"),
-                items(p, new int[]{0, 12, 4, 9}));
+                items(p, new int[]{0, 12, 4, 9})));
 
-        bundle(co, "Active Life Bundle",
+        result.add(bundle(co, "Active Life Bundle",
                 "Your complete workout kit — high-waist leggings, supportive sports bra, quick-dry shorts, and arch-support socks.",
                 "https://placehold.co/800x800/7d3c98/ffffff?text=Active+Life",
                 new BigDecimal("109.99"), new BigDecimal("134.96"),
-                items(p, new int[]{6, 28, 3, 14}));
+                items(p, new int[]{6, 28, 3, 14})));
 
-        bundle(co, "Smart Business Look",
+        result.add(bundle(co, "Smart Business Look",
                 "Polished from collar to sole — Oxford shirt, stretch chinos, leather belt, and slip-on loafers.",
                 "https://placehold.co/800x800/2c3e50/ffffff?text=Smart+Business",
                 new BigDecimal("249.99"), new BigDecimal("289.96"),
-                items(p, new int[]{29, 12, 8, 42}));
+                items(p, new int[]{29, 12, 8, 42})));
 
-        bundle(co, "Cosy Home Set",
+        result.add(bundle(co, "Cosy Home Set",
                 "The ultimate stay-in bundle — brushed flannel pyjamas, ribbed turtleneck, merino beanie, and cashmere wrap.",
                 "https://placehold.co/800x800/884ea0/ffffff?text=Cosy+Home",
                 new BigDecimal("139.99"), new BigDecimal("179.96"),
-                items(p, new int[]{18, 44, 16, 20}));
+                items(p, new int[]{18, 44, 16, 20})));
 
-        bundle(co, "Festival Looks Bundle",
+        result.add(bundle(co, "Festival Looks Bundle",
                 "Stand out at any outdoor event — vintage graphic tee, high-waist denim shorts, bucket hat, and canvas sneakers.",
                 "https://placehold.co/800x800/e9c46a/333333?text=Festival+Look",
                 new BigDecimal("139.99"), new BigDecimal("169.96"),
-                items(p, new int[]{37, 45, 34, 4}));
+                items(p, new int[]{37, 45, 34, 4})));
 
-        return first;
+        return result;
     }
 
     // =========================================================================
@@ -151,41 +154,42 @@ public class BundleSeeder {
     //    32=Collagen Cream  33=HA Serum  35=SPF 50  43=Herbal Sleep Tea  48=Acupressure Mat
     // =========================================================================
 
-    private ProductBundle seedWellness(Company co, List<Product> p) {
+    private List<ProductBundle> seedWellness(Company co, List<Product> p) {
         List<ProductBundle> existing = bundleRepository.findAllByCompanyId(co.getId());
-        if (!existing.isEmpty()) return existing.get(0);
+        if (!existing.isEmpty()) return existing;
 
-        ProductBundle first = bundle(co, "Morning Routine Starter",
+        List<ProductBundle> result = new ArrayList<>();
+        result.add(bundle(co, "Morning Routine Starter",
                 "Kick-start every day — quality protein, essential vitamins, ceremonial matcha, and an insulated tumbler.",
                 "https://placehold.co/800x800/d6eaf8/333333?text=Morning+Routine",
                 new BigDecimal("124.99"), new BigDecimal("154.96"),
-                items(p, new int[]{0, 19, 12, 13}));
+                items(p, new int[]{0, 19, 12, 13})));
 
-        bundle(co, "Skincare Ritual Bundle",
+        result.add(bundle(co, "Skincare Ritual Bundle",
                 "A complete AM/PM routine — vitamin C serum, firming collagen cream, hyaluronic acid, and daily SPF.",
                 "https://placehold.co/800x800/fef9e7/333333?text=Skincare+Ritual",
                 new BigDecimal("119.99"), new BigDecimal("144.96"),
-                items(p, new int[]{1, 32, 33, 35}));
+                items(p, new int[]{1, 32, 33, 35})));
 
-        bundle(co, "Recovery & Rest Pack",
+        result.add(bundle(co, "Recovery & Rest Pack",
                 "Wind down and sleep deeper — magnesium glycinate, sleep gummies, calming herbal tea, and acupressure mat.",
                 "https://placehold.co/800x800/e8daef/333333?text=Recovery+Rest",
                 new BigDecimal("99.99"), new BigDecimal("124.96"),
-                items(p, new int[]{22, 10, 43, 48}));
+                items(p, new int[]{22, 10, 43, 48})));
 
-        bundle(co, "Sports Performance Stack",
+        result.add(bundle(co, "Sports Performance Stack",
                 "The science-backed training foundation — whey protein, creatine, pre-workout, and BCAAs.",
                 "https://placehold.co/800x800/c8e6c9/333333?text=Performance+Stack",
                 new BigDecimal("124.99"), new BigDecimal("149.96"),
-                items(p, new int[]{0, 27, 25, 26}));
+                items(p, new int[]{0, 27, 25, 26})));
 
-        bundle(co, "Home Wellness Sanctuary",
+        result.add(bundle(co, "Home Wellness Sanctuary",
                 "Create your restorative space — premium yoga mat, aromatherapy diffuser, meditation cushion, and soy candle.",
                 "https://placehold.co/800x800/7dcea0/ffffff?text=Wellness+Sanctuary",
                 new BigDecimal("164.99"), new BigDecimal("194.96"),
-                items(p, new int[]{5, 8, 16, 4}));
+                items(p, new int[]{5, 8, 16, 4})));
 
-        return first;
+        return result;
     }
 
     // =========================================================================
@@ -199,41 +203,42 @@ public class BundleSeeder {
     //    43=LED Floor Lamp  45=Chunky Knit Throw  46=Plant Stand  49=Marble Tray
     // =========================================================================
 
-    private ProductBundle seedHome(Company co, List<Product> p) {
+    private List<ProductBundle> seedHome(Company co, List<Product> p) {
         List<ProductBundle> existing = bundleRepository.findAllByCompanyId(co.getId());
-        if (!existing.isEmpty()) return existing.get(0);
+        if (!existing.isEmpty()) return existing;
 
-        ProductBundle first = bundle(co, "Smart Home Security Pack",
+        List<ProductBundle> result = new ArrayList<>();
+        result.add(bundle(co, "Smart Home Security Pack",
                 "Full-coverage protection — 2K doorbell, pan-tilt camera, smoke & CO alarm, and water leak sensor.",
                 "https://placehold.co/800x800/2c3e50/ffffff?text=Security+Pack",
                 new BigDecimal("219.99"), new BigDecimal("259.96"),
-                items(p, new int[]{3, 4, 5, 6}));
+                items(p, new int[]{3, 4, 5, 6})));
 
-        bundle(co, "Kitchen Starter Kit",
+        result.add(bundle(co, "Kitchen Starter Kit",
                 "Equip your kitchen properly — German steel chef's knife, bamboo cutting board, cast iron skillet, and digital scale.",
                 "https://placehold.co/800x800/bdc3c7/333333?text=Kitchen+Starter",
                 new BigDecimal("164.99"), new BigDecimal("194.96"),
-                items(p, new int[]{16, 12, 13, 17}));
+                items(p, new int[]{16, 12, 13, 17})));
 
-        bundle(co, "Bedroom Dream Setup",
+        result.add(bundle(co, "Bedroom Dream Setup",
                 "Sleep like you deserve — silky bamboo sheets, memory foam pillows, weighted blanket, and mulberry silk eye mask.",
                 "https://placehold.co/800x800/f2f3f4/333333?text=Bedroom+Dream",
                 new BigDecimal("224.99"), new BigDecimal("264.96"),
-                items(p, new int[]{23, 25, 24, 31}));
+                items(p, new int[]{23, 25, 24, 31})));
 
-        bundle(co, "Home Fragrance Collection",
+        result.add(bundle(co, "Home Fragrance Collection",
                 "Scent your space beautifully — artisan soy candle trio, ultrasonic diffuser, ceramic vases, and marble tray.",
                 "https://placehold.co/800x800/fdebd0/333333?text=Fragrance+Collection",
                 new BigDecimal("129.99"), new BigDecimal("154.96"),
-                items(p, new int[]{20, 21, 40, 49}));
+                items(p, new int[]{20, 21, 40, 49})));
 
-        bundle(co, "Living Room Refresh",
+        result.add(bundle(co, "Living Room Refresh",
                 "Transform your living room — arc floor lamp, chunky knit throw, linen pillow covers, and bamboo plant stand.",
                 "https://placehold.co/800x800/f5f5f5/333333?text=Living+Room+Refresh",
                 new BigDecimal("209.99"), new BigDecimal("249.96"),
-                items(p, new int[]{43, 45, 42, 46}));
+                items(p, new int[]{43, 45, 42, 46})));
 
-        return first;
+        return result;
     }
 
     // =========================================================================
@@ -247,41 +252,42 @@ public class BundleSeeder {
     //    43=Waterproof Earbuds  44=Gym Gloves  45=Powerlifting Belt  48=Wrist Straps  49=Lacrosse Balls
     // =========================================================================
 
-    private ProductBundle seedSport(Company co, List<Product> p) {
+    private List<ProductBundle> seedSport(Company co, List<Product> p) {
         List<ProductBundle> existing = bundleRepository.findAllByCompanyId(co.getId());
-        if (!existing.isEmpty()) return existing.get(0);
+        if (!existing.isEmpty()) return existing;
 
-        ProductBundle first = bundle(co, "Runner's Complete Kit",
+        List<ProductBundle> result = new ArrayList<>();
+        result.add(bundle(co, "Runner's Complete Kit",
                 "Hit the road fully equipped — elite shorts, pro leggings, perforated cap, phone armband, and arch-support socks.",
                 "https://placehold.co/800x800/1abc9c/ffffff?text=Runners+Kit",
                 new BigDecimal("139.99"), new BigDecimal("166.95"),
-                items(p, new int[]{0, 1, 9, 42, 4}));
+                items(p, new int[]{0, 1, 9, 42, 4})));
 
-        bundle(co, "Home Gym Starter",
+        result.add(bundle(co, "Home Gym Starter",
                 "Build your training base at home — resistance bands, professional yoga mat, foam roller, and ab wheel.",
                 "https://placehold.co/800x800/e74c3c/ffffff?text=Home+Gym+Starter",
                 new BigDecimal("134.99"), new BigDecimal("159.96"),
-                items(p, new int[]{10, 11, 12, 18}));
+                items(p, new int[]{10, 11, 12, 18})));
 
-        bundle(co, "Nutrition Fundamentals",
+        result.add(bundle(co, "Nutrition Fundamentals",
                 "The four pillars of sports nutrition — CFM whey isolate, Creapure creatine, BCAA electrolytes, and protein bars.",
                 "https://placehold.co/800x800/d6eaf8/333333?text=Nutrition+Fund",
                 new BigDecimal("134.99"), new BigDecimal("159.96"),
-                items(p, new int[]{22, 25, 23, 28}));
+                items(p, new int[]{22, 25, 23, 28})));
 
-        bundle(co, "Powerlifting Pack",
+        result.add(bundle(co, "Powerlifting Pack",
                 "Every accessory a powerlifter needs — velcro belt, wrist straps, leather gloves, chalk, and lacrosse balls.",
                 "https://placehold.co/800x800/1c2833/ffffff?text=Powerlifting+Pack",
                 new BigDecimal("94.99"), new BigDecimal("117.95"),
-                items(p, new int[]{45, 48, 44, 38, 49}));
+                items(p, new int[]{45, 48, 44, 38, 49})));
 
-        bundle(co, "Training Day Bundle",
+        result.add(bundle(co, "Training Day Bundle",
                 "Gear up for any session — mesh workout tank, tapered joggers, waterproof earbuds, and insulated water bottle.",
                 "https://placehold.co/800x800/212f3c/ffffff?text=Training+Day",
                 new BigDecimal("159.99"), new BigDecimal("187.96"),
-                items(p, new int[]{5, 7, 43, 41}));
+                items(p, new int[]{5, 7, 43, 41})));
 
-        return first;
+        return result;
     }
 
     // =========================================================================
