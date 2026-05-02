@@ -29,7 +29,7 @@ import backend.dtos.responses.product.ProductVariantResponse;
 import backend.exceptions.http.AppHttpException;
 import backend.exceptions.http.InternalServerErrorException;
 import backend.models.enums.ProductStatus;
-import backend.services.impl.ProductIndexingService;
+import backend.kafka.workers.ProductIndexingService;
 import backend.services.intf.BundleService;
 import backend.services.intf.ProductService;
 import backend.services.intf.SanitizationService;

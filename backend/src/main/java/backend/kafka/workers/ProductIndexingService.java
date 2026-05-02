@@ -1,12 +1,8 @@
-package backend.services.impl;
+package backend.kafka.workers;
 
 import backend.configurations.environment.EnvironmentSetting;
 import backend.documents.BundleDocument;
 import backend.documents.ProductDocument;
-import backend.events.BundleIndexEvent;
-import backend.events.BundleRemoveEvent;
-import backend.events.ProductIndexEvent;
-import backend.events.ProductRemoveEvent;
 import backend.models.core.IndexingFailure;
 import backend.models.core.Product;
 import backend.models.core.ProductBundle;
@@ -28,8 +24,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.event.TransactionPhase;
-import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -113,38 +107,13 @@ public class ProductIndexingService implements ApplicationRunner {
     }
 
     // -------------------------------------------------------------------------
-    // Event listeners — fire after DB transaction commit
-    // -------------------------------------------------------------------------
-
-    // fallbackExecution=true: if published outside a transaction the event fires immediately
-    // (data is already committed by that point). Inside a transaction it fires after commit.
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
-    public void on(ProductIndexEvent e) {
-        indexProduct(e.product(), e.companyId());
-    }
-
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
-    public void on(ProductRemoveEvent e) {
-        removeProduct(e.productId());
-    }
-
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
-    public void on(BundleIndexEvent e) {
-        indexBundle(e.bundle());
-    }
-
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
-    public void on(BundleRemoveEvent e) {
-        removeBundle(e.bundleId());
-    }
-
-    // -------------------------------------------------------------------------
-    // Public API — called by event listeners, startup reindex, and retry scheduler
+    // Public API — called by Kafka consumers, startup reindex, and retry scheduler
     // -------------------------------------------------------------------------
 
     /**
      * @param companyId must be passed explicitly — product.getCompany().getId() resolved
-     *                  while the entity is still in a JPA session (prevents lazy-load in workers)
+     *                  while the entity is still loaded in the calling
+     *                  JPA session (prevents lazy-load in workers)
      */
     public void indexProduct(Product product, long companyId) {
         submit(new IndexingTask.IndexProduct(product, companyId));

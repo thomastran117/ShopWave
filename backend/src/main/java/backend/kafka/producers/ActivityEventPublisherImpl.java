@@ -1,4 +1,4 @@
-package backend.services.impl;
+package backend.kafka.producers;
 
 import backend.events.activity.ActivityType;
 import backend.events.activity.UserActivityEvent;

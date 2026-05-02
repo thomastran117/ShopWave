@@ -1,4 +1,4 @@
-package backend.services.impl;
+package backend.kafka.producers;
 
 import backend.events.ProductIndexEvent;
 import backend.events.ProductRemoveEvent;

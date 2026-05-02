@@ -1,5 +1,6 @@
 package backend.services.impl;
 
+import backend.kafka.workers.ProductIndexingService;
 import backend.models.core.IndexingFailure;
 import backend.models.enums.IndexingFailureStatus;
 import backend.repositories.BundleRepository;

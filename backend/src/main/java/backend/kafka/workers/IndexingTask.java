@@ -1,4 +1,4 @@
-package backend.services.impl;
+package backend.kafka.workers;
 
 import backend.models.core.Product;
 import backend.models.core.ProductBundle;
