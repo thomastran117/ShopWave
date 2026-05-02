@@ -18,9 +18,9 @@ import backend.repositories.SavedPaymentMethodRepository;
 import backend.repositories.OrderRepository;
 import backend.repositories.SubscriptionRepository;
 import backend.repositories.UserRepository;
-import backend.services.intf.LoyaltyService;
-import backend.services.intf.OrderService;
-import backend.services.intf.PaymentService;
+import backend.services.intf.promotions.LoyaltyService;
+import backend.services.intf.orders.OrderService;
+import backend.services.intf.payments.PaymentService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

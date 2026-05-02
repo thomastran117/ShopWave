@@ -12,7 +12,7 @@ import backend.models.enums.DiscountType;
 import backend.models.enums.PromotionRuleType;
 import backend.repositories.CouponRepository;
 import backend.repositories.PromotionRuleRepository;
-import backend.services.intf.PricingEngine;
+import backend.services.intf.pricing.PricingEngine;
 import backend.services.pricing.AppliedPromotion;
 import backend.services.pricing.CartContext;
 import backend.services.pricing.CartLine;

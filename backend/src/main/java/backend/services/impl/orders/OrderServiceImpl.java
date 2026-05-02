@@ -1,0 +1,2369 @@
+package backend.services.impl.orders;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+import backend.dtos.requests.order.CreateOrderRequest;
+import backend.dtos.responses.general.PagedResponse;
+import backend.dtos.responses.order.CompanyOrderResponse;
+import backend.dtos.responses.order.OrderItemResponse;
+import backend.dtos.responses.order.OrderResponse;
+import backend.dtos.responses.risk.RiskAssessmentResponse;
+import backend.dtos.responses.risk.RiskReviewResponse;
+import backend.dtos.responses.risk.RiskSignalResponse;
+import backend.dtos.requests.risk.RiskDecisionRequest;
+import backend.exceptions.http.BadRequestException;
+import backend.exceptions.http.ConflictException;
+import backend.exceptions.http.ForbiddenException;
+import backend.exceptions.http.ResourceNotFoundException;
+import backend.exceptions.http.RiskStepUpRequiredException;
+import backend.models.core.BundleItem;
+import backend.models.core.CommissionRecord;
+import backend.models.core.InventoryAdjustment;
+import backend.models.core.LocationStock;
+import backend.models.core.MarketplaceVendor;
+import backend.models.core.Order;
+import backend.models.core.OrderCompensation;
+import backend.models.core.OrderItem;
+import backend.models.core.SubOrder;
+import backend.models.enums.SubOrderStatus;
+import backend.models.core.Product;
+import backend.models.core.ProductBundle;
+import backend.models.core.ProductVariant;
+import backend.models.core.Subscription;
+import backend.models.core.SubscriptionItem;
+import backend.models.core.User;
+import backend.models.core.Company;
+import backend.models.core.Coupon;
+import backend.models.core.CouponRedemption;
+import backend.models.core.FailedPaymentAttempt;
+import backend.models.core.PromotionRedemption;
+import backend.models.core.PromotionRule;
+import backend.models.core.RiskAssessment;
+import backend.models.core.RiskReview;
+import backend.dtos.requests.order.ReturnOrderRequest;
+import backend.dtos.requests.order.ShipOrderRequest;
+import backend.models.enums.AdjustmentReason;
+import backend.models.enums.CompensationStatus;
+import backend.models.enums.CompensationType;
+import backend.models.enums.DiscountStatus;
+import backend.models.enums.FulfillmentStatus;
+import backend.models.enums.OrderStatus;
+import backend.models.enums.ProductStatus;
+import backend.models.enums.RiskAction;
+import backend.models.enums.RiskAssessmentKind;
+import backend.models.enums.RiskMode;
+import backend.models.enums.RiskReviewStatus;
+import backend.repositories.BundleRepository;
+import backend.repositories.CommissionRecordRepository;
+import backend.repositories.CouponRepository;
+import backend.repositories.VendorBalanceRepository;
+import backend.repositories.MarketplaceVendorRepository;
+import backend.repositories.OrderItemRepository;
+import backend.repositories.SubOrderRepository;
+import backend.services.intf.pricing.CommissionEngine;
+import backend.services.intf.promotions.LoyaltyService;
+import backend.repositories.CouponPerUserCountRepository;
+import backend.repositories.CouponRedemptionRepository;
+import backend.repositories.CompanyRepository;
+import backend.repositories.PromotionRedemptionRepository;
+import backend.repositories.PromotionRuleRepository;
+import backend.repositories.InventoryAdjustmentRepository;
+import backend.repositories.InventoryLocationRepository;
+import backend.repositories.LocationStockRepository;
+import backend.repositories.OrderCompensationRepository;
+import backend.repositories.OrderRepository;
+import backend.repositories.ProductRepository;
+import backend.repositories.ProductVariantRepository;
+import backend.repositories.FailedPaymentAttemptRepository;
+import backend.repositories.RiskAssessmentRepository;
+import backend.repositories.RiskReviewRepository;
+import backend.repositories.UserRepository;
+import backend.dtos.requests.return_.BuyerReturnItemRequest;
+import backend.dtos.requests.return_.MerchantInitiateReturnRequest;
+import backend.models.core.InventoryLocation;
+import backend.models.enums.AllocationStrategy;
+import backend.events.activity.ActivityType;
+import backend.events.activity.UserActivityEvent;
+import backend.services.impl.inventory.StockAlertService;
+import backend.services.intf.ActivityEventPublisher;
+import backend.services.intf.inventory.AllocationService;
+import backend.services.intf.CacheService;
+import backend.services.intf.auth.DeviceService;
+import backend.services.intf.support.EmailService;
+import backend.services.intf.auth.EmailVerificationService;
+import backend.services.intf.orders.OrderService;
+import backend.services.intf.payments.PaymentService;
+import backend.services.intf.payments.PaymentService.PaymentIntentResult;
+import backend.services.intf.pricing.PricingEngine;
+import backend.services.intf.returns.ReturnService;
+import backend.services.intf.pricing.RiskEngine;
+import backend.services.risk.RiskAssessmentResult;
+import backend.services.risk.RiskContext;
+import backend.services.risk.RiskSignal;
+import backend.configurations.environment.RiskProperties;
+import backend.http.ClientInfo;
+import backend.http.ClientRequestContext;
+import backend.services.pricing.AppliedPromotion;
+import backend.services.pricing.CartContext;
+import backend.services.pricing.CartLine;
+import backend.services.pricing.LineBreakdown;
+import backend.services.pricing.PricingResult;
+
+import org.springframework.dao.DataIntegrityViolationException;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Instant;
+import java.util.*;
+import java.util.stream.Collectors;
+
+@Service
+public class OrderServiceImpl implements OrderService {
+
+    private static final Logger log = LoggerFactory.getLogger(OrderServiceImpl.class);
+
+    private static final String LOCK_PREFIX = "lock:product:";
+    private static final String VARIANT_LOCK_PREFIX = "lock:variant:";
+    private static final long LOCK_TTL_SECONDS = 10;
+    private static final int LOCK_RETRY_ATTEMPTS = 5;
+    private static final long LOCK_RETRY_DELAY_MS = 100;
+    private static final Set<String> SORTABLE_FIELDS = Set.of("createdAt", "totalAmount");
+
+    @Value("${app.order.reservation.ttl-seconds:900}")
+    private int reservationTtlSeconds;
+
+    private final OrderRepository orderRepository;
+    private final OrderCompensationRepository compensationRepository;
+    private final ProductRepository productRepository;
+    private final ProductVariantRepository variantRepository;
+    private final LocationStockRepository locationStockRepository;
+    private final InventoryAdjustmentRepository adjustmentRepository;
+    private final InventoryLocationRepository locationRepository;
+    private final BundleRepository bundleRepository;
+    private final UserRepository userRepository;
+    private final CompanyRepository companyRepository;
+    private final CouponRepository couponRepository;
+    private final CouponRedemptionRepository couponRedemptionRepository;
+    private final CouponPerUserCountRepository couponPerUserCountRepository;
+    private final PromotionRuleRepository promotionRuleRepository;
+    private final PromotionRedemptionRepository promotionRedemptionRepository;
+    private final PricingEngine pricingEngine;
+    private final PaymentService paymentService;
+    private final CacheService cacheService;
+    private final StockAlertService stockAlertService;
+    private final EmailService emailService;
+    private final AllocationService allocationService;
+    private final RiskEngine riskEngine;
+    private final RiskAssessmentRepository riskAssessmentRepository;
+    private final RiskReviewRepository riskReviewRepository;
+    private final FailedPaymentAttemptRepository failedPaymentAttemptRepository;
+    private final RiskProperties riskProperties;
+    private final DeviceService deviceService;
+    private final EmailVerificationService emailVerificationService;
+    private final MarketplaceVendorRepository marketplaceVendorRepository;
+    private final SubOrderRepository subOrderRepository;
+    private final OrderItemRepository orderItemRepository;
+    private final CommissionEngine commissionEngine;
+    private final CommissionRecordRepository commissionRecordRepository;
+    private final VendorBalanceRepository vendorBalanceRepository;
+    private final LoyaltyService loyaltyService;
+    private final ActivityEventPublisher activityEventPublisher;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    private ReturnService returnService;
+
+    public OrderServiceImpl(
+            OrderRepository orderRepository,
+            OrderCompensationRepository compensationRepository,
+            ProductRepository productRepository,
+            ProductVariantRepository variantRepository,
+            LocationStockRepository locationStockRepository,
+            InventoryAdjustmentRepository adjustmentRepository,
+            InventoryLocationRepository locationRepository,
+            BundleRepository bundleRepository,
+            UserRepository userRepository,
+            CompanyRepository companyRepository,
+            CouponRepository couponRepository,
+            CouponRedemptionRepository couponRedemptionRepository,
+            CouponPerUserCountRepository couponPerUserCountRepository,
+            PromotionRuleRepository promotionRuleRepository,
+            PromotionRedemptionRepository promotionRedemptionRepository,
+            PricingEngine pricingEngine,
+            PaymentService paymentService,
+            CacheService cacheService,
+            StockAlertService stockAlertService,
+            EmailService emailService,
+            AllocationService allocationService,
+            RiskEngine riskEngine,
+            RiskAssessmentRepository riskAssessmentRepository,
+            RiskReviewRepository riskReviewRepository,
+            FailedPaymentAttemptRepository failedPaymentAttemptRepository,
+            RiskProperties riskProperties,
+            DeviceService deviceService,
+            EmailVerificationService emailVerificationService,
+            MarketplaceVendorRepository marketplaceVendorRepository,
+            SubOrderRepository subOrderRepository,
+            OrderItemRepository orderItemRepository,
+            CommissionEngine commissionEngine,
+            CommissionRecordRepository commissionRecordRepository,
+            VendorBalanceRepository vendorBalanceRepository,
+            LoyaltyService loyaltyService,
+            ActivityEventPublisher activityEventPublisher) {
+        this.orderRepository = orderRepository;
+        this.compensationRepository = compensationRepository;
+        this.productRepository = productRepository;
+        this.variantRepository = variantRepository;
+        this.locationStockRepository = locationStockRepository;
+        this.adjustmentRepository = adjustmentRepository;
+        this.locationRepository = locationRepository;
+        this.bundleRepository = bundleRepository;
+        this.userRepository = userRepository;
+        this.companyRepository = companyRepository;
+        this.couponRepository = couponRepository;
+        this.couponRedemptionRepository = couponRedemptionRepository;
+        this.couponPerUserCountRepository = couponPerUserCountRepository;
+        this.promotionRuleRepository = promotionRuleRepository;
+        this.promotionRedemptionRepository = promotionRedemptionRepository;
+        this.pricingEngine = pricingEngine;
+        this.paymentService = paymentService;
+        this.cacheService = cacheService;
+        this.stockAlertService = stockAlertService;
+        this.emailService = emailService;
+        this.allocationService = allocationService;
+        this.riskEngine = riskEngine;
+        this.riskAssessmentRepository = riskAssessmentRepository;
+        this.riskReviewRepository = riskReviewRepository;
+        this.failedPaymentAttemptRepository = failedPaymentAttemptRepository;
+        this.riskProperties = riskProperties;
+        this.deviceService = deviceService;
+        this.emailVerificationService = emailVerificationService;
+        this.marketplaceVendorRepository = marketplaceVendorRepository;
+        this.subOrderRepository = subOrderRepository;
+        this.orderItemRepository = orderItemRepository;
+        this.commissionEngine = commissionEngine;
+        this.commissionRecordRepository = commissionRecordRepository;
+        this.vendorBalanceRepository = vendorBalanceRepository;
+        this.loyaltyService = loyaltyService;
+        this.activityEventPublisher = activityEventPublisher;
+    }
+
+    /** Setter injection breaks the circular dependency: ReturnService → OrderServiceImpl → ReturnService. */
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setReturnService(ReturnService returnService) {
+        this.returnService = returnService;
+    }
+
+    @Override
+    @Transactional
+    public OrderResponse createOrder(long userId, CreateOrderRequest request) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
+
+        List<CreateOrderRequest.OrderItemRequest> itemRequests = request.getItems();
+
+        // Validate: each item must have exactly one of productId or bundleId
+        for (CreateOrderRequest.OrderItemRequest ir : itemRequests) {
+            if (ir.getProductId() == null && ir.getBundleId() == null) {
+                throw new BadRequestException("Each order item must specify either a productId or a bundleId");
+            }
+            if (ir.getProductId() != null && ir.getBundleId() != null) {
+                throw new BadRequestException("Each order item must specify either a productId or a bundleId, not both");
+            }
+        }
+
+        List<CreateOrderRequest.OrderItemRequest> productItemRequests = itemRequests.stream()
+                .filter(i -> i.getBundleId() == null).toList();
+        List<CreateOrderRequest.OrderItemRequest> bundleItemRequests = itemRequests.stream()
+                .filter(i -> i.getBundleId() != null).toList();
+
+        // Resolve and validate bundles before locking (fail fast)
+        Map<Long, ProductBundle> resolvedBundles = new HashMap<>();
+        for (CreateOrderRequest.OrderItemRequest ir : bundleItemRequests) {
+            long bundleId = ir.getBundleId();
+            if (resolvedBundles.containsKey(bundleId)) continue;
+            ProductBundle bundle = bundleRepository.findById(bundleId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Bundle not found with id: " + bundleId));
+            if (bundle.getStatus() != backend.models.enums.ProductStatus.ACTIVE || !bundle.isListed()) {
+                throw new BadRequestException("Bundle '" + bundle.getName() + "' is not available for purchase");
+            }
+            resolvedBundles.put(bundleId, bundle);
+        }
+
+        // Collect product IDs from product items
+        List<Long> productIds = productItemRequests.stream()
+                .map(CreateOrderRequest.OrderItemRequest::getProductId)
+                .collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new))
+                .stream().toList();
+
+        // Merge constituent product IDs from all bundles into the lock set (sorted, deduplicated)
+        java.util.TreeSet<Long> allProductIdSet = new java.util.TreeSet<>(productIds);
+        for (ProductBundle bundle : resolvedBundles.values()) {
+            for (BundleItem bi : bundle.getItems()) {
+                allProductIdSet.add(bi.getProduct().getId());
+            }
+        }
+        List<Long> allProductIds = new ArrayList<>(allProductIdSet);
+
+        // Reject same productId with different variantIds — ambiguous, can't be safely merged
+        Map<Long, Long> seenProductVariant = new HashMap<>();
+        for (CreateOrderRequest.OrderItemRequest item : productItemRequests) {
+            if (item.getProductId() == null) continue;
+            Long existingVariant = seenProductVariant.put(item.getProductId(), item.getVariantId());
+            if (existingVariant != null && !Objects.equals(existingVariant, item.getVariantId())) {
+                throw new BadRequestException(
+                    "Product id " + item.getProductId() + " appears with multiple variants in the same order — submit as separate orders");
+            }
+        }
+
+        Map<Long, Integer> quantityMap = new HashMap<>();
+        Map<Long, Long> variantMap = new HashMap<>();  // productId -> variantId
+        for (CreateOrderRequest.OrderItemRequest item : productItemRequests) {
+            quantityMap.merge(item.getProductId(), item.getQuantity(), Integer::sum);
+            if (item.getVariantId() != null) {
+                variantMap.put(item.getProductId(), item.getVariantId());
+            }
+        }
+
+        // Collect variant IDs that need locks (sorted for deadlock prevention)
+        List<Long> variantIdsToLock = variantMap.values().stream().sorted().toList();
+
+        String lockToken = UUID.randomUUID().toString();
+        List<String> acquiredLocks = new ArrayList<>();
+        List<long[]> decrementedProducts = new ArrayList<>();
+        List<long[]> decrementedVariants = new ArrayList<>();
+        List<long[]> decrementedLocationStocks = new ArrayList<>();
+        Long savedOrderId = null; // set after order is persisted; used for loyalty point restore on failure
+        // [product, variant (null for product-level), prevStock, newStock]
+        record PurchaseRecord(Product prod, ProductVariant var, int prevStock, int newStock) {}
+        List<PurchaseRecord> purchaseRecords = new ArrayList<>();
+
+        try {
+            acquireLocks(allProductIds, lockToken, acquiredLocks);
+            acquireVariantLocks(variantIdsToLock, lockToken, acquiredLocks);
+
+            List<Product> products = productRepository.findAllById(productIds);
+            if (products.size() != productIds.size()) {
+                throw new ResourceNotFoundException("One or more products not found");
+            }
+
+            Map<Long, Product> productMap = new HashMap<>();
+            for (Product p : products) {
+                productMap.put(p.getId(), p);
+            }
+
+            for (Product product : products) {
+                if (product.getStatus() != ProductStatus.ACTIVE) {
+                    throw new BadRequestException("Product '" + product.getName() + "' is not available for purchase");
+                }
+                if (!product.isPurchasable()) {
+                    throw new BadRequestException("Product '" + product.getName() + "' is not available for purchase");
+                }
+                boolean hasVariants = variantRepository.existsByProductId(product.getId());
+                Long requestedVariantId = variantMap.get(product.getId());
+                if (hasVariants && requestedVariantId == null) {
+                    throw new BadRequestException("Product '" + product.getName() + "' has variants — specify a variantId");
+                }
+                if (!hasVariants && requestedVariantId != null) {
+                    throw new BadRequestException("Product '" + product.getName() + "' has no variants");
+                }
+            }
+
+            AllocationStrategy strategy = request.getAllocationStrategy() != null
+                    ? request.getAllocationStrategy() : AllocationStrategy.HIGHEST_STOCK;
+            Double buyerLat = request.getBuyerLatitude();
+            Double buyerLng = request.getBuyerLongitude();
+
+            List<OrderItem> orderItems = new ArrayList<>();
+
+            for (Long productId : productIds) {
+                Product product = productMap.get(productId);
+                int qty = quantityMap.get(productId);
+                Long variantId = variantMap.get(productId);
+
+                OrderItem item = new OrderItem();
+                item.setProduct(product);
+                item.setProductName(product.getName());
+                item.setQuantity(qty);
+
+                if (variantId != null) {
+                    ProductVariant variant = variantRepository.findByIdAndProductId(variantId, productId)
+                            .orElseThrow(() -> new ResourceNotFoundException("Variant not found with id: " + variantId));
+
+                    if (!variant.isPurchasable()) {
+                        throw new BadRequestException("Variant is not available for purchase");
+                    }
+
+                    int prevVariantStock = variant.getStock() != null ? variant.getStock() : 0;
+                    int updated = variantRepository.decrementStock(variantId, qty);
+                    if (updated == 0) {
+                        if (variant.isBackorderEnabled()) {
+                            item.setFulfillmentStatus(FulfillmentStatus.BACKORDERED);
+                        } else {
+                            safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
+                            throw new ConflictException("Insufficient stock for variant of product '" + product.getName() + "'");
+                        }
+                    } else {
+                        decrementedVariants.add(new long[]{variantId, qty});
+                        purchaseRecords.add(new PurchaseRecord(product, variant, prevVariantStock, prevVariantStock - qty));
+                    }
+
+                    item.setVariant(variant);
+                    item.setVariantTitle(buildVariantTitle(variant));
+                    item.setVariantSku(variant.getSku());
+                    item.setUnitPrice(variant.getPrice());
+                } else {
+                    int prevProductStock = product.getStock() != null ? product.getStock() : 0;
+                    int updated = productRepository.decrementStock(product.getId(), qty);
+                    if (updated == 0) {
+                        if (product.isBackorderEnabled()) {
+                            item.setFulfillmentStatus(FulfillmentStatus.BACKORDERED);
+                        } else {
+                            safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
+                            throw new ConflictException("Insufficient stock for product '" + product.getName() + "'");
+                        }
+                    } else {
+                        decrementedProducts.add(new long[]{product.getId(), qty});
+                        purchaseRecords.add(new PurchaseRecord(product, null, prevProductStock, prevProductStock - qty));
+                    }
+
+                    item.setUnitPrice(product.getPrice());
+                }
+
+                // Location stock — skip for backordered items (no stock was reserved)
+                if (item.getFulfillmentStatus() != FulfillmentStatus.BACKORDERED) {
+                    List<AllocationService.AllocationResult> allocResults =
+                            allocationService.allocate(productId, variantId, qty, strategy, buyerLat, buyerLng);
+
+                    if (allocResults.isEmpty() && hasAnyLocationStock(productId, variantId)) {
+                        safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
+                        throw new ConflictException("Insufficient location stock for product '" + product.getName() + "'");
+                    }
+
+                    for (AllocationService.AllocationResult r : allocResults) {
+                        decrementedLocationStocks.add(new long[]{r.locationStockId(), r.allocatedQty()});
+                    }
+
+                    if (!allocResults.isEmpty()) {
+                        InventoryLocation primaryLoc = allocResults.get(0).location();
+                        item.setFulfillmentLocation(primaryLoc);
+                        item.setFulfillmentLocationName(primaryLoc.getName());
+                    }
+                }
+
+                orderItems.add(item);
+            }
+
+            // Process bundle items (inside lock block — all constituent product IDs are already locked)
+            for (CreateOrderRequest.OrderItemRequest req : bundleItemRequests) {
+                ProductBundle bundle = resolvedBundles.get(req.getBundleId());
+                int bundleQty = req.getQuantity();
+
+                OrderItem bundleItem = new OrderItem();
+                bundleItem.setBundle(bundle);
+                bundleItem.setBundleName(bundle.getName());
+                bundleItem.setProduct(null);
+                bundleItem.setQuantity(bundleQty);
+                bundleItem.setUnitPrice(bundle.getPrice());
+                bundleItem.setProductName(bundle.getName());
+
+                for (BundleItem bi : bundle.getItems()) {
+                    if (bi.getProduct().getStatus() != ProductStatus.ACTIVE || !bi.getProduct().isPurchasable()) {
+                        safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
+                        throw new BadRequestException("Bundle '" + bundle.getName() +
+                            "' contains unavailable product '" + bi.getProduct().getName() + "'");
+                    }
+                    if (bi.getVariant() != null && !bi.getVariant().isPurchasable()) {
+                        safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
+                        throw new BadRequestException("Bundle '" + bundle.getName() +
+                            "' contains an unavailable variant of '" + bi.getProduct().getName() + "'");
+                    }
+                    int totalQty = bundleQty * bi.getQuantity();
+
+                    int prevStock, updated;
+                    if (bi.getVariant() != null) {
+                        prevStock = bi.getVariant().getStock() != null ? bi.getVariant().getStock() : 0;
+                        updated = variantRepository.decrementStock(bi.getVariant().getId(), totalQty);
+                    } else {
+                        prevStock = bi.getProduct().getStock() != null ? bi.getProduct().getStock() : 0;
+                        updated = productRepository.decrementStock(bi.getProduct().getId(), totalQty);
+                    }
+
+                    if (updated == 0) {
+                        safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
+                        throw new ConflictException("Insufficient stock for bundle '" + bundle.getName() +
+                                "' (product: '" + bi.getProduct().getName() + "')");
+                    }
+
+                    int newStock = prevStock - totalQty;
+                    if (bi.getVariant() != null) {
+                        decrementedVariants.add(new long[]{bi.getVariant().getId(), totalQty});
+                    } else {
+                        decrementedProducts.add(new long[]{bi.getProduct().getId(), totalQty});
+                    }
+                    purchaseRecords.add(new PurchaseRecord(bi.getProduct(), bi.getVariant(), prevStock, newStock));
+                }
+
+                orderItems.add(bundleItem);
+            }
+
+            String currency = request.getCurrency() != null ? request.getCurrency().toLowerCase() : "usd";
+
+            // --- Build cart lines for the pricing engine (products + bundles).
+            List<CartLine> cartLines = new ArrayList<>();
+            List<OrderItem> itemsInLineOrder = new ArrayList<>();
+            int lineIdx = 0;
+            for (OrderItem item : orderItems) {
+                if (item.getProduct() != null) {
+                    BigDecimal basePrice = item.getVariant() != null
+                            ? item.getVariant().getPrice()
+                            : item.getProduct().getPrice();
+                    cartLines.add(new CartLine(
+                            lineIdx++,
+                            item.getProduct().getId(),
+                            item.getVariant() != null ? item.getVariant().getId() : null,
+                            item.getQuantity(),
+                            basePrice,
+                            item.getProduct().getCompany().getId(),
+                            null));
+                    itemsInLineOrder.add(item);
+                } else if (item.getBundle() != null) {
+                    cartLines.add(new CartLine(
+                            lineIdx++,
+                            null,
+                            null,
+                            item.getQuantity(),
+                            item.getUnitPrice(),
+                            item.getBundle().getCompany().getId(),
+                            item.getBundle().getId()));
+                    itemsInLineOrder.add(item);
+                }
+            }
+
+            // --- Coupon pre-validation: hard-fail on existence, status, window, per-user cap.
+            //     minOrderAmount is enforced by the engine against the post-promotion subtotal.
+            String appliedCouponCode = null;
+            Coupon appliedCoupon = null;
+            if (request.getCouponCode() != null && !request.getCouponCode().isBlank()) {
+                String code = request.getCouponCode().trim().toUpperCase();
+                Coupon coupon = couponRepository.findByCodeIgnoreCase(code)
+                        .orElseThrow(() -> new BadRequestException("Coupon code '" + code + "' is not valid"));
+
+                Instant couponNow = Instant.now();
+                boolean expired   = coupon.getEndDate()   != null && coupon.getEndDate().isBefore(couponNow);
+                boolean notStarted = coupon.getStartDate() != null && coupon.getStartDate().isAfter(couponNow);
+                if (coupon.getStatus() == DiscountStatus.DISABLED || expired || notStarted) {
+                    throw new BadRequestException("Coupon '" + code + "' is not currently valid");
+                }
+
+                if (coupon.getMaxUsesPerUser() != null) {
+                    int claimed = couponPerUserCountRepository.tryIncrementUserCount(
+                            coupon.getId(), userId, coupon.getMaxUsesPerUser());
+                    if (claimed == 0) {
+                        throw new BadRequestException("You have already used coupon '"
+                                + code + "' the maximum number of times");
+                    }
+                }
+                appliedCouponCode = code;
+                appliedCoupon = coupon;
+            }
+
+            // --- Invoke the pricing engine on product lines ---
+            Set<Long> userSegmentIds = new HashSet<>(userRepository.findSegmentIdsByUserId(userId));
+            CartContext ctx = new CartContext(
+                    cartLines,
+                    userId,
+                    userSegmentIds,
+                    currency.toUpperCase(),
+                    appliedCouponCode,
+                    null,
+                    Instant.now());
+            PricingResult pricing = pricingEngine.quote(ctx);
+
+            // If a coupon was supplied but the engine couldn't apply it (e.g. minOrderAmount not met
+            // against the post-promotion subtotal), surface that as a hard error rather than silently
+            // charging full price. The engine emits a warning describing why.
+            if (appliedCouponCode != null && pricing.appliedCouponCode() == null) {
+                String reason = pricing.warnings().stream()
+                        .filter(w -> {
+                            String lw = w.toLowerCase();
+                            return lw.contains("coupon") || lw.contains("cart below");
+                        })
+                        .findFirst()
+                        .orElse("Coupon '" + appliedCouponCode + "' is not applicable to this order");
+                throw new BadRequestException(reason);
+            }
+
+            // Map per-line engine output back onto OrderItems (products and bundles).
+            for (LineBreakdown lb : pricing.lines()) {
+                OrderItem item = itemsInLineOrder.get(lb.index());
+                BigDecimal basePrice = lb.unitBasePrice();
+                BigDecimal perUnit = lb.quantity() > 0
+                        ? lb.savings().divide(BigDecimal.valueOf(lb.quantity()), 2, RoundingMode.HALF_UP)
+                        : BigDecimal.ZERO;
+                item.setUnitPrice(basePrice.subtract(perUnit).max(BigDecimal.ZERO));
+                item.setDiscountAmount(perUnit);
+                item.setPromotionSavings(lb.savings());
+                if (lb.appliedRuleIds() != null && !lb.appliedRuleIds().isEmpty()) {
+                    // Strip the synthetic negative coupon marker the engine records.
+                    StringBuilder csv = new StringBuilder();
+                    for (Long id : lb.appliedRuleIds()) {
+                        if (id == null || id <= 0) continue;
+                        if (csv.length() > 0) csv.append(',');
+                        csv.append(id);
+                    }
+                    item.setAppliedRuleIdsCsv(csv.length() > 0 ? csv.toString() : null);
+                }
+            }
+
+            BigDecimal couponDiscountAmount = pricing.couponSavings();
+            BigDecimal promotionSavings = pricing.promotionSavings();
+            BigDecimal finalTotal = pricing.finalTotal();
+
+            // --- Loyalty point redemption: pre-validate and compute discount before Stripe charge ---
+            // The actual atomic deduction is deferred until after the order entity is saved (orderId needed).
+            int loyaltyPointsToRedeem = request.getLoyaltyPointsToRedeem() != null
+                    ? request.getLoyaltyPointsToRedeem() : 0;
+            long loyaltyDiscountCents = 0L;
+            long loyaltyCompanyId = 0L;
+            if (loyaltyPointsToRedeem > 0) {
+                loyaltyCompanyId = resolveOrderCompanyId(orderItems);
+                var quote = loyaltyService.getRedemptionQuote(userId, loyaltyCompanyId, loyaltyPointsToRedeem);
+                if (!quote.isValid()) {
+                    throw new BadRequestException("Cannot redeem loyalty points: " + quote.getInvalidReason());
+                }
+                loyaltyDiscountCents = quote.getDiscountCents();
+                finalTotal = finalTotal.subtract(BigDecimal.valueOf(loyaltyDiscountCents).movePointLeft(2))
+                        .max(BigDecimal.ZERO);
+            }
+
+            long amountInCents = finalTotal.multiply(BigDecimal.valueOf(100))
+                    .setScale(0, RoundingMode.HALF_UP)
+                    .longValueExact();
+
+            // --- Marketplace: stamp vendorId on items BEFORE cascade-save so it's persisted
+            //     atomically with the order. SubOrders are wired up after the order is saved.
+            boolean hasMarketplaceItems = stampVendorIds(orderItems);
+
+            Order order = new Order();
+            order.setUser(user);
+            order.setTotalAmount(finalTotal);
+            order.setCouponCode(pricing.appliedCouponCode());
+            order.setCouponDiscountAmount(couponDiscountAmount);
+            order.setPromotionSavings(promotionSavings);
+            order.setCoupon(appliedCoupon);
+            order.setCurrency(currency);
+            order.setStatus(OrderStatus.RESERVED);
+
+            for (OrderItem item : orderItems) {
+                item.setOrder(order);
+            }
+            order.setItems(orderItems);
+
+            order = orderRepository.save(order);
+
+            savedOrderId = order.getId();
+
+            // Publish one ORDER activity event per line item (fire-and-forget after commit).
+            for (OrderItem item : order.getItems()) {
+                if (item.getProduct() == null) continue;
+                Long mkt = item.getProduct().getMarketplaceId();
+                if (mkt == null) continue;
+                activityEventPublisher.publish(new UserActivityEvent(
+                        userId, null, item.getProduct().getId(), mkt, ActivityType.ORDER, Instant.now()));
+            }
+
+            // --- Atomically deduct loyalty points now that the order has an ID ---
+            if (loyaltyPointsToRedeem > 0) {
+                loyaltyService.applyRedemption(userId, loyaltyCompanyId, order.getId(), loyaltyPointsToRedeem);
+                order.setLoyaltyPointsApplied(loyaltyPointsToRedeem);
+                order.setLoyaltyDiscountCents(loyaltyDiscountCents);
+                order = orderRepository.save(order);
+            }
+
+            // --- Create per-vendor SubOrders for marketplace carts ---
+            if (hasMarketplaceItems) {
+                order.setMarketplaceOrder(true);
+                createSubOrders(order, orderItems);
+                orderRepository.save(order);
+            }
+
+            // Atomically increment coupon usedCount and record redemption
+            if (appliedCoupon != null) {
+                int incremented = couponRepository.tryIncrementUsedCount(appliedCoupon.getId());
+                if (incremented == 0) {
+                    throw new ConflictException("Coupon '" + appliedCouponCode + "' has reached its usage limit. Please try another.");
+                }
+                CouponRedemption redemption = new CouponRedemption();
+                redemption.setCoupon(appliedCoupon);
+                redemption.setOrder(order);
+                redemption.setUser(user);
+                redemption.setDiscountAmount(couponDiscountAmount);
+                redemption.setRedeemedAt(Instant.now());
+                ClientInfo clientInfoForCoupon = ClientRequestContext.get();
+                if (clientInfoForCoupon != null && clientInfoForCoupon.ip() != null) {
+                    redemption.setIp(clientInfoForCoupon.ip());
+                }
+                couponRedemptionRepository.save(redemption);
+            }
+
+            // Atomically increment each fired promotion rule's usedCount + write a redemption row.
+            // Losers of a concurrent race (maxUses cap exhausted between quote and here) throw
+            // ConflictException; the caller's catch block restores stock via safeRestoreAll.
+            if (!pricing.appliedPromotions().isEmpty()) {
+                Instant redeemedAt = Instant.now();
+                for (AppliedPromotion ap : pricing.appliedPromotions()) {
+                    int updated = promotionRuleRepository.tryIncrementUsedCount(ap.ruleId());
+                    if (updated == 0) {
+                        throw new ConflictException("Promotion '" + ap.name()
+                                + "' has reached its usage limit. Please try again.");
+                    }
+                    PromotionRule ruleRef = promotionRuleRepository.getReferenceById(ap.ruleId());
+                    Company funder = companyRepository.getReferenceById(ap.fundedByCompanyId());
+                    PromotionRedemption redemption = new PromotionRedemption();
+                    redemption.setRule(ruleRef);
+                    redemption.setOrder(order);
+                    redemption.setUser(user);
+                    redemption.setDiscountAmount(ap.savings());
+                    redemption.setFundedByCompany(funder);
+                    redemption.setRedeemedAt(redeemedAt);
+                    promotionRedemptionRepository.save(redemption);
+                }
+            }
+
+            // Invalidate 1h hot-product demand cache for all companies in this order.
+            // The next API call within the TTL will recompute from the DB (now including this order).
+            orderItems.stream()
+                    .filter(item -> item.getProduct() != null)
+                    .map(item -> item.getProduct().getCompany().getId())
+                    .distinct()
+                    .forEach(cid -> cacheService.delete("demand:hot:1h:" + cid));
+
+            // Write reservation manifest — holds stock in Redis for reservationTtlSeconds (default 15 min).
+            // Released on all terminal paths: payment success, payment failure, stale-order compensation.
+            writeReservation(order.getId(), decrementedProducts, decrementedVariants, decrementedLocationStocks);
+
+            // Record PURCHASE adjustments — order is now persisted so orderId is set.
+            // previousStock is captured from the in-memory entity while the lock is held: no race condition.
+            List<InventoryAdjustment> purchaseAdjs = new ArrayList<>();
+            for (PurchaseRecord pr : purchaseRecords) {
+                InventoryAdjustment adj = new InventoryAdjustment();
+                adj.setProduct(pr.prod());
+                adj.setVariant(pr.var());
+                adj.setDelta(pr.newStock() - pr.prevStock()); // negative (e.g. -3)
+                adj.setPreviousStock(pr.prevStock());
+                adj.setNewStock(pr.newStock());
+                adj.setReason(AdjustmentReason.PURCHASE);
+                adj.setNote("Order #" + order.getId());
+                adj.setOrderId(order.getId());
+                purchaseAdjs.add(adj);
+            }
+            adjustmentRepository.saveAll(purchaseAdjs);
+
+            // Low stock alerts — uses data already captured in purchaseRecords (no extra queries)
+            for (PurchaseRecord pr : purchaseRecords) {
+                Integer threshold = pr.var() != null
+                        ? pr.var().getLowStockThreshold()
+                        : pr.prod().getLowStockThreshold();
+                stockAlertService.checkAndAlert(
+                        pr.prod().getId(), pr.prod().getName(),
+                        pr.var() != null ? pr.var().getId() : null,
+                        pr.var() != null ? pr.var().getSku() : null,
+                        pr.newStock(), threshold);
+            }
+
+            // --- Risk / fraud evaluation. Assessment is always persisted (SHADOW + ENFORCE);
+            //     ENFORCE flips the order to UNDER_REVIEW or raises a step-up exception.
+            RiskAssessment persistedAssessment = runRiskAssessment(
+                    user, order, userSegmentIds, pricing,
+                    request.getRiskVerificationToken());
+            order.setRiskAssessmentId(persistedAssessment.getId());
+            order.setRiskDecision(persistedAssessment.getDecision());
+            order.setRiskScore(persistedAssessment.getScore());
+            if (order.getStatus() == OrderStatus.UNDER_REVIEW) {
+                // Block path: order is parked for merchant review. Stock stays reserved;
+                // stale-order scheduler auto-releases if no decision within the TTL.
+                OrderResponse response = toResponse(orderRepository.save(order));
+                emailService.sendOrderReceiptEmail(user.getEmail(), user.getFirstName(), response);
+                return response;
+            }
+
+            PaymentIntentResult paymentIntent;
+            try {
+                paymentIntent = paymentService.createPaymentIntent(
+                        amountInCents,
+                        currency,
+                        null,
+                        Map.of("user_id", String.valueOf(userId), "order_id", String.valueOf(order.getId()))
+                );
+            } catch (Exception e) {
+                order.setStatus(OrderStatus.FAILED);
+                order.setFailureReason("Payment intent creation failed: " + e.getMessage());
+                orderRepository.save(order);
+                releaseReservation(order.getId());
+                scheduleStockCompensation(order, decrementedProducts, decrementedVariants, decrementedLocationStocks);
+                throw e;
+            }
+
+            order.setPaymentIntentId(paymentIntent.id());
+            order.setPaymentClientSecret(paymentIntent.clientSecret());
+
+            OrderResponse response = toResponse(orderRepository.save(order));
+            emailService.sendOrderReceiptEmail(user.getEmail(), user.getFirstName(), response);
+            return response;
+        } catch (ConflictException | ResourceNotFoundException | BadRequestException e) {
+            throw e;
+        } catch (Exception e) {
+            safeRestoreAll(decrementedProducts, decrementedVariants, decrementedLocationStocks);
+            if (savedOrderId != null) {
+                try { loyaltyService.restoreRedeemedPoints(savedOrderId); } catch (Exception ex) {
+                    log.error("Failed to restore loyalty points for order {}: {}", savedOrderId, ex.getMessage());
+                }
+            }
+            throw e;
+        } finally {
+            releaseLocks(acquiredLocks, lockToken);
+        }
+    }
+
+    @Override
+    public OrderResponse getOrder(long orderId, long userId) {
+        Order order = orderRepository.findByIdAndUserId(orderId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        return toResponse(order);
+    }
+
+    @Override
+    public PagedResponse<OrderResponse> getOrders(long userId, OrderStatus status, int page, int size, String sort, String direction) {
+        if (size > 50) size = 50;
+
+        String sortField = (sort != null && SORTABLE_FIELDS.contains(sort)) ? sort : "createdAt";
+        Sort.Direction sortDir = "asc".equalsIgnoreCase(direction) ? Sort.Direction.ASC : Sort.Direction.DESC;
+        Pageable pageable = PageRequest.of(page, size, Sort.by(sortDir, sortField));
+
+        if (status != null) {
+            return new PagedResponse<>(
+                    orderRepository.findAllByUserIdAndStatus(userId, status, pageable).map(this::toResponse)
+            );
+        }
+        return new PagedResponse<>(
+                orderRepository.findAllByUserId(userId, pageable).map(this::toResponse)
+        );
+    }
+
+    @Override
+    @Transactional
+    public OrderResponse cancelOrder(long orderId, long userId) {
+        return cancelOrderInternal(orderId, userId, backend.models.enums.CancellationReason.CUSTOMER_REQUEST);
+    }
+
+    /**
+     * Same flow as the public {@link #cancelOrder} but lets internal callers
+     * (risk reject, payment failure escalation, etc.) tag the cancellation
+     * with the correct {@link backend.models.enums.CancellationReason}.
+     */
+    OrderResponse cancelOrderInternal(long orderId, long userId, backend.models.enums.CancellationReason reason) {
+        Order order = orderRepository.findByIdAndUserId(orderId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+
+        if (order.getStatus() != OrderStatus.RESERVED
+                && order.getStatus() != OrderStatus.PAID
+                && order.getStatus() != OrderStatus.PACKED) {
+            throw new ConflictException("Orders can only be cancelled before they are shipped");
+        }
+
+        order.setStatus(OrderStatus.CANCELLED);
+        order.setCancelledAt(Instant.now());
+        order.setCancellationReason(reason);
+
+        if (order.getPaymentIntentId() != null) {
+            try {
+                paymentService.cancelPaymentIntent(order.getPaymentIntentId());
+                recordCompensation(order, CompensationType.PAYMENT_CANCEL,
+                        "Cancelled payment intent: " + order.getPaymentIntentId(), CompensationStatus.COMPLETED);
+            } catch (Exception e) {
+                log.error("Failed to cancel payment intent {} for order {}: {}",
+                        order.getPaymentIntentId(), order.getId(), e.getMessage());
+                recordCompensation(order, CompensationType.PAYMENT_CANCEL,
+                        "Failed to cancel payment intent: " + order.getPaymentIntentId(), CompensationStatus.FAILED, e.getMessage());
+            }
+        }
+
+        for (OrderItem item : order.getItems()) {
+            try {
+                restoreItemStock(item);
+                recordCancelAdjustment(item, order.getId());
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        buildRestoreDetail(item) + " restored for order cancellation", CompensationStatus.COMPLETED);
+            } catch (Exception e) {
+                log.error("Failed to restore stock for item on order {}: {}", order.getId(), e.getMessage());
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        buildRestoreDetail(item) + " failed to restore", CompensationStatus.FAILED, e.getMessage());
+            }
+            item.setFulfillmentStatus(FulfillmentStatus.CANCELLED);
+        }
+
+        order.setCompensated(true);
+        return toResponse(orderRepository.save(order));
+    }
+
+    @Override
+    @Transactional
+    public void handlePaymentSuccess(String paymentIntentId) {
+        orderRepository.findByPaymentIntentId(paymentIntentId).ifPresent(order -> {
+            if (order.getStatus() == OrderStatus.PAID) {
+                log.debug("payment_intent.succeeded replay ignored — order {} already PAID", order.getId());
+                return;
+            }
+            // Always PAID — backordered items are tracked via FulfillmentStatus.BACKORDERED per item.
+            order.setStatus(OrderStatus.PAID);
+            order.setPaidAt(Instant.now());
+            orderRepository.save(order);
+            releaseReservation(order.getId());
+            if (order.isMarketplaceOrder()) {
+                recordSubOrderCommission(order);
+            }
+            try {
+                long companyId = resolveOrderCompanyId(order.getItems());
+                loyaltyService.recordOrderEarn(order, companyId);
+            } catch (Exception e) {
+                log.error("[LOYALTY] Failed to record earn for order {}: {}", order.getId(), e.getMessage());
+            }
+        });
+    }
+
+    @Override
+    @Transactional
+    public void handlePaymentFailure(String paymentIntentId) {
+        orderRepository.findByPaymentIntentId(paymentIntentId).ifPresent(order -> {
+            if (order.getStatus() == OrderStatus.PAID) {
+                log.warn("payment_intent.payment_failed ignored — order {} is already PAID", order.getId());
+                return;
+            }
+            if (orderRepository.markCompensated(order.getId()) == 0) return;
+            order.setCompensated(true); // keep entity in sync with DB
+            releaseReservation(order.getId());
+
+            order.setStatus(OrderStatus.FAILED);
+            order.setFailureReason("Payment failed via webhook");
+            order.setCancelledAt(Instant.now());
+            order.setCancellationReason(backend.models.enums.CancellationReason.PAYMENT_FAILED);
+
+            // Feed the failed-payment velocity signal. The webhook itself has no IP;
+            // recover it from the risk assessment recorded at checkout time.
+            recordFailedPaymentAttempt(order, paymentIntentId, "Payment failed via webhook");
+
+            for (OrderItem item : order.getItems()) {
+                try {
+                    restoreItemStock(item);
+                    recordCancelAdjustment(item, order.getId());
+                    recordCompensation(order, CompensationType.STOCK_RESTORE,
+                            buildRestoreDetail(item) + " restored for payment failure", CompensationStatus.COMPLETED);
+                } catch (Exception e) {
+                    log.error("Failed to restore stock for item on failed order {}: {}", order.getId(), e.getMessage());
+                    recordCompensation(order, CompensationType.STOCK_RESTORE,
+                            buildRestoreDetail(item) + " failed to restore", CompensationStatus.FAILED, e.getMessage());
+                }
+            }
+
+            orderRepository.save(order);
+        });
+    }
+
+    /**
+     * Compensates a single failed/stale order. Called by the scheduler for orders
+     * that were not successfully compensated inline. Each step is individually
+     * wrapped so a failure in one does not prevent the others from executing.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void compensateOrder(Order order) {
+        if (orderRepository.markCompensated(order.getId()) == 0) return;
+        order.setCompensated(true); // keep entity in sync with DB
+        releaseReservation(order.getId());
+
+        log.info("Compensating order {} (status={})", order.getId(), order.getStatus());
+
+        for (OrderItem item : order.getItems()) {
+            try {
+                restoreItemStock(item);
+                recordCancelAdjustment(item, order.getId());
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        buildRestoreDetail(item) + " restored by scheduler", CompensationStatus.COMPLETED);
+            } catch (Exception e) {
+                log.error("Scheduled compensation: failed to restore stock for item on order {}: {}", order.getId(), e.getMessage());
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        buildRestoreDetail(item) + " failed in scheduler", CompensationStatus.FAILED, e.getMessage());
+            }
+        }
+
+        if (order.getPaymentIntentId() != null && order.getStatus() != OrderStatus.CANCELLED) {
+            try {
+                paymentService.cancelPaymentIntent(order.getPaymentIntentId());
+                recordCompensation(order, CompensationType.PAYMENT_CANCEL,
+                        "Cancelled payment intent: " + order.getPaymentIntentId(), CompensationStatus.COMPLETED);
+            } catch (Exception e) {
+                log.error("Scheduled compensation: failed to cancel payment {} for order {}: {}",
+                        order.getPaymentIntentId(), order.getId(), e.getMessage());
+                recordCompensation(order, CompensationType.PAYMENT_CANCEL,
+                        "Cancel payment intent: " + order.getPaymentIntentId(), CompensationStatus.FAILED, e.getMessage());
+            }
+        }
+
+        if (order.getStatus() == OrderStatus.RESERVED) {
+            order.setStatus(OrderStatus.FAILED);
+            order.setFailureReason("Compensated by scheduler — stale reserved order");
+            order.setCancelledAt(Instant.now());
+            order.setCancellationReason(backend.models.enums.CancellationReason.STALE_TIMEOUT);
+        }
+        orderRepository.save(order);
+
+        try {
+            loyaltyService.restoreRedeemedPoints(order.getId());
+        } catch (Exception e) {
+            log.error("Failed to restore loyalty points for compensated order {}: {}", order.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * Retries a single previously failed compensation record. Called by the scheduler
+     * to ensure eventual consistency on items that failed their first compensation attempt.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void retryCompensation(OrderCompensation compensation) {
+        if (compensationRepository.claimForRetry(compensation.getId()) == 0) {
+            log.debug("Compensation {} already claimed by another worker — skipping", compensation.getId());
+            return;
+        }
+        compensation.setAttempts(compensation.getAttempts() + 1);
+
+        try {
+            switch (compensation.getType()) {
+                case STOCK_RESTORE -> {
+                    String detail = compensation.getDetail();
+                    int quantity = extractQuantityFromDetail(detail);
+                    if (detail != null && detail.startsWith("[LOC:")) {
+                        long locationStockId = extractLocationStockIdFromDetail(detail);
+                        if (locationStockId > 0 && quantity > 0) {
+                            locationStockRepository.restoreStock(locationStockId, quantity);
+                        }
+                    } else if (detail != null && detail.startsWith("[VARIANT]")) {
+                        long variantId = extractVariantIdFromDetail(detail);
+                        if (variantId > 0 && quantity > 0) {
+                            variantRepository.restoreStock(variantId, quantity);
+                        }
+                    } else {
+                        long productId = extractProductIdFromDetail(detail);
+                        if (productId > 0 && quantity > 0) {
+                            productRepository.restoreStock(productId, quantity);
+                        }
+                    }
+                }
+                case PAYMENT_CANCEL -> {
+                    String intentId = extractIntentIdFromDetail(compensation.getDetail());
+                    if (intentId != null) {
+                        paymentService.cancelPaymentIntent(intentId);
+                    }
+                }
+                case PAYMENT_REFUND -> {
+                    String detail = compensation.getDetail();
+                    String intentId = extractIntentIdFromDetail(detail);
+                    Long centsToRefund = extractRefundCentsFromDetail(detail);
+                    if (intentId != null) {
+                        paymentService.refundPayment(intentId, centsToRefund);
+                    }
+                }
+            }
+            compensation.setStatus(CompensationStatus.COMPLETED);
+            compensation.setCompletedAt(Instant.now());
+            compensation.setErrorMessage(null);
+        } catch (Exception e) {
+            log.error("Compensation retry failed for id={} type={}: {}",
+                    compensation.getId(), compensation.getType(), e.getMessage());
+            compensation.setErrorMessage(e.getMessage());
+        }
+
+        compensationRepository.save(compensation);
+    }
+
+    private void scheduleStockCompensation(Order order, List<long[]> decrementedProducts,
+                                            List<long[]> decrementedVariants, List<long[]> decrementedLocationStocks) {
+        for (long[] entry : decrementedProducts) {
+            try {
+                productRepository.restoreStock(entry[0], (int) entry[1]);
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        "Restored " + entry[1] + " units for product " + entry[0], CompensationStatus.COMPLETED);
+            } catch (Exception e) {
+                log.error("Inline stock compensation failed for product {} on order {}: {}",
+                        entry[0], order.getId(), e.getMessage());
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        "Restore " + entry[1] + " units for product " + entry[0], CompensationStatus.FAILED, e.getMessage());
+            }
+        }
+        for (long[] entry : decrementedVariants) {
+            try {
+                variantRepository.restoreStock(entry[0], (int) entry[1]);
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        "[VARIANT] Restored " + entry[1] + " units for variant " + entry[0], CompensationStatus.COMPLETED);
+            } catch (Exception e) {
+                log.error("Inline stock compensation failed for variant {} on order {}: {}",
+                        entry[0], order.getId(), e.getMessage());
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        "[VARIANT] Restore " + entry[1] + " units for variant " + entry[0], CompensationStatus.FAILED, e.getMessage());
+            }
+        }
+        for (long[] entry : decrementedLocationStocks) {
+            try {
+                locationStockRepository.restoreStock(entry[0], (int) entry[1]);
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        "[LOC:" + entry[0] + "] Restored " + entry[1] + " units", CompensationStatus.COMPLETED);
+            } catch (Exception e) {
+                log.error("Inline location stock compensation failed for locationStockId {} on order {}: {}",
+                        entry[0], order.getId(), e.getMessage());
+                recordCompensation(order, CompensationType.STOCK_RESTORE,
+                        "[LOC:" + entry[0] + "] Restore " + entry[1] + " units", CompensationStatus.FAILED, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Writes a Redis reservation manifest for the given order.
+     * Key: "reserve:order:{orderId}", TTL = reservationTtlSeconds.
+     * Non-critical: failures are logged and swallowed so checkout is not blocked.
+     */
+    private void writeReservation(long orderId,
+                                   List<long[]> products,
+                                   List<long[]> variants,
+                                   List<long[]> locationStocks) {
+        try {
+            StringBuilder sb = new StringBuilder("{\"p\":{");
+            appendReservationEntries(sb, products);
+            sb.append("},\"v\":{");
+            appendReservationEntries(sb, variants);
+            sb.append("},\"ls\":{");
+            appendReservationEntries(sb, locationStocks);
+            sb.append("}}");
+            cacheService.set("reserve:order:" + orderId, sb.toString(), reservationTtlSeconds);
+        } catch (Exception e) {
+            log.warn("[RESERVE] Failed to write reservation for order {}: {}", orderId, e.getMessage());
+        }
+    }
+
+    private static void appendReservationEntries(StringBuilder sb, List<long[]> entries) {
+        boolean first = true;
+        for (long[] e : entries) {
+            if (!first) sb.append(',');
+            sb.append('"').append(e[0]).append("\":").append(e[1]);
+            first = false;
+        }
+    }
+
+    /**
+     * Deletes the Redis reservation manifest for this order.
+     * Idempotent: safe to call even if the key has already expired or was never written.
+     */
+    private void releaseReservation(long orderId) {
+        try {
+            cacheService.delete("reserve:order:" + orderId);
+        } catch (Exception e) {
+            log.warn("[RESERVE] Failed to release reservation for order {}: {}", orderId, e.getMessage());
+        }
+    }
+
+    private void safeRestoreAll(List<long[]> decrementedProducts, List<long[]> decrementedVariants,
+                                List<long[]> decrementedLocationStocks) {
+        for (long[] entry : decrementedProducts) {
+            try {
+                productRepository.restoreStock(entry[0], (int) entry[1]);
+            } catch (Exception e) {
+                log.error("Emergency stock restore failed for product {}: {}", entry[0], e.getMessage());
+            }
+        }
+        for (long[] entry : decrementedVariants) {
+            try {
+                variantRepository.restoreStock(entry[0], (int) entry[1]);
+            } catch (Exception e) {
+                log.error("Emergency stock restore failed for variant {}: {}", entry[0], e.getMessage());
+            }
+        }
+        for (long[] entry : decrementedLocationStocks) {
+            try {
+                locationStockRepository.restoreStock(entry[0], (int) entry[1]);
+            } catch (Exception e) {
+                log.error("Emergency location stock restore failed for locationStockId {}: {}", entry[0], e.getMessage());
+            }
+        }
+    }
+
+    private boolean hasAnyLocationStock(long productId, Long variantId) {
+        long variantRef = (variantId != null) ? variantId : 0L;
+        List<LocationStock> check = (variantId != null)
+                ? locationStockRepository.findTopByVariantStockDesc(productId, variantRef, PageRequest.of(0, 1))
+                : locationStockRepository.findTopByProductStockDesc(productId, PageRequest.of(0, 1));
+        return !check.isEmpty();
+    }
+
+    private void restoreItemStock(OrderItem item) {
+        if (item.getFulfillmentStatus() == FulfillmentStatus.BACKORDERED) return;  // no stock was decremented — nothing to restore
+
+        if (item.getBundle() != null) {
+            // Restore each constituent product's stock (no location stock for bundle items)
+            for (BundleItem bi : item.getBundle().getItems()) {
+                int totalQty = item.getQuantity() * bi.getQuantity();
+                if (bi.getVariant() != null) {
+                    variantRepository.restoreStock(bi.getVariant().getId(), totalQty);
+                } else {
+                    productRepository.restoreStock(bi.getProduct().getId(), totalQty);
+                }
+            }
+            return;
+        }
+
+        if (item.getVariant() != null) {
+            variantRepository.restoreStock(item.getVariant().getId(), item.getQuantity());
+        } else {
+            productRepository.restoreStock(item.getProduct().getId(), item.getQuantity());
+        }
+        if (item.getFulfillmentLocation() != null) {
+            long variantRef = item.getVariant() != null ? item.getVariant().getId() : 0L;
+            locationStockRepository.findByLocationIdAndProductIdAndVariantRef(
+                            item.getFulfillmentLocation().getId(), item.getProduct().getId(), variantRef)
+                    .ifPresent(ls -> locationStockRepository.restoreStock(ls.getId(), item.getQuantity()));
+        }
+    }
+
+    private void recordCompensation(Order order, CompensationType type, String detail, CompensationStatus status) {
+        recordCompensation(order, type, detail, status, null);
+    }
+
+    private void recordCompensation(Order order, CompensationType type, String detail, CompensationStatus status, String errorMessage) {
+        OrderCompensation comp = new OrderCompensation();
+        comp.setOrder(order);
+        comp.setType(type);
+        comp.setDetail(detail);
+        comp.setStatus(status);
+        comp.setErrorMessage(errorMessage);
+        comp.setAttempts(1);
+        if (status == CompensationStatus.COMPLETED) {
+            comp.setCompletedAt(Instant.now());
+        }
+        compensationRepository.save(comp);
+    }
+
+    /**
+     * Records an ORDER_CANCELLED adjustment for a single order item after stock has been restored.
+     * previousStock/newStock are set to 0 — the restore is atomic and reading before it would be a
+     * TOCTOU race. The delta (+qty) and orderId are the authoritative audit values.
+     */
+    private void recordCancelAdjustment(OrderItem item, long orderId) {
+        try {
+            if (item.getBundle() != null) {
+                // One adjustment per bundle constituent
+                for (BundleItem bi : item.getBundle().getItems()) {
+                    int totalQty = item.getQuantity() * bi.getQuantity();
+                    InventoryAdjustment adj = new InventoryAdjustment();
+                    adj.setProduct(bi.getProduct());
+                    adj.setVariant(bi.getVariant());
+                    adj.setDelta(totalQty);
+                    adj.setPreviousStock(0);
+                    adj.setNewStock(0);
+                    adj.setReason(AdjustmentReason.ORDER_CANCELLED);
+                    adj.setNote("Bundle order #" + orderId + " cancelled — bundle: " + item.getBundleName());
+                    adj.setOrderId(orderId);
+                    adjustmentRepository.save(adj);
+                }
+                return;
+            }
+
+            InventoryAdjustment adj = new InventoryAdjustment();
+            adj.setProduct(item.getProduct());
+            adj.setVariant(item.getVariant());
+            adj.setDelta(item.getQuantity()); // positive = stock returned
+            adj.setPreviousStock(0);
+            adj.setNewStock(0);
+            adj.setReason(AdjustmentReason.ORDER_CANCELLED);
+            adj.setNote("Order #" + orderId + " cancelled/failed");
+            adj.setOrderId(orderId);
+            adjustmentRepository.save(adj);
+        } catch (Exception e) {
+            log.warn("Failed to record cancel adjustment for order {}: {}", orderId, e.getMessage());
+        }
+    }
+
+    private static String buildRestoreDetail(OrderItem item) {
+        if (item.getBundle() != null) {
+            return "[BUNDLE:" + item.getBundle().getId() + "] " + item.getQuantity() + " unit(s) of bundle " + item.getBundleName();
+        }
+        if (item.getVariant() != null) {
+            return "[VARIANT] " + item.getQuantity() + " units for variant " + item.getVariant().getId();
+        }
+        return "Restored " + item.getQuantity() + " units for product " +
+                (item.getProduct() != null ? item.getProduct().getId() : "unknown");
+    }
+
+    private void acquireVariantLocks(List<Long> sortedVariantIds, String lockToken, List<String> acquiredLocks) {
+        for (Long variantId : sortedVariantIds) {
+            String lockKey = VARIANT_LOCK_PREFIX + variantId;
+            boolean acquired = false;
+
+            for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
+                if (cacheService.tryLock(lockKey, lockToken, LOCK_TTL_SECONDS)) {
+                    acquiredLocks.add(lockKey);
+                    acquired = true;
+                    break;
+                }
+                try {
+                    Thread.sleep(LOCK_RETRY_DELAY_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new ConflictException("Order processing interrupted, please try again");
+                }
+            }
+
+            if (!acquired) {
+                releaseLocks(acquiredLocks, lockToken);
+                throw new ConflictException("Variant is currently being purchased by another user, please try again shortly");
+            }
+        }
+    }
+
+    private void acquireLocks(List<Long> sortedProductIds, String lockToken, List<String> acquiredLocks) {
+        for (Long productId : sortedProductIds) {
+            String lockKey = LOCK_PREFIX + productId;
+            boolean acquired = false;
+
+            for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
+                if (cacheService.tryLock(lockKey, lockToken, LOCK_TTL_SECONDS)) {
+                    acquiredLocks.add(lockKey);
+                    acquired = true;
+                    break;
+                }
+                try {
+                    Thread.sleep(LOCK_RETRY_DELAY_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new ConflictException("Order processing interrupted, please try again");
+                }
+            }
+
+            if (!acquired) {
+                releaseLocks(acquiredLocks, lockToken);
+                throw new ConflictException("Product is currently being purchased by another user, please try again shortly");
+            }
+        }
+    }
+
+    private void releaseLocks(List<String> lockKeys, String lockToken) {
+        for (String lockKey : lockKeys) {
+            try {
+                cacheService.unlock(lockKey, lockToken);
+            } catch (Exception e) {
+                log.error("Failed to release lock {}: {}", lockKey, e.getMessage());
+            }
+        }
+    }
+
+    private static long extractProductIdFromDetail(String detail) {
+        try {
+            int idx = detail.lastIndexOf("product ");
+            if (idx >= 0) return Long.parseLong(detail.substring(idx + 8).trim());
+        } catch (Exception ignored) {}
+        return -1;
+    }
+
+    private static String buildVariantTitle(ProductVariant variant) {
+        String title = java.util.stream.Stream.of(variant.getOption1(), variant.getOption2(), variant.getOption3())
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.joining(" / "));
+        return title.isBlank() ? null : title;
+    }
+
+    private static long extractVariantIdFromDetail(String detail) {
+        try {
+            int idx = detail.lastIndexOf("variant ");
+            if (idx >= 0) return Long.parseLong(detail.substring(idx + 8).trim());
+        } catch (Exception ignored) {}
+        return -1;
+    }
+
+    // Parses "[LOC:42] Restored 3 units" → 42
+    private static long extractLocationStockIdFromDetail(String detail) {
+        try {
+            int start = detail.indexOf("[LOC:") + 5;
+            int end = detail.indexOf("]", start);
+            if (start > 4 && end > start) return Long.parseLong(detail.substring(start, end).trim());
+        } catch (Exception ignored) {}
+        return -1;
+    }
+
+    private static int extractQuantityFromDetail(String detail) {
+        try {
+            int startIdx = detail.indexOf("Restore ") >= 0 ? detail.indexOf("Restore ") + 8 : detail.indexOf("Restored ") + 9;
+            int endIdx = detail.indexOf(" units");
+            if (startIdx > 0 && endIdx > startIdx) return Integer.parseInt(detail.substring(startIdx, endIdx).trim());
+        } catch (Exception ignored) {}
+        return -1;
+    }
+
+    private static String extractIntentIdFromDetail(String detail) {
+        if (detail == null) return null;
+        // Structured partial-refund format: "REFUND_PARTIAL:{intentId}:CENTS:{amount}"
+        if (detail.startsWith("REFUND_PARTIAL:")) {
+            String[] parts = detail.split(":");
+            // parts[0]=REFUND_PARTIAL, parts[1]=intentId (may contain underscores), parts[2]=CENTS, parts[3]=amount
+            if (parts.length >= 4) return parts[1];
+        }
+        int idx = detail.lastIndexOf(": ");
+        if (idx >= 0) return detail.substring(idx + 2).trim();
+        idx = detail.lastIndexOf("intent: ");
+        if (idx >= 0) return detail.substring(idx + 8).trim();
+        return null;
+    }
+
+    /**
+     * Extracts the refund amount in cents from a structured PAYMENT_REFUND compensation detail.
+     * Returns null for legacy full-refund records (which should call refundPayment with null).
+     * Format: "REFUND_PARTIAL:{intentId}:CENTS:{amountCents}"
+     */
+    private static Long extractRefundCentsFromDetail(String detail) {
+        if (detail == null || !detail.startsWith("REFUND_PARTIAL:")) return null;
+        try {
+            int centsIdx = detail.lastIndexOf(":CENTS:");
+            if (centsIdx >= 0) {
+                return Long.parseLong(detail.substring(centsIdx + 7).trim());
+            }
+        } catch (NumberFormatException ignored) {}
+        return null;
+    }
+
+    @Override
+    @Transactional
+    public void fulfillPendingBackorders(long productId, Long variantId, int availableQty, Long fulfillmentLocationId) {
+        String lockToken = UUID.randomUUID().toString();
+        List<String> acquiredLocks = new ArrayList<>();
+
+        try {
+            String productLockKey = LOCK_PREFIX + productId;
+            for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
+                if (cacheService.tryLock(productLockKey, lockToken, LOCK_TTL_SECONDS)) {
+                    acquiredLocks.add(productLockKey);
+                    break;
+                }
+                try { Thread.sleep(LOCK_RETRY_DELAY_MS); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+            }
+            if (acquiredLocks.isEmpty()) {
+                log.warn("fulfillPendingBackorders: could not acquire product lock for product={} — skipping this run", productId);
+                return;
+            }
+
+            if (variantId != null) {
+                String variantLockKey = VARIANT_LOCK_PREFIX + variantId;
+                boolean variantAcquired = false;
+                for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
+                    if (cacheService.tryLock(variantLockKey, lockToken, LOCK_TTL_SECONDS)) {
+                        acquiredLocks.add(variantLockKey);
+                        variantAcquired = true;
+                        break;
+                    }
+                    try { Thread.sleep(LOCK_RETRY_DELAY_MS); }
+                    catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+                }
+                if (!variantAcquired) {
+                    log.warn("fulfillPendingBackorders: could not acquire variant lock for variant={} — skipping this run", variantId);
+                    return;
+                }
+            }
+
+            List<Order> backorders = (variantId != null)
+                    ? orderRepository.findPaidOrdersWithBackorderedVariant(variantId, FulfillmentStatus.BACKORDERED)
+                    : orderRepository.findPaidOrdersWithBackorderedProduct(productId, FulfillmentStatus.BACKORDERED);
+
+            int remaining = availableQty;
+
+            for (Order order : backorders) {
+                if (remaining <= 0) break;
+
+                for (OrderItem item : order.getItems()) {
+                    if (item.getFulfillmentStatus() != FulfillmentStatus.BACKORDERED) continue;
+                    if (item.getProduct().getId() != productId) continue;
+                    if (variantId != null && (item.getVariant() == null || item.getVariant().getId() != variantId)) continue;
+
+                    int qty = item.getQuantity();
+                    if (qty > remaining) return; // FIFO: stop rather than skip to a younger order
+
+                    int updated = (variantId != null)
+                            ? variantRepository.decrementStock(variantId, qty)
+                            : productRepository.decrementStock(productId, qty);
+
+                    if (updated == 0) {
+                        log.warn("fulfillPendingBackorders: decrementStock returned 0 for product={} variant={} qty={} — stopping",
+                                productId, variantId, qty);
+                        return;
+                    }
+
+                    remaining -= qty;
+                    item.setFulfillmentStatus(FulfillmentStatus.PENDING); // ready for warehouse packing
+
+                    if (fulfillmentLocationId != null) {
+                        locationRepository.findById(fulfillmentLocationId).ifPresent(loc -> {
+                            item.setFulfillmentLocation(loc);
+                            item.setFulfillmentLocationName(loc.getName());
+                        });
+                    }
+
+                    InventoryAdjustment adj = new InventoryAdjustment();
+                    adj.setProduct(item.getProduct());
+                    adj.setVariant(item.getVariant());
+                    adj.setDelta(-qty); // stock was decremented to fulfill this item
+                    adj.setPreviousStock(0); // TOCTOU-safe: delta is authoritative
+                    adj.setNewStock(0);
+                    adj.setReason(AdjustmentReason.BACKORDER_FULFILLED);
+                    adj.setNote("Backorder fulfilled for order #" + order.getId());
+                    adj.setOrderId(order.getId());
+                    adjustmentRepository.save(adj);
+                }
+
+                // Order remains PAID — the merchant will advance it to PACKED once all items are ready.
+                orderRepository.save(order);
+            }
+        } finally {
+            releaseLocks(acquiredLocks, lockToken);
+        }
+    }
+
+    @Override
+    public PagedResponse<CompanyOrderResponse> getCompanyOrders(long companyId, long ownerId, OrderStatus status, int page, int size) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        if (size > 50) size = 50;
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+
+        if (status != null) {
+            return new PagedResponse<>(
+                    orderRepository.findAllByProductCompanyIdAndStatus(companyId, status, pageable)
+                            .map(o -> toCompanyOrderResponse(o, companyId)));
+        }
+        return new PagedResponse<>(
+                orderRepository.findAllByProductCompanyId(companyId, pageable)
+                        .map(o -> toCompanyOrderResponse(o, companyId)));
+    }
+
+    @Override
+    public CompanyOrderResponse getCompanyOrder(long companyId, long orderId, long ownerId) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+
+        return toCompanyOrderResponse(order, companyId);
+    }
+
+    private CompanyOrderResponse toCompanyOrderResponse(Order order, long companyId) {
+        List<OrderItem> companyItems = order.getItems().stream()
+                .filter(item -> item.getBundle() != null
+                        ? item.getBundle().getCompany().getId() == companyId
+                        : item.getProduct() != null && item.getProduct().getCompany().getId() == companyId)
+                .toList();
+
+        BigDecimal total = companyItems.stream()
+                .map(item -> item.getUnitPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        List<OrderItemResponse> itemResponses = companyItems.stream()
+                .map(this::toItemResponse)
+                .toList();
+
+        return new CompanyOrderResponse(
+                order.getId(),
+                order.getUser().getId(),
+                order.getStatus().name(),
+                order.getCurrency(),
+                total,
+                itemResponses,
+                order.getTrackingNumber(),
+                order.getCarrier(),
+                order.getShippedAt(),
+                order.getDeliveredAt(),
+                order.getReturnedAt(),
+                order.getFulfillmentNote(),
+                order.getRefundedAmountCents(),
+                order.getCreatedAt());
+    }
+
+    private OrderResponse toResponse(Order order) {
+        List<OrderItemResponse> items = order.getItems().stream()
+                .map(this::toItemResponse)
+                .toList();
+
+        return new OrderResponse(
+                order.getId(),
+                order.getUser().getId(),
+                items,
+                order.getTotalAmount(),
+                order.getCurrency(),
+                order.getStatus().name(),
+                order.getPaymentIntentId(),
+                order.getPaymentClientSecret(),
+                order.getCouponCode(),
+                order.getCouponDiscountAmount(),
+                order.getTrackingNumber(),
+                order.getCarrier(),
+                order.getShippedAt(),
+                order.getDeliveredAt(),
+                order.getReturnedAt(),
+                order.getFulfillmentNote(),
+                order.getRefundedAmountCents(),
+                order.getCreatedAt(),
+                order.getUpdatedAt()
+        );
+    }
+
+    private OrderItemResponse toItemResponse(OrderItem item) {
+        return new OrderItemResponse(
+                item.getId(),
+                item.getProduct() != null ? item.getProduct().getId() : null,
+                item.getProductName(),
+                item.getVariant() != null ? item.getVariant().getId() : null,
+                item.getVariantTitle(),
+                item.getVariantSku(),
+                item.getQuantity(),
+                item.getUnitPrice(),
+                item.getFulfillmentLocation() != null ? item.getFulfillmentLocation().getId() : null,
+                item.getFulfillmentLocationName(),
+                item.getFulfillmentStatus(),
+                item.getBundle() != null ? item.getBundle().getId() : null,
+                item.getBundleName(),
+                item.getDiscountAmount()
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Fulfillment transitions (merchant-facing)
+    // -------------------------------------------------------------------------
+
+    private void validateTransition(Order order, OrderStatus target, OrderStatus... allowed) {
+        if (!Set.of(allowed).contains(order.getStatus())) {
+            throw new ConflictException("Cannot transition order " + order.getId()
+                    + " to " + target + ": current status is " + order.getStatus());
+        }
+    }
+
+    @Override
+    @Transactional
+    public CompanyOrderResponse markAsPacked(long companyId, long orderId, long ownerId) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+
+        validateTransition(order, OrderStatus.PACKED, OrderStatus.PAID);
+
+        for (OrderItem item : order.getItems()) {
+            if (item.getFulfillmentStatus() == FulfillmentStatus.PENDING) {
+                item.setFulfillmentStatus(FulfillmentStatus.PACKED);
+            }
+        }
+        order.setStatus(OrderStatus.PACKED);
+        order.setPackedAt(Instant.now());
+        return toCompanyOrderResponse(orderRepository.save(order), companyId);
+    }
+
+    @Override
+    @Transactional
+    public CompanyOrderResponse markAsShipped(long companyId, long orderId, long ownerId, ShipOrderRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+
+        validateTransition(order, OrderStatus.SHIPPED, OrderStatus.PACKED, OrderStatus.PARTIALLY_FULFILLED);
+
+        Set<Long> targetItemIds = (request.itemIds() != null && !request.itemIds().isEmpty())
+                ? new java.util.HashSet<>(request.itemIds())
+                : null;
+
+        for (OrderItem item : order.getItems()) {
+            if (item.getFulfillmentStatus() != FulfillmentStatus.PACKED) continue;
+            if (targetItemIds != null && !targetItemIds.contains(item.getId())) continue;
+            item.setFulfillmentStatus(FulfillmentStatus.SHIPPED);
+        }
+
+        order.setTrackingNumber(request.trackingNumber());
+        if (request.carrier() != null) order.setCarrier(request.carrier());
+        if (request.note() != null) order.setFulfillmentNote(request.note());
+        order.setShippedAt(Instant.now());
+
+        // Compute order-level status from item statuses
+        boolean anyPacked = order.getItems().stream()
+                .anyMatch(i -> i.getFulfillmentStatus() == FulfillmentStatus.PACKED
+                            || i.getFulfillmentStatus() == FulfillmentStatus.PENDING);
+        boolean allDoneOrShipped = order.getItems().stream()
+                .allMatch(i -> i.getFulfillmentStatus() == FulfillmentStatus.SHIPPED
+                            || i.getFulfillmentStatus() == FulfillmentStatus.CANCELLED
+                            || i.getFulfillmentStatus() == FulfillmentStatus.BACKORDERED);
+
+        if (allDoneOrShipped) {
+            order.setStatus(OrderStatus.SHIPPED);
+        } else if (anyPacked) {
+            order.setStatus(OrderStatus.PARTIALLY_FULFILLED);
+        }
+        // else: remains PARTIALLY_FULFILLED if called again for remaining items
+
+        return toCompanyOrderResponse(orderRepository.save(order), companyId);
+    }
+
+    @Override
+    @Transactional
+    public CompanyOrderResponse markAsDelivered(long companyId, long orderId, long ownerId) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+
+        validateTransition(order, OrderStatus.DELIVERED, OrderStatus.SHIPPED, OrderStatus.PARTIALLY_FULFILLED);
+
+        for (OrderItem item : order.getItems()) {
+            if (item.getFulfillmentStatus() == FulfillmentStatus.SHIPPED) {
+                item.setFulfillmentStatus(FulfillmentStatus.DELIVERED);
+            }
+        }
+        order.setDeliveredAt(Instant.now());
+        order.setStatus(OrderStatus.DELIVERED);
+        return toCompanyOrderResponse(orderRepository.save(order), companyId);
+    }
+
+    @Override
+    @Transactional
+    public CompanyOrderResponse initiateReturn(long companyId, long orderId, long ownerId, ReturnOrderRequest request) {
+        // Load order to translate legacy itemIds → BuyerReturnItemRequest list with full quantities
+        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+
+        List<BuyerReturnItemRequest> itemRequests = buildLegacyItemRequests(request.itemIds(), order);
+
+        MerchantInitiateReturnRequest translated = new MerchantInitiateReturnRequest(
+                itemRequests,
+                null,                           // no reason in legacy request
+                request.note(),
+                request.restockItems(),
+                request.issueRefund() ? null : 0L,  // null=auto-calc, 0=waive
+                null                            // auto-select primary return location
+        );
+
+        returnService.merchantInitiateReturn(orderId, companyId, ownerId, translated);
+
+        // Re-fetch to pick up all state changes made by ReturnService
+        Order updated = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        return toCompanyOrderResponse(updated, companyId);
+    }
+
+    /**
+     * Translates the legacy ReturnOrderRequest.itemIds (List&lt;Long&gt;) to the new request format.
+     * If itemIds is null/empty all returnable items are included. Quantity defaults to the full
+     * order-item quantity (the legacy API had no per-item quantity field).
+     */
+    private List<BuyerReturnItemRequest> buildLegacyItemRequests(List<Long> itemIds, Order order) {
+        List<OrderItem> targets;
+        if (itemIds == null || itemIds.isEmpty()) {
+            targets = order.getItems().stream()
+                    .filter(i -> i.getFulfillmentStatus() == FulfillmentStatus.DELIVERED
+                            || i.getFulfillmentStatus() == FulfillmentStatus.SHIPPED)
+                    .toList();
+        } else {
+            Set<Long> idSet = new java.util.HashSet<>(itemIds);
+            targets = order.getItems().stream()
+                    .filter(i -> idSet.contains(i.getId()))
+                    .toList();
+        }
+        return targets.stream()
+                .map(i -> new BuyerReturnItemRequest(i.getId(), i.getQuantity()))
+                .toList();
+    }
+
+    // -------------------------------------------------------------------------
+    // Risk / fraud engine integration
+    // -------------------------------------------------------------------------
+
+    /**
+     * Assesses the in-flight order, persists the assessment, and applies the engine's
+     * verdict according to the current mode.
+     *
+     * <ul>
+     *   <li>SHADOW mode: always returns (the caller proceeds to Stripe); assessment row
+     *       is still written so thresholds can be tuned against real traffic.</li>
+     *   <li>ENFORCE + ALLOW: proceeds.</li>
+     *   <li>ENFORCE + VERIFY: if the caller supplied a valid {@code riskVerificationToken}
+     *       for this user, the token is consumed and the order proceeds. Otherwise the
+     *       email step-up has already been dispatched inside the engine and we throw
+     *       {@link RiskStepUpRequiredException} so the controller can surface HTTP 428.</li>
+     *   <li>ENFORCE + BLOCK: the order is flipped to {@link OrderStatus#UNDER_REVIEW} and a
+     *       PENDING {@link RiskReview} row is created. The Stripe call is skipped entirely.</li>
+     * </ul>
+     */
+    private RiskAssessment runRiskAssessment(
+            User user,
+            Order order,
+            Set<Long> userSegmentIds,
+            PricingResult pricing,
+            String suppliedVerificationToken) {
+
+        ClientInfo clientInfo = ClientRequestContext.get();
+        String fingerprint = (clientInfo != null && clientInfo.userAgent() != null
+                && !clientInfo.userAgent().isBlank())
+                ? deviceService.computeFingerprint(clientInfo.userAgent())
+                : null;
+
+        List<Long> companyIds = order.getItems().stream()
+                .map(item -> item.getProduct() != null ? item.getProduct().getCompany().getId()
+                        : (item.getBundle() != null ? item.getBundle().getCompany().getId() : null))
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        RiskContext ctx = new RiskContext(
+                user.getId(),
+                user.getEmail(),
+                user.getCreatedAt(),
+                null, // lastLoginAt not currently exposed on User — fine, evaluators treat null as unknown
+                userSegmentIds,
+                order.getId(),
+                order.getTotalAmount(),
+                null, // no delivery yet on checkout
+                order.getCurrency(),
+                order.getCouponCode(),
+                pricing != null ? pricing.couponSavings() : null,
+                companyIds,
+                null, // shippingCountry — GeoIP stub; wire up when Address entity lands
+                clientInfo != null ? clientInfo.ip() : null,
+                fingerprint,
+                clientInfo != null ? clientInfo.userAgent() : null,
+                clientInfo != null ? clientInfo.deviceType() : null,
+                RiskAssessmentKind.CHECKOUT,
+                Instant.now());
+
+        RiskAssessmentResult result = riskEngine.assess(ctx);
+        RiskMode mode = riskProperties.getMode();
+        RiskAssessment saved = persistAssessment(ctx, result, mode);
+
+        if (mode == RiskMode.SHADOW) {
+            log.info("Risk(SHADOW) orderId={} action={} score={}",
+                    order.getId(), result.action(), result.totalScore());
+            return saved;
+        }
+
+        switch (result.action()) {
+            case ALLOW -> { /* proceed */ }
+            case VERIFY -> {
+                if (suppliedVerificationToken == null || suppliedVerificationToken.isBlank()) {
+                    throw new RiskStepUpRequiredException(order.getId(), "EMAIL");
+                }
+                long tokenUserId;
+                try {
+                    tokenUserId = emailVerificationService.consumeVerificationToken(suppliedVerificationToken);
+                } catch (RuntimeException ex) {
+                    throw new RiskStepUpRequiredException(order.getId(), "EMAIL");
+                }
+                if (tokenUserId != user.getId()) {
+                    throw new RiskStepUpRequiredException(order.getId(), "EMAIL");
+                }
+                // token valid → proceed
+            }
+            case BLOCK -> {
+                order.setStatus(OrderStatus.UNDER_REVIEW);
+                RiskReview review = new RiskReview();
+                review.setOrderId(order.getId());
+                review.setAssessmentId(saved.getId());
+                review.setStatus(RiskReviewStatus.PENDING);
+                riskReviewRepository.save(review);
+            }
+        }
+        return saved;
+    }
+
+    private RiskAssessment persistAssessment(RiskContext ctx, RiskAssessmentResult result, RiskMode mode) {
+        RiskAssessment assessment = new RiskAssessment();
+        assessment.setOrderId(ctx.orderId());
+        assessment.setUserId(ctx.userId());
+        assessment.setDecision(result.action());
+        assessment.setScore(result.totalScore());
+        assessment.setMode(mode);
+        assessment.setKind(ctx.kind());
+        assessment.setIp(ctx.clientIp());
+        assessment.setDeviceFingerprint(ctx.deviceFingerprint());
+        String ua = ctx.userAgent();
+        if (ua != null && ua.length() > 512) {
+            ua = ua.substring(0, 512);
+        }
+        assessment.setUserAgent(ua);
+        assessment.setReasonsJson(serializeSignals(result));
+        return riskAssessmentRepository.save(assessment);
+    }
+
+    private String serializeSignals(RiskAssessmentResult result) {
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            List<Map<String, Object>> signalsJson = new ArrayList<>();
+            for (RiskSignal sig : result.signals()) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("type", sig.type().name());
+                row.put("decision", sig.decision().name());
+                row.put("score", sig.scoreContribution());
+                row.put("reason", sig.reason());
+                signalsJson.add(row);
+            }
+            payload.put("signals", signalsJson);
+            payload.put("warnings", result.warnings());
+            return objectMapper.writeValueAsString(payload);
+        } catch (Exception e) {
+            log.warn("Failed to serialize risk signals", e);
+            return "{}";
+        }
+    }
+
+    @Override
+    public PagedResponse<RiskReviewResponse> listRiskReviews(long companyId, long ownerId,
+                                                             RiskReviewStatus status, int page, int size) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+        if (size > 50) size = 50;
+        RiskReviewStatus effective = status != null ? status : RiskReviewStatus.PENDING;
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        return new PagedResponse<>(
+                riskReviewRepository.findByCompanyIdAndStatus(companyId, effective, pageable)
+                        .map(this::toRiskReviewResponse));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public RiskAssessmentResponse getOrderRisk(long companyId, long orderId, long ownerId) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+        orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        RiskAssessment latest = riskAssessmentRepository.findTopByOrderIdOrderByCreatedAtDesc(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("No risk assessment on order " + orderId));
+        return toRiskAssessmentResponse(latest);
+    }
+
+    @Override
+    @Transactional
+    public OrderResponse approveRiskReview(long companyId, long orderId, long ownerId, RiskDecisionRequest req) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        if (order.getStatus() != OrderStatus.UNDER_REVIEW) {
+            throw new ConflictException("Order is not under review (status=" + order.getStatus() + ")");
+        }
+        RiskReview review = riskReviewRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("No pending review for order " + orderId));
+        if (review.getStatus() != RiskReviewStatus.PENDING) {
+            throw new ConflictException("Review already decided (status=" + review.getStatus() + ")");
+        }
+
+        long amountInCents = order.getTotalAmount().multiply(BigDecimal.valueOf(100))
+                .setScale(0, RoundingMode.HALF_UP).longValueExact();
+        PaymentIntentResult paymentIntent;
+        try {
+            paymentIntent = paymentService.createPaymentIntent(
+                    amountInCents,
+                    order.getCurrency(),
+                    null,
+                    Map.of("user_id", String.valueOf(order.getUser().getId()),
+                            "order_id", String.valueOf(order.getId()),
+                            "risk_reviewed_by", String.valueOf(ownerId))
+            );
+        } catch (Exception e) {
+            throw new backend.exceptions.http.BadGatewayException(
+                    "Failed to create payment intent: " + e.getMessage());
+        }
+        order.setPaymentIntentId(paymentIntent.id());
+        order.setPaymentClientSecret(paymentIntent.clientSecret());
+        order.setStatus(OrderStatus.RESERVED);
+        orderRepository.save(order);
+
+        review.setStatus(RiskReviewStatus.APPROVED);
+        review.setDecidedByUserId(ownerId);
+        review.setDecidedAt(Instant.now());
+        if (req != null && req.getMerchantNote() != null) {
+            review.setMerchantNote(req.getMerchantNote());
+        }
+        riskReviewRepository.save(review);
+
+        return toResponse(order);
+    }
+
+    @Override
+    @Transactional
+    public OrderResponse rejectRiskReview(long companyId, long orderId, long ownerId, RiskDecisionRequest req) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        if (order.getStatus() != OrderStatus.UNDER_REVIEW) {
+            throw new ConflictException("Order is not under review (status=" + order.getStatus() + ")");
+        }
+        RiskReview review = riskReviewRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("No pending review for order " + orderId));
+        if (review.getStatus() != RiskReviewStatus.PENDING) {
+            throw new ConflictException("Review already decided (status=" + review.getStatus() + ")");
+        }
+
+        // Delegate stock-restore + order-cancel to the existing cancel pipeline.
+        OrderResponse cancelled = cancelOrderInternal(orderId, order.getUser().getId(),
+                backend.models.enums.CancellationReason.RISK_REJECTED);
+
+        review.setStatus(RiskReviewStatus.REJECTED);
+        review.setDecidedByUserId(ownerId);
+        review.setDecidedAt(Instant.now());
+        if (req != null && req.getMerchantNote() != null) {
+            review.setMerchantNote(req.getMerchantNote());
+        }
+        riskReviewRepository.save(review);
+
+        return cancelled;
+    }
+
+    private RiskReviewResponse toRiskReviewResponse(RiskReview review) {
+        RiskReviewResponse r = new RiskReviewResponse();
+        r.setId(review.getId());
+        r.setOrderId(review.getOrderId());
+        r.setAssessmentId(review.getAssessmentId());
+        r.setStatus(review.getStatus());
+        r.setDecidedByUserId(review.getDecidedByUserId());
+        r.setDecidedAt(review.getDecidedAt());
+        r.setMerchantNote(review.getMerchantNote());
+        r.setCreatedAt(review.getCreatedAt());
+        if (review.getAssessmentId() != null) {
+            riskAssessmentRepository.findById(review.getAssessmentId()).ifPresent(a -> {
+                r.setScore(a.getScore());
+                r.setTopReason(topReason(a));
+            });
+        }
+        return r;
+    }
+
+    private String topReason(RiskAssessment a) {
+        String json = a.getReasonsJson();
+        if (json == null || json.isBlank()) return null;
+        try {
+            var tree = objectMapper.readTree(json);
+            var signals = tree.get("signals");
+            if (signals == null || !signals.isArray()) return null;
+            com.fasterxml.jackson.databind.JsonNode best = null;
+            int bestScore = -1;
+            for (var s : signals) {
+                int sc = s.has("score") ? s.get("score").asInt() : 0;
+                if (sc > bestScore) {
+                    bestScore = sc;
+                    best = s;
+                }
+            }
+            return best != null && best.has("reason") ? best.get("reason").asText() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void recordFailedPaymentAttempt(Order order, String paymentIntentId, String reason) {
+        try {
+            String ip = null;
+            if (order.getRiskAssessmentId() != null) {
+                ip = riskAssessmentRepository.findById(order.getRiskAssessmentId())
+                        .map(RiskAssessment::getIp)
+                        .orElse(null);
+            }
+            FailedPaymentAttempt attempt = new FailedPaymentAttempt(
+                    order.getUser().getId(),
+                    order.getId(),
+                    ip,
+                    paymentIntentId,
+                    reason);
+            failedPaymentAttemptRepository.save(attempt);
+        } catch (Exception ex) {
+            // Best-effort telemetry — do not let signal capture break the webhook.
+            log.warn("Failed to record FailedPaymentAttempt for orderId={}", order.getId(), ex);
+        }
+    }
+
+    private RiskAssessmentResponse toRiskAssessmentResponse(RiskAssessment a) {
+        List<RiskSignalResponse> signalList = new ArrayList<>();
+        if (a.getReasonsJson() != null && !a.getReasonsJson().isBlank()) {
+            try {
+                var tree = objectMapper.readTree(a.getReasonsJson());
+                var signals = tree.get("signals");
+                if (signals != null && signals.isArray()) {
+                    for (var s : signals) {
+                        signalList.add(new RiskSignalResponse(
+                                backend.models.enums.RiskSignalType.valueOf(s.get("type").asText()),
+                                backend.models.enums.RiskDecision.valueOf(s.get("decision").asText()),
+                                s.has("score") ? s.get("score").asInt() : 0,
+                                s.has("reason") ? s.get("reason").asText() : null));
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to parse risk assessment reasons for id={}", a.getId(), e);
+            }
+        }
+        return new RiskAssessmentResponse(
+                a.getId(),
+                a.getOrderId(),
+                a.getUserId(),
+                a.getDecision(),
+                a.getScore(),
+                a.getMode(),
+                a.getKind(),
+                a.getIp(),
+                a.getDeviceFingerprint(),
+                a.getUserAgent(),
+                a.getCreatedAt(),
+                signalList);
+    }
+
+    // -------------------------------------------------------------------------
+    // Subscription renewals
+    // -------------------------------------------------------------------------
+
+    @Override
+    @Transactional
+    public Order createRenewalOrder(Subscription subscription, String stripeInvoiceId, long amountPaidCents) {
+        // Idempotency: invoice.paid can be delivered more than once.
+        Order existing = orderRepository.findByStripeInvoiceId(stripeInvoiceId).orElse(null);
+        if (existing != null) {
+            return existing;
+        }
+
+        if (subscription.getItems().isEmpty()) {
+            throw new BadRequestException("Cannot create renewal order: subscription has no items");
+        }
+
+        BigDecimal totalAmount = BigDecimal.valueOf(amountPaidCents)
+                .movePointLeft(2)
+                .setScale(2, RoundingMode.HALF_UP);
+
+        Order order = new Order();
+        order.setUser(subscription.getUser());
+        order.setStatus(OrderStatus.PAID);
+        order.setTotalAmount(totalAmount);
+        order.setCurrency(subscription.getCurrency());
+        order.setSubscription(subscription);
+        order.setRenewal(true);
+        order.setStripeInvoiceId(stripeInvoiceId);
+        order.setPaidAt(Instant.now());
+        order.setCompensated(true); // No reservation lifecycle: this order is born paid.
+
+        for (SubscriptionItem si : subscription.getItems()) {
+            Product product = si.getProduct();
+            int qty = si.getQuantity();
+
+            OrderItem item = new OrderItem();
+            item.setOrder(order);
+            item.setProduct(product);
+            item.setProductName(product.getName());
+            item.setQuantity(qty);
+            item.setUnitPrice(BigDecimal.valueOf(si.getUnitPriceCents()).movePointLeft(2));
+
+            if (si.getVariant() != null) {
+                ProductVariant variant = si.getVariant();
+                item.setVariant(variant);
+                item.setVariantTitle(buildVariantTitle(variant));
+                item.setVariantSku(variant.getSku());
+
+                int updated = variantRepository.decrementStock(variant.getId(), qty);
+                if (updated == 0) {
+                    item.setFulfillmentStatus(FulfillmentStatus.BACKORDERED);
+                }
+            } else {
+                int updated = productRepository.decrementStock(product.getId(), qty);
+                if (updated == 0) {
+                    item.setFulfillmentStatus(FulfillmentStatus.BACKORDERED);
+                }
+            }
+
+            order.getItems().add(item);
+        }
+
+        boolean hasMarketplaceItems = stampVendorIds(order.getItems());
+        Order saved;
+        try {
+            saved = orderRepository.save(order);
+        } catch (DataIntegrityViolationException e) {
+            // Concurrent invoice.paid delivery — the unique constraint on stripe_invoice_id
+            // rejected the duplicate insert. Treat as idempotent success.
+            return orderRepository.findByStripeInvoiceId(stripeInvoiceId)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Renewal order save failed on duplicate invoice but existing row not found: " + stripeInvoiceId, e));
+        }
+
+        if (hasMarketplaceItems) {
+            saved.setMarketplaceOrder(true);
+            createSubOrders(saved, saved.getItems());
+            saved = orderRepository.save(saved);
+            recordSubOrderCommission(saved);
+        }
+
+        try {
+            User user = subscription.getUser();
+            OrderResponse response = toResponse(saved);
+            emailService.sendOrderReceiptEmail(user.getEmail(), user.getFirstName(), response);
+        } catch (Exception e) {
+            log.warn("Failed to send renewal receipt email for order {}: {}", saved.getId(), e.getMessage());
+        }
+
+        return saved;
+    }
+
+    // -------------------------------------------------------------------------
+    // Marketplace helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * For each item whose product is listed on a marketplace, resolves the owning
+     * MarketplaceVendor and stamps {@code item.vendorId}. Uses a single batch query
+     * per marketplace to avoid N+1 lookups. Returns true if any marketplace items exist.
+     */
+    private boolean stampVendorIds(List<OrderItem> items) {
+        // Group product company IDs by marketplace
+        Map<Long, Set<Long>> marketplaceToCompanyIds = new HashMap<>();
+        for (OrderItem item : items) {
+            if (item.getProduct() != null && item.getProduct().getMarketplaceId() != null) {
+                marketplaceToCompanyIds
+                        .computeIfAbsent(item.getProduct().getMarketplaceId(), k -> new HashSet<>())
+                        .add(item.getProduct().getCompany().getId());
+            }
+        }
+        if (marketplaceToCompanyIds.isEmpty()) return false;
+
+        // Batch-lookup vendors; key = "marketplaceId:companyId"
+        Map<String, Long> companyKeyToVendorId = new HashMap<>();
+        for (Map.Entry<Long, Set<Long>> entry : marketplaceToCompanyIds.entrySet()) {
+            long mId = entry.getKey();
+            marketplaceVendorRepository
+                    .findByMarketplaceIdAndVendorCompanyIdIn(mId, entry.getValue())
+                    .forEach(mv -> companyKeyToVendorId.put(
+                            mId + ":" + mv.getVendorCompany().getId(), mv.getId()));
+        }
+
+        for (OrderItem item : items) {
+            if (item.getProduct() != null && item.getProduct().getMarketplaceId() != null) {
+                String key = item.getProduct().getMarketplaceId() + ":" + item.getProduct().getCompany().getId();
+                item.setVendorId(companyKeyToVendorId.get(key));
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Groups items by vendorId and creates one {@link SubOrder} per vendor.
+     * Updates each item's {@code subOrderId} via a batch repository call.
+     * Items with no vendorId (standalone products in a mixed cart) are skipped.
+     */
+    private void createSubOrders(Order order, List<OrderItem> items) {
+        Map<Long, List<OrderItem>> byVendor = items.stream()
+                .filter(i -> i.getVendorId() != null)
+                .collect(Collectors.groupingBy(OrderItem::getVendorId));
+
+        for (Map.Entry<Long, List<OrderItem>> entry : byVendor.entrySet()) {
+            Long mvId = entry.getKey();
+            List<OrderItem> vendorItems = entry.getValue();
+
+            MarketplaceVendor vendor = marketplaceVendorRepository.findById(mvId).orElse(null);
+            if (vendor == null) {
+                log.warn("[MARKETPLACE] MarketplaceVendor {} not found — skipping SubOrder creation for order {}",
+                        mvId, order.getId());
+                continue;
+            }
+
+            BigDecimal subtotal = vendorItems.stream()
+                    .map(i -> i.getUnitPrice().multiply(BigDecimal.valueOf(i.getQuantity())))
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            SubOrder subOrder = new SubOrder();
+            subOrder.setOrder(order);
+            subOrder.setMarketplaceVendor(vendor);
+            subOrder.setMarketplaceId(vendor.getMarketplace().getId());
+            subOrder.setStatus(SubOrderStatus.PENDING);
+            subOrder.setSubtotal(subtotal);
+            subOrder.setTotalAmount(subtotal);
+            subOrder.setCurrency(order.getCurrency());
+
+            SubOrder saved = subOrderRepository.save(subOrder);
+
+            List<Long> itemIds = vendorItems.stream().map(OrderItem::getId).toList();
+            orderItemRepository.setSubOrderId(saved.getId(), itemIds);
+        }
+    }
+
+    /**
+     * Resolves the company ID to use for the loyalty program for a given set of order items.
+     * For standalone orders, uses the first product's company. For marketplace orders, uses the marketplace company.
+     */
+    private long resolveOrderCompanyId(List<OrderItem> items) {
+        if (items == null || items.isEmpty()) return 0L;
+        for (OrderItem item : items) {
+            if (item.getProduct() != null) {
+                // If there's a marketplace context, the marketplace company owns the loyalty program
+                if (item.getProduct().getMarketplaceId() != null) {
+                    return item.getProduct().getMarketplaceId();
+                }
+                return item.getProduct().getCompany().getId();
+            }
+        }
+        return 0L;
+    }
+
+    /**
+     * Computes and persists a {@link CommissionRecord} for each sub-order on a
+     * just-paid marketplace order. Failures are logged but do not abort the transaction.
+     */
+    private void recordSubOrderCommission(Order order) {
+        List<SubOrder> subOrders = subOrderRepository.findAllByOrderId(order.getId());
+        Instant paidAt = order.getPaidAt();
+        for (SubOrder subOrder : subOrders) {
+            subOrder.setPaidAt(paidAt);
+            try {
+                CommissionEngine.CommissionResult result = commissionEngine.compute(subOrder);
+                subOrder.setCommissionAmount(result.commissionAmount());
+                subOrder.setNetVendorAmount(result.netVendorAmount());
+                subOrderRepository.save(subOrder);
+
+                CommissionRecord record = new CommissionRecord();
+                record.setSubOrder(subOrder);
+                record.setVendorId(subOrder.getMarketplaceVendor().getId());
+                record.setMarketplaceId(subOrder.getMarketplaceId());
+                record.setCommissionRate(result.commissionRate());
+                record.setGrossAmount(result.grossAmount());
+                record.setCommissionAmount(result.commissionAmount());
+                record.setNetVendorAmount(result.netVendorAmount());
+                record.setCurrency(result.currency());
+                commissionRecordRepository.save(record);
+
+                // Credit VendorBalance.pendingCents atomically (hold period releases via scheduler)
+                long pendingCents = result.netVendorAmount()
+                        .multiply(BigDecimal.valueOf(100)).longValue();
+                long grossCents = result.grossAmount()
+                        .multiply(BigDecimal.valueOf(100)).longValue();
+                long commissionCents = result.commissionAmount()
+                        .multiply(BigDecimal.valueOf(100)).longValue();
+                vendorBalanceRepository.upsertPending(
+                        subOrder.getMarketplaceVendor().getId(),
+                        pendingCents, grossCents, commissionCents, result.currency());
+            } catch (Exception e) {
+                log.warn("[COMMISSION] Failed to record commission for sub_order {} on order {}: {}",
+                        subOrder.getId(), order.getId(), e.getMessage());
+            }
+        }
+    }
+}

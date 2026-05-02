@@ -4,7 +4,7 @@ import backend.events.activity.ActivityType;
 import backend.events.activity.UserActivityEvent;
 import backend.services.intf.ActivityEventPublisher;
 import backend.services.intf.CacheService;
-import backend.services.intf.UserPreferenceService;
+import backend.services.intf.profile.UserPreferenceService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
