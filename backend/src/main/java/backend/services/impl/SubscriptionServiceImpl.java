@@ -38,6 +38,9 @@ import backend.services.intf.PaymentService.PaymentMethodInfo;
 import backend.services.intf.PaymentService.PriceResult;
 import backend.services.intf.PaymentService.SetupIntentResult;
 import backend.services.intf.PaymentService.SubscriptionResult;
+import backend.events.activity.ActivityType;
+import backend.events.activity.UserActivityEvent;
+import backend.services.intf.ActivityEventPublisher;
 import backend.services.intf.LoyaltyService;
 import backend.services.intf.SubscriptionService;
 
@@ -62,6 +65,7 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     private final OrderService orderService;
     private final OrderRepository orderRepository;
     private final LoyaltyService loyaltyService;
+    private final ActivityEventPublisher activityEventPublisher;
 
     public SubscriptionServiceImpl(
             SubscriptionRepository subscriptionRepository,
@@ -72,7 +76,8 @@ public class SubscriptionServiceImpl implements SubscriptionService {
             PaymentService paymentService,
             OrderService orderService,
             OrderRepository orderRepository,
-            LoyaltyService loyaltyService) {
+            LoyaltyService loyaltyService,
+            ActivityEventPublisher activityEventPublisher) {
         this.subscriptionRepository = subscriptionRepository;
         this.savedPaymentMethodRepository = savedPaymentMethodRepository;
         this.userRepository = userRepository;
@@ -82,6 +87,7 @@ public class SubscriptionServiceImpl implements SubscriptionService {
         this.orderService = orderService;
         this.orderRepository = orderRepository;
         this.loyaltyService = loyaltyService;
+        this.activityEventPublisher = activityEventPublisher;
     }
 
     // -------------------------------------------------------------------------
@@ -214,6 +220,15 @@ public class SubscriptionServiceImpl implements SubscriptionService {
         sub.getItems().add(item);
 
         Subscription saved = subscriptionRepository.save(sub);
+
+        for (SubscriptionItem si : saved.getItems()) {
+            if (si.getProduct() == null) continue;
+            Long mkt = si.getProduct().getMarketplaceId();
+            if (mkt == null) continue;
+            activityEventPublisher.publish(new UserActivityEvent(
+                    userId, null, si.getProduct().getId(), mkt, ActivityType.SUBSCRIPTION_CREATE, Instant.now()));
+        }
+
         return toResponse(saved);
     }
 

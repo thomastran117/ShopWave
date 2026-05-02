@@ -18,10 +18,14 @@ import backend.repositories.ProductRepository;
 import backend.repositories.UserRepository;
 import backend.repositories.WishlistItemRepository;
 import backend.repositories.WishlistRepository;
+import backend.events.activity.ActivityType;
+import backend.events.activity.UserActivityEvent;
+import backend.services.intf.ActivityEventPublisher;
 import backend.services.intf.WishlistService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 
 @Service
@@ -31,15 +35,18 @@ public class WishlistServiceImpl implements WishlistService {
     private final WishlistItemRepository wishlistItemRepository;
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
+    private final ActivityEventPublisher activityEventPublisher;
 
     public WishlistServiceImpl(WishlistRepository wishlistRepository,
                                WishlistItemRepository wishlistItemRepository,
                                UserRepository userRepository,
-                               ProductRepository productRepository) {
+                               ProductRepository productRepository,
+                               ActivityEventPublisher activityEventPublisher) {
         this.wishlistRepository = wishlistRepository;
         this.wishlistItemRepository = wishlistItemRepository;
         this.userRepository = userRepository;
         this.productRepository = productRepository;
+        this.activityEventPublisher = activityEventPublisher;
     }
 
     @Override
@@ -130,7 +137,15 @@ public class WishlistServiceImpl implements WishlistService {
         item.setProduct(product);
         item.setVariant(variant);
 
-        return toItemResponse(wishlistItemRepository.save(item));
+        WishlistItemResponse response = toItemResponse(wishlistItemRepository.save(item));
+
+        Long marketplaceId = product.getMarketplaceId();
+        if (marketplaceId != null) {
+            activityEventPublisher.publish(new UserActivityEvent(
+                    userId, null, product.getId(), marketplaceId, ActivityType.WISHLIST_ADD, Instant.now()));
+        }
+
+        return response;
     }
 
     @Override
@@ -140,7 +155,17 @@ public class WishlistServiceImpl implements WishlistService {
         WishlistItem item = wishlistItemRepository.findByIdAndWishlistId(itemId, wishlistId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Item not found with id: " + itemId));
+
+        // Capture before delete to avoid lazy-loading a detached entity.
+        Long productId = item.getProduct() != null ? item.getProduct().getId() : null;
+        Long marketplaceId = item.getProduct() != null ? item.getProduct().getMarketplaceId() : null;
+
         wishlistItemRepository.delete(item);
+
+        if (productId != null && marketplaceId != null) {
+            activityEventPublisher.publish(new UserActivityEvent(
+                    userId, null, productId, marketplaceId, ActivityType.WISHLIST_REMOVE, Instant.now()));
+        }
     }
 
     // -------------------------------------------------------------------------

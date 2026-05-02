@@ -90,6 +90,9 @@ import backend.dtos.requests.return_.BuyerReturnItemRequest;
 import backend.dtos.requests.return_.MerchantInitiateReturnRequest;
 import backend.models.core.InventoryLocation;
 import backend.models.enums.AllocationStrategy;
+import backend.events.activity.ActivityType;
+import backend.events.activity.UserActivityEvent;
+import backend.services.intf.ActivityEventPublisher;
 import backend.services.intf.AllocationService;
 import backend.services.intf.CacheService;
 import backend.services.intf.DeviceService;
@@ -171,6 +174,7 @@ public class OrderServiceImpl implements OrderService {
     private final CommissionRecordRepository commissionRecordRepository;
     private final VendorBalanceRepository vendorBalanceRepository;
     private final LoyaltyService loyaltyService;
+    private final ActivityEventPublisher activityEventPublisher;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
     private ReturnService returnService;
 
@@ -209,7 +213,8 @@ public class OrderServiceImpl implements OrderService {
             CommissionEngine commissionEngine,
             CommissionRecordRepository commissionRecordRepository,
             VendorBalanceRepository vendorBalanceRepository,
-            LoyaltyService loyaltyService) {
+            LoyaltyService loyaltyService,
+            ActivityEventPublisher activityEventPublisher) {
         this.orderRepository = orderRepository;
         this.compensationRepository = compensationRepository;
         this.productRepository = productRepository;
@@ -245,6 +250,7 @@ public class OrderServiceImpl implements OrderService {
         this.commissionRecordRepository = commissionRecordRepository;
         this.vendorBalanceRepository = vendorBalanceRepository;
         this.loyaltyService = loyaltyService;
+        this.activityEventPublisher = activityEventPublisher;
     }
 
     /** Setter injection breaks the circular dependency: ReturnService → OrderServiceImpl → ReturnService. */
@@ -662,6 +668,15 @@ public class OrderServiceImpl implements OrderService {
             order = orderRepository.save(order);
 
             savedOrderId = order.getId();
+
+            // Publish one ORDER activity event per line item (fire-and-forget after commit).
+            for (OrderItem item : order.getItems()) {
+                if (item.getProduct() == null) continue;
+                Long mkt = item.getProduct().getMarketplaceId();
+                if (mkt == null) continue;
+                activityEventPublisher.publish(new UserActivityEvent(
+                        userId, null, item.getProduct().getId(), mkt, ActivityType.ORDER, Instant.now()));
+            }
 
             // --- Atomically deduct loyalty points now that the order has an ID ---
             if (loyaltyPointsToRedeem > 0) {

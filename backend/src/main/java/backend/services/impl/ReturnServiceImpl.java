@@ -52,6 +52,9 @@ import backend.repositories.ReturnItemRepository;
 import backend.repositories.ReturnRepository;
 import backend.repositories.RiskAssessmentRepository;
 import backend.repositories.UserRepository;
+import backend.events.activity.ActivityType;
+import backend.events.activity.UserActivityEvent;
+import backend.services.intf.ActivityEventPublisher;
 import backend.services.intf.PaymentService;
 import backend.services.intf.ReturnService;
 import backend.services.intf.RiskEngine;
@@ -93,6 +96,7 @@ public class ReturnServiceImpl implements ReturnService {
     private final RiskEngine riskEngine;
     private final RiskAssessmentRepository riskAssessmentRepository;
     private final RiskProperties riskProperties;
+    private final ActivityEventPublisher activityEventPublisher;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
 
     public ReturnServiceImpl(
@@ -110,7 +114,8 @@ public class ReturnServiceImpl implements ReturnService {
             PaymentService paymentService,
             RiskEngine riskEngine,
             RiskAssessmentRepository riskAssessmentRepository,
-            RiskProperties riskProperties) {
+            RiskProperties riskProperties,
+            ActivityEventPublisher activityEventPublisher) {
         this.returnRepository = returnRepository;
         this.returnItemRepository = returnItemRepository;
         this.orderRepository = orderRepository;
@@ -126,6 +131,7 @@ public class ReturnServiceImpl implements ReturnService {
         this.riskEngine = riskEngine;
         this.riskAssessmentRepository = riskAssessmentRepository;
         this.riskProperties = riskProperties;
+        this.activityEventPublisher = activityEventPublisher;
     }
 
     // -------------------------------------------------------------------------
@@ -159,7 +165,18 @@ public class ReturnServiceImpl implements ReturnService {
         List<ReturnItem> returnItems = buildReturnItems(ret, request.items(), order);
         ret.setItems(returnItems);
 
-        return toReturnResponse(returnRepository.save(ret));
+        Return saved = returnRepository.save(ret);
+
+        for (ReturnItem ri : saved.getItems()) {
+            OrderItem oi = ri.getOrderItem();
+            if (oi == null || oi.getProduct() == null) continue;
+            Long mkt = oi.getProduct().getMarketplaceId();
+            if (mkt == null) continue;
+            activityEventPublisher.publish(new UserActivityEvent(
+                    buyerUserId, null, oi.getProduct().getId(), mkt, ActivityType.RETURN, Instant.now()));
+        }
+
+        return toReturnResponse(saved);
     }
 
     @Override

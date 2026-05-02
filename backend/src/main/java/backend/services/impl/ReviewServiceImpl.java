@@ -18,8 +18,12 @@ import backend.models.enums.ReviewStatus;
 import backend.repositories.ProductRepository;
 import backend.repositories.ProductReviewRepository;
 import backend.repositories.UserRepository;
+import backend.events.activity.ActivityType;
+import backend.events.activity.UserActivityEvent;
+import backend.services.intf.ActivityEventPublisher;
 import backend.services.intf.ReviewService;
 
+import java.time.Instant;
 import java.util.Set;
 
 @Service
@@ -30,14 +34,17 @@ public class ReviewServiceImpl implements ReviewService {
     private final ProductReviewRepository reviewRepository;
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
+    private final ActivityEventPublisher activityEventPublisher;
 
     public ReviewServiceImpl(
             ProductReviewRepository reviewRepository,
             ProductRepository productRepository,
-            UserRepository userRepository) {
+            UserRepository userRepository,
+            ActivityEventPublisher activityEventPublisher) {
         this.reviewRepository = reviewRepository;
         this.productRepository = productRepository;
         this.userRepository = userRepository;
+        this.activityEventPublisher = activityEventPublisher;
     }
 
     @Override
@@ -81,7 +88,16 @@ public class ReviewServiceImpl implements ReviewService {
         review.setTitle(request.getTitle());
         review.setBody(request.getBody());
 
-        return toResponse(reviewRepository.save(review));
+        ReviewResponse response = toResponse(reviewRepository.save(review));
+
+        Long marketplaceId = product.getMarketplaceId();
+        if (marketplaceId != null && request.getRating() != 3) {
+            ActivityType type = request.getRating() >= 4 ? ActivityType.REVIEW_POSITIVE : ActivityType.REVIEW_NEGATIVE;
+            activityEventPublisher.publish(new UserActivityEvent(
+                    userId, null, productId, marketplaceId, type, Instant.now()));
+        }
+
+        return response;
     }
 
     @Override

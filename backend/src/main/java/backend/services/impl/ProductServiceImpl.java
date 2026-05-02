@@ -318,7 +318,7 @@ public class ProductServiceImpl implements ProductService {
 
         promotionRuleRepository.removeProductFromAllRules(productId);
         productRepository.delete(product);
-        eventPublisher.publishEvent(new ProductRemoveEvent(productId));
+        eventPublisher.publishEvent(new ProductRemoveEvent(productId, product.getMarketplaceId()));
     }
 
     @Override
@@ -377,8 +377,8 @@ public class ProductServiceImpl implements ProductService {
 
         promotionRuleRepository.removeProductsFromAllRules(request.getIds());
         productRepository.deleteAll(products);
-        for (Long id : request.getIds()) {
-            eventPublisher.publishEvent(new ProductRemoveEvent(id));
+        for (Product p : products) {
+            eventPublisher.publishEvent(new ProductRemoveEvent(p.getId(), p.getMarketplaceId()));
         }
     }
 
