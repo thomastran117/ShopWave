@@ -1,5 +1,7 @@
 package backend.repositories;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
@@ -31,6 +33,10 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
 
     @Query("SELECT p FROM Product p JOIN FETCH p.company WHERE p.marketplaceId = :marketplaceId AND p.marketplaceListed = true AND p.status = 'ACTIVE'")
     List<Product> findMarketplaceListed(@Param("marketplaceId") Long marketplaceId);
+
+    @Query(value = "SELECT p FROM Product p JOIN FETCH p.company WHERE p.marketplaceId = :marketplaceId AND p.marketplaceListed = true AND p.status = 'ACTIVE'",
+           countQuery = "SELECT COUNT(p) FROM Product p WHERE p.marketplaceId = :marketplaceId AND p.marketplaceListed = true AND p.status = 'ACTIVE'")
+    Page<Product> findMarketplaceListedPaged(@Param("marketplaceId") Long marketplaceId, Pageable pageable);
 
     Optional<Product> findByIdAndMarketplaceId(long id, long marketplaceId);
 

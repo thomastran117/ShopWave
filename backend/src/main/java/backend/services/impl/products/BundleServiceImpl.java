@@ -160,19 +160,20 @@ public class BundleServiceImpl implements BundleService {
     public PagedResponse<BundleResponse> listBundles(long companyId, ProductStatus status, int page, int size) {
         if (size > 50) size = 50;
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-
-        if (status != null) {
-            return new PagedResponse<>(
-                    bundleRepository.findAllByCompanyIdAndStatus(companyId, status, pageable).map(this::toResponse));
-        }
+        // Public endpoint — always restrict to ACTIVE bundles regardless of requested status.
         return new PagedResponse<>(
-                bundleRepository.findAllByCompanyId(companyId, pageable).map(this::toResponse));
+                bundleRepository.findAllByCompanyIdAndStatus(companyId, ProductStatus.ACTIVE, pageable)
+                        .map(this::toResponse));
     }
 
     @Override
     public BundleResponse getBundle(long companyId, long bundleId) {
-        return toResponse(bundleRepository.findByIdAndCompanyId(bundleId, companyId)
-                .orElseThrow(() -> new ResourceNotFoundException("Bundle not found with id: " + bundleId)));
+        ProductBundle bundle = bundleRepository.findByIdAndCompanyId(bundleId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Bundle not found with id: " + bundleId));
+        if (bundle.getStatus() != ProductStatus.ACTIVE) {
+            throw new ResourceNotFoundException("Bundle not found with id: " + bundleId);
+        }
+        return toResponse(bundle);
     }
 
     // --- Helpers ---

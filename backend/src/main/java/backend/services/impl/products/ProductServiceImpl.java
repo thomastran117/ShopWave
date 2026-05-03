@@ -5,6 +5,7 @@ import co.elastic.clients.elasticsearch._types.query_dsl.MultiMatchQuery;
 import co.elastic.clients.elasticsearch._types.query_dsl.TermQuery;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -329,11 +330,16 @@ public class ProductServiceImpl implements ProductService {
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
 
         List<ProductResponse> results = new java.util.ArrayList<>();
+        Set<String> batchSkus = new HashSet<>();
 
         for (CreateProductRequest req : request.getProducts()) {
-            if (req.getSku() != null && !req.getSku().isBlank()
-                    && productRepository.existsBySkuAndCompanyId(req.getSku(), companyId)) {
-                throw new ConflictException("A product with SKU '" + req.getSku() + "' already exists in this company");
+            if (req.getSku() != null && !req.getSku().isBlank()) {
+                if (!batchSkus.add(req.getSku().toLowerCase())) {
+                    throw new ConflictException("Duplicate SKU '" + req.getSku() + "' within this batch");
+                }
+                if (productRepository.existsBySkuAndCompanyId(req.getSku(), companyId)) {
+                    throw new ConflictException("A product with SKU '" + req.getSku() + "' already exists in this company");
+                }
             }
 
             Product product = new Product();
@@ -482,7 +488,9 @@ public class ProductServiceImpl implements ProductService {
                 .sorted(java.util.Comparator.comparingInt(ProductImage::getDisplayOrder))
                 .toList();
 
-        product.setThumbnailUrl(reordered.get(0).getImageUrl());
+        if (!reordered.isEmpty()) {
+            product.setThumbnailUrl(reordered.get(0).getImageUrl());
+        }
         productRepository.save(product);
 
         return reordered.stream()
@@ -764,15 +772,9 @@ public class ProductServiceImpl implements ProductService {
         }
 
         // --- JPA fallback (unfiltered, no active search filters) ---
-        List<Product> products = productRepository.findMarketplaceListed(marketplaceId);
-        Map<Long, MarketplaceVendor> vendorMap = buildVendorMap(marketplaceId, products);
-        List<MarketplaceCatalogProductResponse> all = products.stream()
-                .map(p -> toCatalogResponse(p, vendorMap.get(p.getCompany().getId())))
-                .toList();
-        int start = (int) pageable.getOffset();
-        int end   = Math.min(start + pageable.getPageSize(), all.size());
-        List<MarketplaceCatalogProductResponse> pageContent = start < all.size() ? all.subList(start, end) : List.of();
-        return new PagedResponse<>(new PageImpl<>(pageContent, pageable, all.size()));
+        Page<Product> productPage = productRepository.findMarketplaceListedPaged(marketplaceId, pageable);
+        Map<Long, MarketplaceVendor> vendorMap = buildVendorMap(marketplaceId, productPage.getContent());
+        return new PagedResponse<>(productPage.map(p -> toCatalogResponse(p, vendorMap.get(p.getCompany().getId()))));
     }
 
     @Override
@@ -824,12 +826,16 @@ public class ProductServiceImpl implements ProductService {
         Product product = productRepository.findByIdAndCompanyId(productId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
 
-        if (!marketplaceVendorRepository.existsByMarketplaceIdAndVendorCompanyId(request.getMarketplaceId(), companyId)) {
+        boolean listing = Boolean.TRUE.equals(request.getListed());
+        long marketplaceToCheck = listing
+                ? request.getMarketplaceId()
+                : (product.getMarketplaceId() != null ? product.getMarketplaceId() : request.getMarketplaceId());
+        if (!marketplaceVendorRepository.existsByMarketplaceIdAndVendorCompanyId(marketplaceToCheck, companyId)) {
             throw new ForbiddenException("Your company is not an approved vendor in this marketplace");
         }
 
-        product.setMarketplaceId(request.getListed() ? request.getMarketplaceId() : null);
-        product.setMarketplaceListed(Boolean.TRUE.equals(request.getListed()));
+        product.setMarketplaceId(listing ? request.getMarketplaceId() : null);
+        product.setMarketplaceListed(listing);
 
         Product saved = productRepository.save(product);
         eventPublisher.publishEvent(new ProductIndexEvent(saved, saved.getCompany().getId()));

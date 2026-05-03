@@ -389,6 +389,14 @@ public class InventoryServiceImpl implements InventoryService {
         if (request.getMaxStock() != null) product.setMaxStock(request.getMaxStock());
         if (request.getAutoRestockEnabled() != null) product.setAutoRestockEnabled(request.getAutoRestockEnabled());
         if (request.getAutoRestockQty() != null) product.setAutoRestockQty(request.getAutoRestockQty());
+
+        boolean willBeEnabled = Boolean.TRUE.equals(request.getAutoRestockEnabled())
+                || (request.getAutoRestockEnabled() == null && product.isAutoRestockEnabled());
+        Integer effectiveQty = request.getAutoRestockQty() != null ? request.getAutoRestockQty() : product.getAutoRestockQty();
+        if (willBeEnabled && (effectiveQty == null || effectiveQty < 1)) {
+            throw new BadRequestException("autoRestockQty must be set to a positive value when autoRestockEnabled is true");
+        }
+
         productRepository.save(product);
 
         return toInventoryItemResponse(product);
