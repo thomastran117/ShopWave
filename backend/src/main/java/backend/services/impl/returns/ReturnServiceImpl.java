@@ -61,12 +61,14 @@ import backend.services.intf.pricing.RiskEngine;
 import backend.services.risk.RiskAssessmentResult;
 import backend.services.risk.RiskContext;
 import backend.services.risk.RiskSignal;
+import backend.utilities.SecurityUtils;
 import backend.configurations.environment.RiskProperties;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 @Service
@@ -162,7 +164,7 @@ public class ReturnServiceImpl implements ReturnService {
         ret.setBuyerNote(request.buyerNote());
         ret.setEvidenceUrls(request.evidenceUrls() != null ? new ArrayList<>(request.evidenceUrls()) : new ArrayList<>());
 
-        List<ReturnItem> returnItems = buildReturnItems(ret, request.items(), order);
+        List<ReturnItem> returnItems = buildReturnItems(ret, request.items(), order, null);
         ret.setItems(returnItems);
 
         Return saved = returnRepository.save(ret);
@@ -199,6 +201,7 @@ public class ReturnServiceImpl implements ReturnService {
         companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
         return returnRepository.findAllByOrderIdAndCompanyId(orderId, companyId).stream()
+                .filter(ret -> returnBelongsExclusivelyToCompany(ret, companyId))
                 .map(this::toReturnResponse)
                 .toList();
     }
@@ -208,8 +211,10 @@ public class ReturnServiceImpl implements ReturnService {
     public ReturnResponse getCompanyReturn(long returnId, long companyId, long ownerId) {
         companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
-        Return ret = returnRepository.findByIdAndCompanyId(returnId, companyId)
-                .orElseThrow(() -> new ResourceNotFoundException("Return not found with id: " + returnId));
+        Return ret = requireCompanyScopedReturn(
+                returnRepository.findByIdAndCompanyId(returnId, companyId),
+                returnId,
+                companyId);
         return toReturnResponse(ret);
     }
 
@@ -219,8 +224,10 @@ public class ReturnServiceImpl implements ReturnService {
         Company company = companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
 
-        Return ret = returnRepository.findByIdAndCompanyIdForUpdate(returnId, companyId)
-                .orElseThrow(() -> new ResourceNotFoundException("Return not found with id: " + returnId));
+        Return ret = requireCompanyScopedReturn(
+                returnRepository.findByIdAndCompanyIdForUpdate(returnId, companyId),
+                returnId,
+                companyId);
 
         if (ret.getStatus() != ReturnStatus.REQUESTED) {
             throw new ConflictException("Return " + returnId + " is not in REQUESTED status (current: " + ret.getStatus() + ")");
@@ -326,8 +333,10 @@ public class ReturnServiceImpl implements ReturnService {
         companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
 
-        Return ret = returnRepository.findByIdAndCompanyId(returnId, companyId)
-                .orElseThrow(() -> new ResourceNotFoundException("Return not found with id: " + returnId));
+        Return ret = requireCompanyScopedReturn(
+                returnRepository.findByIdAndCompanyId(returnId, companyId),
+                returnId,
+                companyId);
 
         if (ret.getStatus() != ReturnStatus.APPROVED) {
             throw new ConflictException("Return " + returnId + " must be APPROVED before inspection (current: " + ret.getStatus() + ")");
@@ -368,8 +377,10 @@ public class ReturnServiceImpl implements ReturnService {
         companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
 
-        Return ret = returnRepository.findByIdAndCompanyId(returnId, companyId)
-                .orElseThrow(() -> new ResourceNotFoundException("Return not found with id: " + returnId));
+        Return ret = requireCompanyScopedReturn(
+                returnRepository.findByIdAndCompanyId(returnId, companyId),
+                returnId,
+                companyId);
 
         if (ret.getStatus() != ReturnStatus.REQUESTED) {
             throw new ConflictException("Return " + returnId + " is not in REQUESTED status (current: " + ret.getStatus() + ")");
@@ -407,7 +418,7 @@ public class ReturnServiceImpl implements ReturnService {
         CompanyReturnLocation location = resolveReturnLocation(company, request.returnLocationId());
         snapshotReturnAddress(ret, location);
 
-        List<ReturnItem> returnItems = buildReturnItems(ret, request.items(), order);
+        List<ReturnItem> returnItems = buildReturnItems(ret, request.items(), order, companyId);
         ret.setItems(returnItems);
 
         processReturnItems(ret, request.restockItems());
@@ -424,6 +435,10 @@ public class ReturnServiceImpl implements ReturnService {
     @Override
     @Transactional
     public ReturnResponse issuePartialRefund(long orderId, long amountCents, String reason, long actorUserId) {
+        User actor = userRepository.findById(actorUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("Staff user not found: " + actorUserId));
+        SecurityUtils.requireStaff(actor);
+
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found: " + orderId));
 
@@ -489,14 +504,31 @@ public class ReturnServiceImpl implements ReturnService {
      * Enforces the double-return guard: queued + new ≤ orderItem.quantity.
      * Looks up OrderItems from the already-loaded order.getItems() collection.
      */
-    private List<ReturnItem> buildReturnItems(Return ret, List<BuyerReturnItemRequest> itemRequests, Order order) {
+    private List<ReturnItem> buildReturnItems(
+            Return ret,
+            List<BuyerReturnItemRequest> itemRequests,
+            Order order,
+            Long expectedCompanyId) {
         List<ReturnItem> returnItems = new ArrayList<>();
+        Long scopedCompanyId = expectedCompanyId;
         for (BuyerReturnItemRequest ir : itemRequests) {
             OrderItem orderItem = order.getItems().stream()
                     .filter(i -> i.getId().equals(ir.orderItemId()))
                     .findFirst()
                     .orElseThrow(() -> new ResourceNotFoundException(
                             "Order item " + ir.orderItemId() + " not found in order " + order.getId()));
+
+            long itemCompanyId = resolveOwningCompanyId(orderItem);
+            if (scopedCompanyId == null) {
+                scopedCompanyId = itemCompanyId;
+            } else if (!scopedCompanyId.equals(itemCompanyId)) {
+                if (expectedCompanyId != null) {
+                    throw new BadRequestException(
+                            "Order item " + ir.orderItemId() + " does not belong to company " + expectedCompanyId);
+                }
+                throw new BadRequestException(
+                        "Return requests must be split by merchant. Submit separate returns for each company.");
+            }
 
             if (orderItem.getFulfillmentStatus() != FulfillmentStatus.DELIVERED
                     && orderItem.getFulfillmentStatus() != FulfillmentStatus.SHIPPED) {
@@ -518,6 +550,41 @@ public class ReturnServiceImpl implements ReturnService {
             returnItems.add(ri);
         }
         return returnItems;
+    }
+
+    private Return requireCompanyScopedReturn(Optional<Return> maybeReturn, long returnId, long companyId) {
+        Return ret = maybeReturn.orElseThrow(() -> new ResourceNotFoundException("Return not found with id: " + returnId));
+        if (!returnBelongsExclusivelyToCompany(ret, companyId)) {
+            throw new ResourceNotFoundException("Return not found with id: " + returnId);
+        }
+        return ret;
+    }
+
+    private boolean returnBelongsExclusivelyToCompany(Return ret, long companyId) {
+        return ret.getItems() != null
+                && !ret.getItems().isEmpty()
+                && ret.getItems().stream()
+                .map(ReturnItem::getOrderItem)
+                .allMatch(item -> Long.valueOf(companyId).equals(findOwningCompanyId(item)));
+    }
+
+    private long resolveOwningCompanyId(OrderItem orderItem) {
+        Long companyId = findOwningCompanyId(orderItem);
+        if (companyId == null) {
+            throw new BadRequestException(
+                    "Order item " + orderItem.getId() + " has no company owner and cannot be returned");
+        }
+        return companyId;
+    }
+
+    private Long findOwningCompanyId(OrderItem orderItem) {
+        if (orderItem.getBundle() != null && orderItem.getBundle().getCompany() != null) {
+            return orderItem.getBundle().getCompany().getId();
+        }
+        if (orderItem.getProduct() != null && orderItem.getProduct().getCompany() != null) {
+            return orderItem.getProduct().getCompany().getId();
+        }
+        return null;
     }
 
     /**

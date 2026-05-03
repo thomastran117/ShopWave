@@ -4,6 +4,7 @@ import backend.dtos.requests.credit.IssueCreditRequest;
 import backend.dtos.responses.credit.CreditBalanceResponse;
 import backend.dtos.responses.credit.CreditEntryResponse;
 import backend.exceptions.http.BadRequestException;
+import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
 import backend.models.core.CustomerCredit;
 import backend.models.core.User;
@@ -11,6 +12,7 @@ import backend.models.enums.CreditEntryType;
 import backend.models.enums.UserRole;
 import backend.repositories.CustomerCreditRepository;
 import backend.repositories.UserRepository;
+import backend.services.impl.customers.CustomerCreditServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -70,6 +72,18 @@ class CustomerCreditServiceImplTest {
         when(userRepository.findById(99L)).thenReturn(Optional.empty());
         IssueCreditRequest req = new IssueCreditRequest(500L, CreditEntryType.COMPENSATION_ISSUED, null, null);
         assertThrows(ResourceNotFoundException.class, () -> service.issueCredit(99L, req, 2L, null, null));
+    }
+
+    @Test
+    void issueCredit_throwsWhenIssuerIsNotStaff() {
+        User customer = makeUser(1L, UserRole.USER);
+        User actor = makeUser(2L, UserRole.USER);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(customer));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(actor));
+
+        IssueCreditRequest req = new IssueCreditRequest(500L, CreditEntryType.COMPENSATION_ISSUED, null, null);
+
+        assertThrows(ForbiddenException.class, () -> service.issueCredit(1L, req, 2L, null, null));
     }
 
     // ─── getBalance ───────────────────────────────────────────────────────────
@@ -162,6 +176,21 @@ class CustomerCreditServiceImplTest {
         when(userRepository.findById(2L)).thenReturn(Optional.of(makeUser(2L, UserRole.SUPPORT)));
 
         assertThrows(BadRequestException.class, () -> service.reverseCredit(10L, 2L));
+    }
+
+    @Test
+    void reverseCredit_throwsWhenActorIsNotStaff() {
+        User customer = makeUser(1L, UserRole.USER);
+        User actor = makeUser(2L, UserRole.USER);
+
+        CustomerCredit original = new CustomerCredit();
+        original.setUser(customer);
+        original.setAmountCents(500L);
+
+        when(creditRepository.findById(10L)).thenReturn(Optional.of(original));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(actor));
+
+        assertThrows(ForbiddenException.class, () -> service.reverseCredit(10L, 2L));
     }
 
     // ─── helpers ─────────────────────────────────────────────────────────────

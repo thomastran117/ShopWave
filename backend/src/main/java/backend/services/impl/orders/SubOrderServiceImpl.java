@@ -7,13 +7,16 @@ import backend.dtos.responses.order.CommissionRecordResponse;
 import backend.dtos.responses.order.OrderItemResponse;
 import backend.dtos.responses.order.SubOrderResponse;
 import backend.exceptions.http.BadRequestException;
+import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
 import backend.models.core.CommissionRecord;
+import backend.models.core.MarketplaceVendor;
 import backend.models.core.OrderItem;
 import backend.models.core.SubOrder;
 import backend.models.enums.FulfillmentStatus;
 import backend.models.enums.SubOrderStatus;
 import backend.repositories.CommissionRecordRepository;
+import backend.repositories.MarketplaceVendorRepository;
 import backend.repositories.OrderItemRepository;
 import backend.repositories.SubOrderRepository;
 import backend.services.intf.orders.SubOrderService;
@@ -34,19 +37,23 @@ public class SubOrderServiceImpl implements SubOrderService {
     private final SubOrderRepository subOrderRepository;
     private final OrderItemRepository orderItemRepository;
     private final CommissionRecordRepository commissionRecordRepository;
+    private final MarketplaceVendorRepository marketplaceVendorRepository;
 
     public SubOrderServiceImpl(
             SubOrderRepository subOrderRepository,
             OrderItemRepository orderItemRepository,
-            CommissionRecordRepository commissionRecordRepository) {
+            CommissionRecordRepository commissionRecordRepository,
+            MarketplaceVendorRepository marketplaceVendorRepository) {
         this.subOrderRepository = subOrderRepository;
         this.orderItemRepository = orderItemRepository;
         this.commissionRecordRepository = commissionRecordRepository;
+        this.marketplaceVendorRepository = marketplaceVendorRepository;
     }
 
     @Override
     @Transactional(readOnly = true)
-    public PagedResponse<SubOrderResponse> listVendorSubOrders(long marketplaceVendorId, SubOrderStatus status, int page, int size) {
+    public PagedResponse<SubOrderResponse> listVendorSubOrders(long marketplaceVendorId, SubOrderStatus status, int page, int size, long ownerId) {
+        assertVendorOwnership(marketplaceVendorId, ownerId);
         if (size > 50) size = 50;
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         Page<SubOrder> results = status != null
@@ -57,14 +64,14 @@ public class SubOrderServiceImpl implements SubOrderService {
 
     @Override
     @Transactional(readOnly = true)
-    public SubOrderResponse getSubOrder(long subOrderId, long marketplaceVendorId) {
-        return toResponse(resolveVendorSubOrder(subOrderId, marketplaceVendorId));
+    public SubOrderResponse getSubOrder(long subOrderId, long marketplaceVendorId, long ownerId) {
+        return toResponse(resolveVendorSubOrder(subOrderId, marketplaceVendorId, ownerId));
     }
 
     @Override
     @Transactional
-    public SubOrderResponse markPacked(long subOrderId, long marketplaceVendorId) {
-        SubOrder subOrder = resolveVendorSubOrder(subOrderId, marketplaceVendorId);
+    public SubOrderResponse markPacked(long subOrderId, long marketplaceVendorId, long ownerId) {
+        SubOrder subOrder = resolveVendorSubOrder(subOrderId, marketplaceVendorId, ownerId);
         if (subOrder.getStatus() != SubOrderStatus.PENDING) {
             throw new BadRequestException("Sub-order must be PENDING to mark as packed");
         }
@@ -83,8 +90,8 @@ public class SubOrderServiceImpl implements SubOrderService {
 
     @Override
     @Transactional
-    public SubOrderResponse markShipped(long subOrderId, long marketplaceVendorId, ShipSubOrderRequest request) {
-        SubOrder subOrder = resolveVendorSubOrder(subOrderId, marketplaceVendorId);
+    public SubOrderResponse markShipped(long subOrderId, long marketplaceVendorId, ShipSubOrderRequest request, long ownerId) {
+        SubOrder subOrder = resolveVendorSubOrder(subOrderId, marketplaceVendorId, ownerId);
         if (subOrder.getStatus() != SubOrderStatus.PACKED) {
             throw new BadRequestException("Sub-order must be PACKED before marking as shipped");
         }
@@ -108,8 +115,8 @@ public class SubOrderServiceImpl implements SubOrderService {
 
     @Override
     @Transactional
-    public SubOrderResponse markDelivered(long subOrderId, long marketplaceVendorId) {
-        SubOrder subOrder = resolveVendorSubOrder(subOrderId, marketplaceVendorId);
+    public SubOrderResponse markDelivered(long subOrderId, long marketplaceVendorId, long ownerId) {
+        SubOrder subOrder = resolveVendorSubOrder(subOrderId, marketplaceVendorId, ownerId);
         if (subOrder.getStatus() != SubOrderStatus.SHIPPED) {
             throw new BadRequestException("Sub-order must be SHIPPED before marking as delivered");
         }
@@ -128,8 +135,8 @@ public class SubOrderServiceImpl implements SubOrderService {
 
     @Override
     @Transactional
-    public SubOrderResponse cancelSubOrder(long subOrderId, long marketplaceVendorId, CancelSubOrderRequest request) {
-        SubOrder subOrder = resolveVendorSubOrder(subOrderId, marketplaceVendorId);
+    public SubOrderResponse cancelSubOrder(long subOrderId, long marketplaceVendorId, CancelSubOrderRequest request, long ownerId) {
+        SubOrder subOrder = resolveVendorSubOrder(subOrderId, marketplaceVendorId, ownerId);
         if (subOrder.getStatus() == SubOrderStatus.SHIPPED
                 || subOrder.getStatus() == SubOrderStatus.DELIVERED
                 || subOrder.getStatus() == SubOrderStatus.CANCELLED) {
@@ -138,13 +145,23 @@ public class SubOrderServiceImpl implements SubOrderService {
         subOrder.setStatus(SubOrderStatus.CANCELLED);
         subOrder.setCancelledAt(Instant.now());
         subOrder.setCancellationReason(request.getReason());
+
+        orderItemRepository.findAllBySubOrderId(subOrderId).forEach(item -> {
+            if (item.getFulfillmentStatus() == FulfillmentStatus.PENDING
+                    || item.getFulfillmentStatus() == FulfillmentStatus.BACKORDERED
+                    || item.getFulfillmentStatus() == FulfillmentStatus.PACKED) {
+                item.setFulfillmentStatus(FulfillmentStatus.CANCELLED);
+                orderItemRepository.save(item);
+            }
+        });
+
         return toResponse(subOrderRepository.save(subOrder));
     }
 
     @Override
     @Transactional(readOnly = true)
-    public CommissionRecordResponse getCommissionRecord(long subOrderId, long marketplaceVendorId) {
-        resolveVendorSubOrder(subOrderId, marketplaceVendorId);
+    public CommissionRecordResponse getCommissionRecord(long subOrderId, long marketplaceVendorId, long ownerId) {
+        resolveVendorSubOrder(subOrderId, marketplaceVendorId, ownerId);
         CommissionRecord record = commissionRecordRepository.findBySubOrderId(subOrderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Commission record not yet available for this sub-order"));
         return toCommissionResponse(record);
@@ -154,9 +171,19 @@ public class SubOrderServiceImpl implements SubOrderService {
     // Helpers
     // -------------------------------------------------------------------------
 
-    private SubOrder resolveVendorSubOrder(long subOrderId, long marketplaceVendorId) {
+    private SubOrder resolveVendorSubOrder(long subOrderId, long marketplaceVendorId, long ownerId) {
+        assertVendorOwnership(marketplaceVendorId, ownerId);
         return subOrderRepository.findByIdAndMarketplaceVendorId(subOrderId, marketplaceVendorId)
                 .orElseThrow(() -> new ResourceNotFoundException("Sub-order not found"));
+    }
+
+    private MarketplaceVendor assertVendorOwnership(long marketplaceVendorId, long ownerId) {
+        MarketplaceVendor vendor = marketplaceVendorRepository.findById(marketplaceVendorId)
+                .orElseThrow(() -> new ResourceNotFoundException("Vendor not found"));
+        if (!vendor.getVendorCompany().getOwner().getId().equals(ownerId)) {
+            throw new ForbiddenException("You do not own this vendor company");
+        }
+        return vendor;
     }
 
     private SubOrderResponse toResponse(SubOrder s) {

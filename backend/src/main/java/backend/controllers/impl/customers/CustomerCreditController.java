@@ -37,7 +37,7 @@ public class CustomerCreditController {
     }
 
     @GetMapping("/support/customers/{userId}/credits")
-    @RequireAuth
+    @RequireAuth(roles = {"SUPPORT", "MODERATOR", "ADMIN"})
     public ResponseEntity<CreditBalanceResponse> getCustomerCredits(@PathVariable long userId) {
         try {
             return ResponseEntity.ok(creditService.getBalance(userId));
@@ -49,7 +49,7 @@ public class CustomerCreditController {
     }
 
     @PostMapping("/support/customers/{userId}/credits")
-    @RequireAuth
+    @RequireAuth(roles = {"SUPPORT", "MODERATOR", "ADMIN"})
     public ResponseEntity<CreditEntryResponse> issueCredit(@PathVariable long userId,
                                                             @Valid @RequestBody IssueCreditRequest request) {
         try {
@@ -63,7 +63,7 @@ public class CustomerCreditController {
     }
 
     @PostMapping("/support/credits/{entryId}/reverse")
-    @RequireAuth
+    @RequireAuth(roles = {"SUPPORT", "MODERATOR", "ADMIN"})
     public ResponseEntity<CreditEntryResponse> reverseCredit(@PathVariable long entryId) {
         try {
             return ResponseEntity.ok(creditService.reverseCredit(entryId, resolveUserId()));

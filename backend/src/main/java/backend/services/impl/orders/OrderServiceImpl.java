@@ -1950,8 +1950,9 @@ public class OrderServiceImpl implements OrderService {
     public RiskAssessmentResponse getOrderRisk(long companyId, long orderId, long ownerId) {
         companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
-        orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        requireExclusiveCompanyOrder(order, orderId, companyId);
         RiskAssessment latest = riskAssessmentRepository.findTopByOrderIdOrderByCreatedAtDesc(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("No risk assessment on order " + orderId));
         return toRiskAssessmentResponse(latest);
@@ -1964,6 +1965,7 @@ public class OrderServiceImpl implements OrderService {
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
         Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        requireExclusiveCompanyOrder(order, orderId, companyId);
         if (order.getStatus() != OrderStatus.UNDER_REVIEW) {
             throw new ConflictException("Order is not under review (status=" + order.getStatus() + ")");
         }
@@ -2012,6 +2014,7 @@ public class OrderServiceImpl implements OrderService {
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
         Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        requireExclusiveCompanyOrder(order, orderId, companyId);
         if (order.getStatus() != OrderStatus.UNDER_REVIEW) {
             throw new ConflictException("Order is not under review (status=" + order.getStatus() + ")");
         }
@@ -2053,6 +2056,30 @@ public class OrderServiceImpl implements OrderService {
             });
         }
         return r;
+    }
+
+    private void requireExclusiveCompanyOrder(Order order, long orderId, long companyId) {
+        if (!orderBelongsExclusivelyToCompany(order, companyId)) {
+            throw new ResourceNotFoundException("Order not found with id: " + orderId);
+        }
+    }
+
+    private boolean orderBelongsExclusivelyToCompany(Order order, long companyId) {
+        return order.getItems() != null
+                && !order.getItems().isEmpty()
+                && order.getItems().stream()
+                .map(this::findOwningCompanyId)
+                .allMatch(itemCompanyId -> Long.valueOf(companyId).equals(itemCompanyId));
+    }
+
+    private Long findOwningCompanyId(OrderItem item) {
+        if (item.getBundle() != null && item.getBundle().getCompany() != null) {
+            return item.getBundle().getCompany().getId();
+        }
+        if (item.getProduct() != null && item.getProduct().getCompany() != null) {
+            return item.getProduct().getCompany().getId();
+        }
+        return null;
     }
 
     private String topReason(RiskAssessment a) {

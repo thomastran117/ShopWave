@@ -2,6 +2,7 @@ package backend.services.impl;
 
 import backend.dtos.responses.return_.ReturnResponse;
 import backend.exceptions.http.BadRequestException;
+import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
 import backend.models.core.Order;
 import backend.models.core.User;
@@ -20,6 +21,8 @@ import backend.repositories.ReturnItemRepository;
 import backend.repositories.ReturnRepository;
 import backend.repositories.RiskAssessmentRepository;
 import backend.repositories.UserRepository;
+import backend.services.impl.returns.ReturnServiceImpl;
+import backend.services.intf.ActivityEventPublisher;
 import backend.services.intf.payments.PaymentService;
 import backend.services.intf.pricing.RiskEngine;
 import backend.configurations.environment.RiskProperties;
@@ -41,6 +44,7 @@ class ReturnServicePartialRefundTest {
     private ReturnRepository returnRepository;
     private OrderRepository orderRepository;
     private PaymentService paymentService;
+    private UserRepository userRepository;
     private ReturnServiceImpl service;
 
     @BeforeEach
@@ -48,6 +52,7 @@ class ReturnServicePartialRefundTest {
         returnRepository = mock(ReturnRepository.class);
         orderRepository = mock(OrderRepository.class);
         paymentService = mock(PaymentService.class);
+        userRepository = mock(UserRepository.class);
 
         service = new ReturnServiceImpl(
                 returnRepository,
@@ -60,18 +65,21 @@ class ReturnServicePartialRefundTest {
                 mock(InventoryAdjustmentRepository.class),
                 mock(CompanyRepository.class),
                 mock(CompanyReturnLocationRepository.class),
-                mock(UserRepository.class),
+                userRepository,
                 paymentService,
                 mock(RiskEngine.class),
                 mock(RiskAssessmentRepository.class),
-                mock(RiskProperties.class));
+                mock(RiskProperties.class),
+                mock(ActivityEventPublisher.class));
     }
 
     @Test
     void issuePartialRefund_createsReturnAndFiresStripeRefund() throws Exception {
         User customer = makeUser(1L);
         Order order = makeOrder(10L, customer);
+        User staff = makeStaffUser(2L);
 
+        when(userRepository.findById(2L)).thenReturn(Optional.of(staff));
         when(orderRepository.findById(10L)).thenReturn(Optional.of(order));
         when(orderRepository.save(any())).thenReturn(order);
 
@@ -93,6 +101,7 @@ class ReturnServicePartialRefundTest {
 
     @Test
     void issuePartialRefund_throwsWhenAmountZero() {
+        when(userRepository.findById(2L)).thenReturn(Optional.of(makeStaffUser(2L)));
         when(orderRepository.findById(10L)).thenReturn(Optional.of(makeOrder(10L, makeUser(1L))));
         assertThrows(BadRequestException.class,
                 () -> service.issuePartialRefund(10L, 0L, null, 2L));
@@ -100,9 +109,18 @@ class ReturnServicePartialRefundTest {
 
     @Test
     void issuePartialRefund_throwsWhenOrderNotFound() {
+        when(userRepository.findById(2L)).thenReturn(Optional.of(makeStaffUser(2L)));
         when(orderRepository.findById(99L)).thenReturn(Optional.empty());
         assertThrows(ResourceNotFoundException.class,
                 () -> service.issuePartialRefund(99L, 500L, null, 2L));
+    }
+
+    @Test
+    void issuePartialRefund_throwsWhenActorIsNotStaff() {
+        when(userRepository.findById(2L)).thenReturn(Optional.of(makeUser(2L)));
+
+        assertThrows(ForbiddenException.class,
+                () -> service.issuePartialRefund(10L, 500L, null, 2L));
     }
 
     // ─── helpers ─────────────────────────────────────────────────────────────
@@ -112,6 +130,12 @@ class ReturnServicePartialRefundTest {
         u.setId(id);
         u.setEmail("user" + id + "@test.com");
         u.setRole(UserRole.USER);
+        return u;
+    }
+
+    private User makeStaffUser(long id) {
+        User u = makeUser(id);
+        u.setRole(UserRole.SUPPORT);
         return u;
     }
 

@@ -17,6 +17,7 @@ import backend.models.enums.CreditEntryType;
 import backend.repositories.CustomerCreditRepository;
 import backend.repositories.UserRepository;
 import backend.services.intf.customers.CustomerCreditService;
+import backend.utilities.SecurityUtils;
 
 import java.time.Instant;
 import java.util.List;
@@ -42,6 +43,7 @@ public class CustomerCreditServiceImpl implements CustomerCreditService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + userId));
         User issuedBy = userRepository.findById(issuedByUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("Staff user not found: " + issuedByUserId));
+        SecurityUtils.requireStaff(issuedBy);
 
         CustomerCredit entry = new CustomerCredit();
         entry.setUser(customer);
@@ -113,6 +115,7 @@ public class CustomerCreditServiceImpl implements CustomerCreditService {
 
         User actor = userRepository.findById(actorUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("Staff user not found: " + actorUserId));
+        SecurityUtils.requireStaff(actor);
 
         CustomerCredit reversal = new CustomerCredit();
         reversal.setUser(original.getUser());

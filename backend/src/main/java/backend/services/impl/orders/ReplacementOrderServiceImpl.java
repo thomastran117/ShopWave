@@ -13,11 +13,14 @@ import backend.exceptions.http.ResourceNotFoundException;
 import backend.models.core.Order;
 import backend.models.core.OrderItem;
 import backend.models.core.ProductVariant;
+import backend.models.core.User;
 import backend.models.enums.FulfillmentStatus;
 import backend.models.enums.OrderStatus;
 import backend.repositories.OrderRepository;
 import backend.repositories.ProductVariantRepository;
+import backend.repositories.UserRepository;
 import backend.services.intf.orders.ReplacementOrderService;
+import backend.utilities.SecurityUtils;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -31,11 +34,14 @@ public class ReplacementOrderServiceImpl implements ReplacementOrderService {
 
     private final OrderRepository orderRepository;
     private final ProductVariantRepository variantRepository;
+    private final UserRepository userRepository;
 
     public ReplacementOrderServiceImpl(OrderRepository orderRepository,
-                                       ProductVariantRepository variantRepository) {
+                                       ProductVariantRepository variantRepository,
+                                       UserRepository userRepository) {
         this.orderRepository = orderRepository;
         this.variantRepository = variantRepository;
+        this.userRepository = userRepository;
     }
 
     @Override
@@ -43,6 +49,10 @@ public class ReplacementOrderServiceImpl implements ReplacementOrderService {
     public OrderResponse createReplacement(long originalOrderId,
                                            ResolveWithReplacementRequest request,
                                            long actorUserId) {
+        User actor = userRepository.findById(actorUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("Staff user not found: " + actorUserId));
+        SecurityUtils.requireStaff(actor);
+
         Order original = orderRepository.findById(originalOrderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found: " + originalOrderId));
 

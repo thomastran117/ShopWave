@@ -17,12 +17,24 @@ public interface RiskReviewRepository extends JpaRepository<RiskReview, Long> {
     Optional<RiskReview> findByOrderId(long orderId);
 
     /**
-     * Paginated queue of reviews for a given company. Joins through the held order's line items
-     * so a merchant only sees reviews for orders containing their products — mirrors the pattern
-     * used by {@code OrderRepository.findAllByProductCompanyId}.
+     * Paginated queue of reviews for a given company.
+     * Only returns reviews whose held order belongs exclusively to that company.
      */
-    @Query("SELECT DISTINCT rr FROM RiskReview rr, Order o JOIN o.items oi " +
-           "WHERE rr.orderId = o.id AND oi.product.company.id = :companyId AND rr.status = :status")
+    @Query("SELECT rr FROM RiskReview rr " +
+           "WHERE rr.status = :status " +
+           "AND EXISTS (" +
+           "  SELECT oi.id FROM Order o JOIN o.items oi " +
+           "  WHERE o.id = rr.orderId " +
+           "  AND ((oi.product IS NOT NULL AND oi.product.company.id = :companyId) " +
+           "    OR (oi.bundle IS NOT NULL AND oi.bundle.company.id = :companyId))" +
+           ") " +
+           "AND NOT EXISTS (" +
+           "  SELECT oi2.id FROM Order o2 JOIN o2.items oi2 " +
+           "  WHERE o2.id = rr.orderId " +
+           "  AND ((oi2.product IS NOT NULL AND oi2.product.company.id <> :companyId) " +
+           "    OR (oi2.bundle IS NOT NULL AND oi2.bundle.company.id <> :companyId) " +
+           "    OR (oi2.product IS NULL AND oi2.bundle IS NULL))" +
+           ")")
     Page<RiskReview> findByCompanyIdAndStatus(
             @Param("companyId") long companyId,
             @Param("status") RiskReviewStatus status,

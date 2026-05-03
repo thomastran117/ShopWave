@@ -13,11 +13,13 @@ import backend.dtos.responses.sla.VendorSLAPolicyResponse;
 import backend.exceptions.http.BadRequestException;
 import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
+import backend.models.core.MarketplaceVendor;
 import backend.models.core.VendorSLABreach;
 import backend.models.core.VendorSLAMetric;
 import backend.models.core.VendorSLAPolicy;
 import backend.models.enums.SLABreachAction;
 import backend.repositories.MarketplaceProfileRepository;
+import backend.repositories.MarketplaceVendorRepository;
 import backend.repositories.VendorSLABreachRepository;
 import backend.repositories.VendorSLAMetricRepository;
 import backend.repositories.VendorSLAPolicyRepository;
@@ -33,16 +35,19 @@ public class VendorSLAServiceImpl implements VendorSLAService {
     private final VendorSLAMetricRepository metricRepository;
     private final VendorSLABreachRepository breachRepository;
     private final MarketplaceProfileRepository marketplaceProfileRepository;
+    private final MarketplaceVendorRepository marketplaceVendorRepository;
 
     public VendorSLAServiceImpl(
             VendorSLAPolicyRepository policyRepository,
             VendorSLAMetricRepository metricRepository,
             VendorSLABreachRepository breachRepository,
-            MarketplaceProfileRepository marketplaceProfileRepository) {
+            MarketplaceProfileRepository marketplaceProfileRepository,
+            MarketplaceVendorRepository marketplaceVendorRepository) {
         this.policyRepository = policyRepository;
         this.metricRepository = metricRepository;
         this.breachRepository = breachRepository;
         this.marketplaceProfileRepository = marketplaceProfileRepository;
+        this.marketplaceVendorRepository = marketplaceVendorRepository;
     }
 
     // -------------------------------------------------------------------------
@@ -98,7 +103,8 @@ public class VendorSLAServiceImpl implements VendorSLAService {
 
     @Override
     @Transactional(readOnly = true)
-    public PagedResponse<VendorSLAMetricResponse> listMetrics(long vendorId, int page, int size) {
+    public PagedResponse<VendorSLAMetricResponse> listMetrics(long marketplaceId, long vendorId, long actorUserId, int page, int size) {
+        assertVendorAccess(marketplaceId, vendorId, actorUserId);
         int cap = Math.min(size, 90);
         var pageable = PageRequest.of(page, cap, Sort.by(Sort.Direction.DESC, "date"));
         var results = metricRepository.findByVendorId(vendorId, pageable);
@@ -107,7 +113,8 @@ public class VendorSLAServiceImpl implements VendorSLAService {
 
     @Override
     @Transactional(readOnly = true)
-    public VendorSLAMetricResponse getLatestMetric(long vendorId) {
+    public VendorSLAMetricResponse getLatestMetric(long marketplaceId, long vendorId, long actorUserId) {
+        assertVendorAccess(marketplaceId, vendorId, actorUserId);
         return metricRepository.findByVendorIdOrderByDateDesc(vendorId).stream()
                 .findFirst()
                 .map(this::toMetricResponse)
@@ -120,7 +127,8 @@ public class VendorSLAServiceImpl implements VendorSLAService {
 
     @Override
     @Transactional(readOnly = true)
-    public PagedResponse<VendorSLABreachResponse> listBreaches(long vendorId, int page, int size) {
+    public PagedResponse<VendorSLABreachResponse> listBreaches(long marketplaceId, long vendorId, long actorUserId, int page, int size) {
+        assertVendorAccess(marketplaceId, vendorId, actorUserId);
         int cap = Math.min(size, 50);
         var pageable = PageRequest.of(page, cap, Sort.by(Sort.Direction.DESC, "detectedAt"));
         var results = breachRepository.findByVendorId(vendorId, pageable);
@@ -143,6 +151,18 @@ public class VendorSLAServiceImpl implements VendorSLAService {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    private void assertVendorAccess(long marketplaceId, long vendorId, long userId) {
+        MarketplaceVendor vendor = marketplaceVendorRepository.findById(vendorId)
+                .orElseThrow(() -> new ResourceNotFoundException("Vendor not found"));
+        if (!vendor.getMarketplace().getId().equals(marketplaceId)) {
+            throw new ResourceNotFoundException("Vendor not found");
+        }
+        if (vendor.getVendorCompany().getOwner().getId().equals(userId)) {
+            return;
+        }
+        assertOperator(marketplaceId, userId);
+    }
 
     private void assertOperator(long marketplaceId, long userId) {
         marketplaceProfileRepository.findByCompanyId(marketplaceId)

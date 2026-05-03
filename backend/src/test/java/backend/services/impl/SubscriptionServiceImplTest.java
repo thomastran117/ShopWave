@@ -6,7 +6,9 @@ import backend.dtos.requests.subscription.UpdateSubscriptionRequest;
 import backend.dtos.responses.subscription.SubscriptionResponse;
 import backend.exceptions.http.BadRequestException;
 import backend.exceptions.http.ConflictException;
+import backend.models.core.Company;
 import backend.models.core.Product;
+import backend.models.core.ProductVariant;
 import backend.models.core.Subscription;
 import backend.models.core.SubscriptionItem;
 import backend.models.core.User;
@@ -18,9 +20,11 @@ import backend.repositories.SavedPaymentMethodRepository;
 import backend.repositories.OrderRepository;
 import backend.repositories.SubscriptionRepository;
 import backend.repositories.UserRepository;
+import backend.services.intf.ActivityEventPublisher;
 import backend.services.intf.promotions.LoyaltyService;
 import backend.services.intf.orders.OrderService;
 import backend.services.intf.payments.PaymentService;
+import backend.services.impl.subscriptions.SubscriptionServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -44,6 +48,7 @@ class SubscriptionServiceImplTest {
     private OrderService orderService;
     private OrderRepository orderRepository;
     private LoyaltyService loyaltyService;
+    private ActivityEventPublisher activityEventPublisher;
     private SubscriptionServiceImpl service;
 
     @BeforeEach
@@ -57,6 +62,7 @@ class SubscriptionServiceImplTest {
         orderService = mock(OrderService.class);
         orderRepository = mock(OrderRepository.class);
         loyaltyService = mock(LoyaltyService.class);
+        activityEventPublisher = mock(ActivityEventPublisher.class);
 
         service = new SubscriptionServiceImpl(
                 subscriptionRepository,
@@ -67,7 +73,8 @@ class SubscriptionServiceImplTest {
                 paymentService,
                 orderService,
                 orderRepository,
-                loyaltyService);
+                loyaltyService,
+                activityEventPublisher);
     }
 
     // ─── create ─────────────────────────────────────────────────────────────
@@ -93,6 +100,34 @@ class SubscriptionServiceImplTest {
         CreateSubscriptionRequest req = makeCreateRequest(10L);
         req.setBillingInterval(BillingInterval.WEEK);
         req.setIntervalCount(1);
+
+        assertThrows(BadRequestException.class, () -> service.create(1L, req));
+    }
+
+    @Test
+    void create_rejectsUnavailableProduct() {
+        User user = makeUser(1L);
+        Product product = makeProduct(10L, true, null);
+        product.setListed(false);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(productRepository.findById(10L)).thenReturn(Optional.of(product));
+
+        assertThrows(BadRequestException.class,
+                () -> service.create(1L, makeCreateRequest(10L)));
+    }
+
+    @Test
+    void create_rejectsUnavailableVariant() {
+        User user = makeUser(1L);
+        user.setStripeCustomerId("cus_123");
+        Product product = makeProduct(10L, true, null);
+        ProductVariant variant = makeVariant(55L, product, false);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(productRepository.findById(10L)).thenReturn(Optional.of(product));
+        when(variantRepository.findByIdAndProductId(55L, 10L)).thenReturn(Optional.of(variant));
+
+        CreateSubscriptionRequest req = makeCreateRequest(10L);
+        req.setVariantId(55L);
 
         assertThrows(BadRequestException.class, () -> service.create(1L, req));
     }
@@ -222,6 +257,45 @@ class SubscriptionServiceImplTest {
         verify(paymentService).swapSubscriptionPrice("sub_1", "si_1", "price_2", 2);
     }
 
+    @Test
+    void update_productSwapRejectsUnavailableProduct() {
+        Subscription sub = makeSubscription(SubscriptionStatus.ACTIVE);
+        Product replacement = makeProduct(20L, true, null);
+        replacement.setPurchasable(false);
+        when(subscriptionRepository.findByIdAndUserId(99L, 1L)).thenReturn(Optional.of(sub));
+        when(productRepository.findById(20L)).thenReturn(Optional.of(replacement));
+
+        UpdateSubscriptionRequest req = new UpdateSubscriptionRequest();
+        req.setProductId(20L);
+
+        assertThrows(BadRequestException.class, () -> service.update(1L, 99L, req));
+    }
+
+    @Test
+    void update_productSwapRefreshesSubscriptionCompany() {
+        Subscription sub = makeSubscription(SubscriptionStatus.ACTIVE);
+        Product replacement = makeProduct(20L, true, null);
+        Company replacementCompany = new Company();
+        replacementCompany.setId(77L);
+        replacement.setCompany(replacementCompany);
+
+        when(subscriptionRepository.findByIdAndUserId(99L, 1L)).thenReturn(Optional.of(sub));
+        when(productRepository.findById(20L)).thenReturn(Optional.of(replacement));
+        when(paymentService.createRecurringPrice(anyLong(), anyString(), any(), anyInt(), anyString(), any()))
+                .thenReturn(new PaymentService.PriceResult("price_2", 1000L, "usd"));
+        when(paymentService.swapSubscriptionPrice("sub_1", "si_1", "price_2", 1))
+                .thenReturn(stripeResult("active"));
+        when(subscriptionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        UpdateSubscriptionRequest req = new UpdateSubscriptionRequest();
+        req.setProductId(20L);
+
+        service.update(1L, 99L, req);
+
+        assertEquals(77L, sub.getCompany().getId());
+        assertEquals(20L, sub.getItems().get(0).getProduct().getId());
+    }
+
     // ─── cancel ─────────────────────────────────────────────────────────────
 
     @Test
@@ -254,14 +328,23 @@ class SubscriptionServiceImplTest {
     @Test
     void handleInvoicePaid_createsOrderAndMarksActive() {
         Subscription sub = makeSubscription(SubscriptionStatus.PAST_DUE);
+        Company oldCompany = new Company();
+        oldCompany.setId(10L);
+        sub.setCompany(oldCompany);
+        Company currentCompany = new Company();
+        currentCompany.setId(20L);
+        sub.getItems().get(0).getProduct().setCompany(currentCompany);
         when(subscriptionRepository.findByStripeSubscriptionId("sub_1"))
                 .thenReturn(Optional.of(sub));
         when(paymentService.retrieveSubscription("sub_1")).thenReturn(stripeResult("active"));
+        when(orderRepository.findByStripeInvoiceId("in_42")).thenReturn(Optional.of(new backend.models.core.Order()));
         when(subscriptionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.handleInvoicePaid("in_42", "sub_1", 1500L);
 
         verify(orderService).createRenewalOrder(eq(sub), eq("in_42"), eq(1500L));
+        verify(loyaltyService).recordOrderEarn(any(), eq(20L));
+        assertEquals(20L, sub.getCompany().getId());
         assertEquals(SubscriptionStatus.ACTIVE, sub.getStatus());
         assertFalse(sub.isSkipNextCycle());
     }
@@ -304,9 +387,24 @@ class SubscriptionServiceImplTest {
         p.setName("Test Product");
         p.setPrice(BigDecimal.valueOf(10));
         p.setCurrency("USD");
+        p.setStatus(backend.models.enums.ProductStatus.ACTIVE);
+        p.setListed(true);
+        p.setPurchasable(true);
         p.setSubscribable(subscribable);
         p.setSubscriptionIntervals(allowedIntervals);
+        Company company = new Company();
+        company.setId(id + 1000);
+        p.setCompany(company);
         return p;
+    }
+
+    private ProductVariant makeVariant(long id, Product product, boolean purchasable) {
+        ProductVariant variant = new ProductVariant();
+        variant.setId(id);
+        variant.setProduct(product);
+        variant.setPrice(BigDecimal.valueOf(12));
+        variant.setPurchasable(purchasable);
+        return variant;
     }
 
     private CreateSubscriptionRequest makeCreateRequest(long productId) {
@@ -334,6 +432,7 @@ class SubscriptionServiceImplTest {
         Subscription sub = new Subscription();
         sub.setId(99L);
         sub.setUser(user);
+        sub.setCompany(product.getCompany());
         sub.setStripeSubscriptionId("sub_1");
         sub.setStripeCustomerId("cus_1");
         sub.setStripePriceId("price_1");

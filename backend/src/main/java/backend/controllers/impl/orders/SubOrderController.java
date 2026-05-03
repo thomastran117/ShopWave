@@ -14,6 +14,8 @@ import backend.services.intf.orders.SubOrderService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -35,7 +37,7 @@ public class SubOrderController {
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size) {
         try {
-            return ResponseEntity.ok(subOrderService.listVendorSubOrders(vendorId, status, page, size));
+            return ResponseEntity.ok(subOrderService.listVendorSubOrders(vendorId, status, page, size, resolveUserId()));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -48,7 +50,7 @@ public class SubOrderController {
             @PathVariable long vendorId,
             @PathVariable long subOrderId) {
         try {
-            return ResponseEntity.ok(subOrderService.getSubOrder(subOrderId, vendorId));
+            return ResponseEntity.ok(subOrderService.getSubOrder(subOrderId, vendorId, resolveUserId()));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -61,7 +63,7 @@ public class SubOrderController {
             @PathVariable long vendorId,
             @PathVariable long subOrderId) {
         try {
-            return ResponseEntity.ok(subOrderService.markPacked(subOrderId, vendorId));
+            return ResponseEntity.ok(subOrderService.markPacked(subOrderId, vendorId, resolveUserId()));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -75,7 +77,7 @@ public class SubOrderController {
             @PathVariable long subOrderId,
             @Valid @RequestBody ShipSubOrderRequest request) {
         try {
-            return ResponseEntity.ok(subOrderService.markShipped(subOrderId, vendorId, request));
+            return ResponseEntity.ok(subOrderService.markShipped(subOrderId, vendorId, request, resolveUserId()));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -88,7 +90,7 @@ public class SubOrderController {
             @PathVariable long vendorId,
             @PathVariable long subOrderId) {
         try {
-            return ResponseEntity.ok(subOrderService.markDelivered(subOrderId, vendorId));
+            return ResponseEntity.ok(subOrderService.markDelivered(subOrderId, vendorId, resolveUserId()));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -102,7 +104,7 @@ public class SubOrderController {
             @PathVariable long subOrderId,
             @Valid @RequestBody CancelSubOrderRequest request) {
         try {
-            return ResponseEntity.ok(subOrderService.cancelSubOrder(subOrderId, vendorId, request));
+            return ResponseEntity.ok(subOrderService.cancelSubOrder(subOrderId, vendorId, request, resolveUserId()));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -115,12 +117,17 @@ public class SubOrderController {
             @PathVariable long vendorId,
             @PathVariable long subOrderId) {
         try {
-            return ResponseEntity.ok(subOrderService.getCommissionRecord(subOrderId, vendorId));
+            return ResponseEntity.ok(subOrderService.getCommissionRecord(subOrderId, vendorId, resolveUserId()));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
             throw new InternalServerErrorException();
         }
+    }
+
+    private long resolveUserId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return ((Number) auth.getPrincipal()).longValue();
     }
 
 }

@@ -10,17 +10,17 @@ import backend.models.enums.SubOrderStatus;
 public interface SubOrderService {
 
     /** Returns paginated sub-orders for a vendor, optionally filtered by status. */
-    PagedResponse<SubOrderResponse> listVendorSubOrders(long marketplaceVendorId, SubOrderStatus status, int page, int size);
+    PagedResponse<SubOrderResponse> listVendorSubOrders(long marketplaceVendorId, SubOrderStatus status, int page, int size, long ownerId);
 
-    SubOrderResponse getSubOrder(long subOrderId, long marketplaceVendorId);
+    SubOrderResponse getSubOrder(long subOrderId, long marketplaceVendorId, long ownerId);
 
-    SubOrderResponse markPacked(long subOrderId, long marketplaceVendorId);
+    SubOrderResponse markPacked(long subOrderId, long marketplaceVendorId, long ownerId);
 
-    SubOrderResponse markShipped(long subOrderId, long marketplaceVendorId, ShipSubOrderRequest request);
+    SubOrderResponse markShipped(long subOrderId, long marketplaceVendorId, ShipSubOrderRequest request, long ownerId);
 
-    SubOrderResponse markDelivered(long subOrderId, long marketplaceVendorId);
+    SubOrderResponse markDelivered(long subOrderId, long marketplaceVendorId, long ownerId);
 
-    SubOrderResponse cancelSubOrder(long subOrderId, long marketplaceVendorId, CancelSubOrderRequest request);
+    SubOrderResponse cancelSubOrder(long subOrderId, long marketplaceVendorId, CancelSubOrderRequest request, long ownerId);
 
-    CommissionRecordResponse getCommissionRecord(long subOrderId, long marketplaceVendorId);
+    CommissionRecordResponse getCommissionRecord(long subOrderId, long marketplaceVendorId, long ownerId);
 }

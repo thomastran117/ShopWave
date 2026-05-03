@@ -14,12 +14,12 @@ import java.util.List;
 public interface VendorAnalyticsService {
 
     // Vendor-scoped endpoints
-    VendorAnalyticsSummaryResponse getSummary(long vendorId, long marketplaceId, int lookbackDays);
-    VendorRevenueResponse getRevenue(long vendorId, long marketplaceId, int lookbackDays);
-    VendorTopProductsResponse getTopProducts(long vendorId, long marketplaceId, int lookbackDays, int limit);
-    VendorOrdersMetricResponse getOrders(long vendorId, long marketplaceId, int lookbackDays);
-    VendorRefundsMetricResponse getRefunds(long vendorId, long marketplaceId, int lookbackDays);
-    VendorPayoutsMetricResponse getPayouts(long vendorId, long marketplaceId, int recentCount);
+    VendorAnalyticsSummaryResponse getSummary(long vendorId, long marketplaceId, int lookbackDays, long actorUserId);
+    VendorRevenueResponse getRevenue(long vendorId, long marketplaceId, int lookbackDays, long actorUserId);
+    VendorTopProductsResponse getTopProducts(long vendorId, long marketplaceId, int lookbackDays, int limit, long actorUserId);
+    VendorOrdersMetricResponse getOrders(long vendorId, long marketplaceId, int lookbackDays, long actorUserId);
+    VendorRefundsMetricResponse getRefunds(long vendorId, long marketplaceId, int lookbackDays, long actorUserId);
+    VendorPayoutsMetricResponse getPayouts(long vendorId, long marketplaceId, int recentCount, long actorUserId);
 
     // Marketplace operator endpoints
     MarketplaceAnalyticsSummaryResponse getMarketplaceSummary(long marketplaceId, long operatorUserId, int lookbackDays);

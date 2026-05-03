@@ -18,8 +18,11 @@ import backend.dtos.responses.vendor.VendorRefundsMetricResponse;
 import backend.dtos.responses.vendor.VendorRevenueResponse;
 import backend.dtos.responses.vendor.VendorTopProductsResponse;
 import backend.exceptions.http.ForbiddenException;
+import backend.exceptions.http.ResourceNotFoundException;
+import backend.models.core.MarketplaceVendor;
 import backend.models.enums.PayoutStatus;
 import backend.repositories.MarketplaceProfileRepository;
+import backend.repositories.MarketplaceVendorRepository;
 import backend.repositories.VendorAnalyticsRepository;
 import backend.repositories.VendorPayoutRepository;
 import backend.repositories.projections.DailyCountProjection;
@@ -52,6 +55,7 @@ public class VendorAnalyticsServiceImpl implements VendorAnalyticsService {
     private final VendorAnalyticsRepository analyticsRepository;
     private final VendorPayoutRepository payoutRepository;
     private final MarketplaceProfileRepository marketplaceProfileRepository;
+    private final MarketplaceVendorRepository marketplaceVendorRepository;
     private final CacheService cacheService;
     private final ObjectMapper objectMapper;
 
@@ -59,11 +63,13 @@ public class VendorAnalyticsServiceImpl implements VendorAnalyticsService {
             VendorAnalyticsRepository analyticsRepository,
             VendorPayoutRepository payoutRepository,
             MarketplaceProfileRepository marketplaceProfileRepository,
+            MarketplaceVendorRepository marketplaceVendorRepository,
             CacheService cacheService,
             ObjectMapper objectMapper) {
         this.analyticsRepository = analyticsRepository;
         this.payoutRepository = payoutRepository;
         this.marketplaceProfileRepository = marketplaceProfileRepository;
+        this.marketplaceVendorRepository = marketplaceVendorRepository;
         this.cacheService = cacheService;
         this.objectMapper = objectMapper;
     }
@@ -74,7 +80,8 @@ public class VendorAnalyticsServiceImpl implements VendorAnalyticsService {
 
     @Override
     @Transactional(readOnly = true)
-    public VendorAnalyticsSummaryResponse getSummary(long vendorId, long marketplaceId, int lookbackDays) {
+    public VendorAnalyticsSummaryResponse getSummary(long vendorId, long marketplaceId, int lookbackDays, long actorUserId) {
+        assertVendorAccess(vendorId, marketplaceId, actorUserId);
         int days = clamp(lookbackDays);
         Window w = window(days);
         String key = cacheKey(vendorId, "summary", days);
@@ -110,7 +117,8 @@ public class VendorAnalyticsServiceImpl implements VendorAnalyticsService {
 
     @Override
     @Transactional(readOnly = true)
-    public VendorRevenueResponse getRevenue(long vendorId, long marketplaceId, int lookbackDays) {
+    public VendorRevenueResponse getRevenue(long vendorId, long marketplaceId, int lookbackDays, long actorUserId) {
+        assertVendorAccess(vendorId, marketplaceId, actorUserId);
         int days = clamp(lookbackDays);
         Window w = window(days);
         String key = cacheKey(vendorId, "revenue", days);
@@ -143,7 +151,8 @@ public class VendorAnalyticsServiceImpl implements VendorAnalyticsService {
 
     @Override
     @Transactional(readOnly = true)
-    public VendorTopProductsResponse getTopProducts(long vendorId, long marketplaceId, int lookbackDays, int limit) {
+    public VendorTopProductsResponse getTopProducts(long vendorId, long marketplaceId, int lookbackDays, int limit, long actorUserId) {
+        assertVendorAccess(vendorId, marketplaceId, actorUserId);
         int days = clamp(lookbackDays);
         Window w = window(days);
         int cap = Math.min(limit, 50);
@@ -169,7 +178,8 @@ public class VendorAnalyticsServiceImpl implements VendorAnalyticsService {
 
     @Override
     @Transactional(readOnly = true)
-    public VendorOrdersMetricResponse getOrders(long vendorId, long marketplaceId, int lookbackDays) {
+    public VendorOrdersMetricResponse getOrders(long vendorId, long marketplaceId, int lookbackDays, long actorUserId) {
+        assertVendorAccess(vendorId, marketplaceId, actorUserId);
         int days = clamp(lookbackDays);
         Window w = window(days);
         String key = cacheKey(vendorId, "orders", days);
@@ -190,7 +200,8 @@ public class VendorAnalyticsServiceImpl implements VendorAnalyticsService {
 
     @Override
     @Transactional(readOnly = true)
-    public VendorRefundsMetricResponse getRefunds(long vendorId, long marketplaceId, int lookbackDays) {
+    public VendorRefundsMetricResponse getRefunds(long vendorId, long marketplaceId, int lookbackDays, long actorUserId) {
+        assertVendorAccess(vendorId, marketplaceId, actorUserId);
         int days = clamp(lookbackDays);
         Window w = window(days);
         String key = cacheKey(vendorId, "refunds", days);
@@ -210,7 +221,8 @@ public class VendorAnalyticsServiceImpl implements VendorAnalyticsService {
 
     @Override
     @Transactional(readOnly = true)
-    public VendorPayoutsMetricResponse getPayouts(long vendorId, long marketplaceId, int recentCount) {
+    public VendorPayoutsMetricResponse getPayouts(long vendorId, long marketplaceId, int recentCount, long actorUserId) {
+        assertVendorAccess(vendorId, marketplaceId, actorUserId);
         int cap = Math.min(recentCount, 50);
         var page = payoutRepository.findByVendorIdAndStatus(
                 vendorId, PayoutStatus.PAID,
@@ -290,6 +302,18 @@ public class VendorAnalyticsServiceImpl implements VendorAnalyticsService {
     private double resolveTargetShipHours(long marketplaceId) {
         // Use a fixed default; SLA policy target is consulted by the SLA service
         return DEFAULT_TARGET_SHIP_HOURS;
+    }
+
+    private void assertVendorAccess(long vendorId, long marketplaceId, long userId) {
+        MarketplaceVendor vendor = marketplaceVendorRepository.findById(vendorId)
+                .orElseThrow(() -> new ResourceNotFoundException("Vendor not found"));
+        if (!vendor.getMarketplace().getId().equals(marketplaceId)) {
+            throw new ResourceNotFoundException("Vendor not found");
+        }
+        if (vendor.getVendorCompany().getOwner().getId().equals(userId)) {
+            return;
+        }
+        assertOperator(marketplaceId, userId);
     }
 
     private void assertOperator(long marketplaceId, long userId) {

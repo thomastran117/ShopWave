@@ -123,7 +123,7 @@ public class MarketplaceAnalyticsController {
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "30") @Min(1) @Max(90) int size) {
         try {
-            return ResponseEntity.ok(vendorSLAService.listMetrics(vendorId, page, size));
+            return ResponseEntity.ok(vendorSLAService.listMetrics(marketplaceId, vendorId, resolveUserId(), page, size));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -136,7 +136,7 @@ public class MarketplaceAnalyticsController {
             @PathVariable long marketplaceId,
             @PathVariable long vendorId) {
         try {
-            return ResponseEntity.ok(vendorSLAService.getLatestMetric(vendorId));
+            return ResponseEntity.ok(vendorSLAService.getLatestMetric(marketplaceId, vendorId, resolveUserId()));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -151,7 +151,7 @@ public class MarketplaceAnalyticsController {
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size) {
         try {
-            return ResponseEntity.ok(vendorSLAService.listBreaches(vendorId, page, size));
+            return ResponseEntity.ok(vendorSLAService.listBreaches(marketplaceId, vendorId, resolveUserId(), page, size));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {

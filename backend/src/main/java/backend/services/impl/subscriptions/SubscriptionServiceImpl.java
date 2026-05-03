@@ -24,6 +24,7 @@ import backend.models.core.Subscription;
 import backend.models.core.SubscriptionItem;
 import backend.models.core.User;
 import backend.models.enums.BillingInterval;
+import backend.models.enums.ProductStatus;
 import backend.models.enums.SubscriptionStatus;
 import backend.repositories.OrderRepository;
 import backend.repositories.ProductRepository;
@@ -137,10 +138,7 @@ public class SubscriptionServiceImpl implements SubscriptionService {
 
         Product product = productRepository.findById(req.getProductId())
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found: " + req.getProductId()));
-
-        if (!product.isSubscribable()) {
-            throw new BadRequestException("Product is not available as a subscription");
-        }
+        validateSubscriptionProduct(product);
 
         validateInterval(product, req.getBillingInterval(), req.getIntervalCount());
 
@@ -148,6 +146,7 @@ public class SubscriptionServiceImpl implements SubscriptionService {
         if (req.getVariantId() != null) {
             variant = variantRepository.findByIdAndProductId(req.getVariantId(), product.getId())
                     .orElseThrow(() -> new ResourceNotFoundException("Variant not found: " + req.getVariantId()));
+            validateSubscriptionVariant(variant);
         }
 
         BigDecimal unitPrice = variant != null ? variant.getPrice() : product.getPrice();
@@ -265,15 +264,15 @@ public class SubscriptionServiceImpl implements SubscriptionService {
         if (req.getProductId() != null && !req.getProductId().equals(product.getId())) {
             product = productRepository.findById(req.getProductId())
                     .orElseThrow(() -> new ResourceNotFoundException("Product not found: " + req.getProductId()));
-            if (!product.isSubscribable()) {
-                throw new BadRequestException("Replacement product is not subscribable");
-            }
+            validateSubscriptionProduct(product);
             variant = null; // reset variant when swapping product
         }
 
         if (req.getVariantId() != null) {
             variant = variantRepository.findByIdAndProductId(req.getVariantId(), product.getId())
                     .orElseThrow(() -> new ResourceNotFoundException("Variant not found: " + req.getVariantId()));
+            validateSubscriptionProduct(product);
+            validateSubscriptionVariant(variant);
         }
 
         BillingInterval interval = req.getBillingInterval() != null ? req.getBillingInterval() : sub.getBillingInterval();
@@ -311,6 +310,7 @@ public class SubscriptionServiceImpl implements SubscriptionService {
             sub.setCurrentPeriodEnd(result.currentPeriodEnd());
             sub.setNextBillingAt(result.currentPeriodEnd());
             sub.setUnitAmountCents(unitCents * quantity);
+            sub.setCompany(product.getCompany());
 
             item.setProduct(product);
             item.setVariant(variant);
@@ -446,7 +446,7 @@ public class SubscriptionServiceImpl implements SubscriptionService {
 
         try {
             orderRepository.findByStripeInvoiceId(stripeInvoiceId).ifPresent(renewalOrder ->
-                    loyaltyService.recordOrderEarn(renewalOrder, sub.getCompany().getId()));
+                    loyaltyService.recordOrderEarn(renewalOrder, resolveSubscriptionCompanyId(sub)));
         } catch (Exception e) {
             log.error("[LOYALTY] Failed to record earn for renewal (subscription {}, invoice {}): {}",
                     sub.getId(), stripeInvoiceId, e.getMessage());
@@ -570,6 +570,37 @@ public class SubscriptionServiceImpl implements SubscriptionService {
             if (token.trim().equalsIgnoreCase(needle)) return;
         }
         throw new BadRequestException("Billing cadence " + needle + " is not allowed for this product");
+    }
+
+    private void validateSubscriptionProduct(Product product) {
+        if (!product.isSubscribable()
+                || product.getStatus() != ProductStatus.ACTIVE
+                || !product.isListed()
+                || !product.isPurchasable()) {
+            throw new BadRequestException("Product is not available as a subscription");
+        }
+    }
+
+    private void validateSubscriptionVariant(ProductVariant variant) {
+        if (!variant.isPurchasable()) {
+            throw new BadRequestException("Variant is not available as a subscription");
+        }
+    }
+
+    private long resolveSubscriptionCompanyId(Subscription sub) {
+        if (sub.getItems() != null && !sub.getItems().isEmpty()) {
+            Product product = sub.getItems().get(0).getProduct();
+            if (product != null && product.getCompany() != null) {
+                if (sub.getCompany() == null || !product.getCompany().getId().equals(sub.getCompany().getId())) {
+                    sub.setCompany(product.getCompany());
+                }
+                return product.getCompany().getId();
+            }
+        }
+        if (sub.getCompany() != null) {
+            return sub.getCompany().getId();
+        }
+        throw new BadRequestException("Subscription has no owning company");
     }
 
     private SubscriptionStatus mapStripeStatus(String stripeStatus) {

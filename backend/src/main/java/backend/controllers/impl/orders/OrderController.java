@@ -190,7 +190,7 @@ public class OrderController {
     }
 
     @PostMapping("/support/orders/{orderId}/partial-refund")
-    @RequireAuth
+    @RequireAuth(roles = {"SUPPORT", "MODERATOR", "ADMIN"})
     public ResponseEntity<ReturnResponse> issuePartialRefund(
             @PathVariable long orderId,
             @RequestParam long amountCents,
@@ -205,7 +205,7 @@ public class OrderController {
     }
 
     @PostMapping("/support/orders/{orderId}/replacement")
-    @RequireAuth
+    @RequireAuth(roles = {"SUPPORT", "MODERATOR", "ADMIN"})
     public ResponseEntity<OrderResponse> createReplacement(
             @PathVariable long orderId,
             @Valid @RequestBody ResolveWithReplacementRequest request) {

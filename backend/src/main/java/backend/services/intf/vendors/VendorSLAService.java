@@ -16,10 +16,10 @@ public interface VendorSLAService {
     List<VendorSLAPolicyResponse> listPolicies(long marketplaceId);
 
     // Metrics (vendor self-service + operator)
-    PagedResponse<VendorSLAMetricResponse> listMetrics(long vendorId, int page, int size);
-    VendorSLAMetricResponse getLatestMetric(long vendorId);
+    PagedResponse<VendorSLAMetricResponse> listMetrics(long marketplaceId, long vendorId, long actorUserId, int page, int size);
+    VendorSLAMetricResponse getLatestMetric(long marketplaceId, long vendorId, long actorUserId);
 
     // Breaches (vendor self-service + operator)
-    PagedResponse<VendorSLABreachResponse> listBreaches(long vendorId, int page, int size);
+    PagedResponse<VendorSLABreachResponse> listBreaches(long marketplaceId, long vendorId, long actorUserId, int page, int size);
     VendorSLABreachResponse resolveBreach(long breachId, long operatorUserId, long marketplaceId);
 }

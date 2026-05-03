@@ -3,6 +3,7 @@ package backend.services.impl;
 import backend.dtos.requests.issue.ResolveWithReplacementRequest;
 import backend.dtos.responses.order.OrderResponse;
 import backend.exceptions.http.BadRequestException;
+import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
 import backend.models.core.Order;
 import backend.models.core.Product;
@@ -12,6 +13,8 @@ import backend.models.enums.OrderStatus;
 import backend.models.enums.UserRole;
 import backend.repositories.OrderRepository;
 import backend.repositories.ProductVariantRepository;
+import backend.repositories.UserRepository;
+import backend.services.impl.orders.ReplacementOrderServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -30,21 +33,25 @@ class ReplacementOrderServiceImplTest {
 
     private OrderRepository orderRepository;
     private ProductVariantRepository variantRepository;
+    private UserRepository userRepository;
     private ReplacementOrderServiceImpl service;
 
     @BeforeEach
     void setUp() {
         orderRepository = mock(OrderRepository.class);
         variantRepository = mock(ProductVariantRepository.class);
-        service = new ReplacementOrderServiceImpl(orderRepository, variantRepository);
+        userRepository = mock(UserRepository.class);
+        service = new ReplacementOrderServiceImpl(orderRepository, variantRepository, userRepository);
     }
 
     @Test
     void createReplacement_setsReplacementOfOrderIdAndZeroTotal() {
         User customer = makeUser(1L);
+        User staff = makeStaffUser(2L);
         Order original = makeOrder(10L, customer);
         ProductVariant variant = makeVariant(5L);
 
+        when(userRepository.findById(2L)).thenReturn(Optional.of(staff));
         when(orderRepository.findById(10L)).thenReturn(Optional.of(original));
         when(variantRepository.findById(5L)).thenReturn(Optional.of(variant));
         when(orderRepository.save(any())).thenAnswer(inv -> {
@@ -68,6 +75,7 @@ class ReplacementOrderServiceImplTest {
     @Test
     void createReplacement_throwsWhenNoItems() {
         User customer = makeUser(1L);
+        when(userRepository.findById(2L)).thenReturn(Optional.of(makeStaffUser(2L)));
         Order original = makeOrder(10L, customer);
         when(orderRepository.findById(10L)).thenReturn(Optional.of(original));
 
@@ -80,6 +88,7 @@ class ReplacementOrderServiceImplTest {
     @Test
     void createReplacement_throwsWhenVariantNotFound() {
         User customer = makeUser(1L);
+        when(userRepository.findById(2L)).thenReturn(Optional.of(makeStaffUser(2L)));
         Order original = makeOrder(10L, customer);
         when(orderRepository.findById(10L)).thenReturn(Optional.of(original));
         when(variantRepository.findById(999L)).thenReturn(Optional.empty());
@@ -93,6 +102,7 @@ class ReplacementOrderServiceImplTest {
 
     @Test
     void createReplacement_throwsWhenOriginalOrderNotFound() {
+        when(userRepository.findById(2L)).thenReturn(Optional.of(makeStaffUser(2L)));
         when(orderRepository.findById(99L)).thenReturn(Optional.empty());
 
         ResolveWithReplacementRequest req = new ResolveWithReplacementRequest(
@@ -102,6 +112,17 @@ class ReplacementOrderServiceImplTest {
         assertThrows(ResourceNotFoundException.class, () -> service.createReplacement(99L, req, 2L));
     }
 
+    @Test
+    void createReplacement_throwsWhenActorIsNotStaff() {
+        when(userRepository.findById(2L)).thenReturn(Optional.of(makeUser(2L)));
+
+        ResolveWithReplacementRequest req = new ResolveWithReplacementRequest(
+                List.of(new ResolveWithReplacementRequest.ReplacementItem(1L, 1)),
+                "123 Main St", "Springfield", "US", "12345");
+
+        assertThrows(ForbiddenException.class, () -> service.createReplacement(10L, req, 2L));
+    }
+
     // ─── helpers ─────────────────────────────────────────────────────────────
 
     private User makeUser(long id) {
@@ -109,6 +130,12 @@ class ReplacementOrderServiceImplTest {
         u.setId(id);
         u.setEmail("user" + id + "@test.com");
         u.setRole(UserRole.USER);
+        return u;
+    }
+
+    private User makeStaffUser(long id) {
+        User u = makeUser(id);
+        u.setRole(UserRole.SUPPORT);
         return u;
     }
 
