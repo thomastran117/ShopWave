@@ -53,9 +53,9 @@ public interface VendorOnboardingService {
     // Queries
     // -------------------------------------------------------------------------
 
-    MarketplaceVendorResponse getVendor(long marketplaceId, long vendorId);
+    MarketplaceVendorResponse getVendor(long marketplaceId, long vendorId, long operatorUserId);
 
-    PagedResponse<MarketplaceVendorResponse> listVendors(long marketplaceId, VendorStatus status, int page, int size);
+    PagedResponse<MarketplaceVendorResponse> listVendors(long marketplaceId, VendorStatus status, int page, int size, long operatorUserId);
 
     /** Returns the vendor record for the authenticated user's company in the given marketplace. */
     MarketplaceVendorResponse getMyVendorRecord(long marketplaceId, long userId);

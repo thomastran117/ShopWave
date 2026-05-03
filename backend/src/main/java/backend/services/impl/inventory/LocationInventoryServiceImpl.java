@@ -158,8 +158,8 @@ public class LocationInventoryServiceImpl implements LocationInventoryService {
         InventoryLocation location = locationRepository.findByIdAndCompanyId(locationId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Location not found with id: " + locationId));
 
-        if (locationStockRepository.existsByLocationId(locationId)) {
-            throw new ConflictException("Cannot delete location with stock records — zero out all stock first");
+        if (locationStockRepository.existsByLocationIdAndStockGreaterThan(locationId, 0)) {
+            throw new ConflictException("Cannot delete location with remaining stock — zero out all stock first");
         }
 
         locationRepository.delete(location);

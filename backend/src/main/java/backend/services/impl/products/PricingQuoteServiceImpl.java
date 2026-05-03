@@ -84,6 +84,10 @@ public class PricingQuoteServiceImpl implements PricingQuoteService {
                 Product product = productRepository.findById(item.getProductId())
                         .orElseThrow(() -> new ResourceNotFoundException("Product not found: " + item.getProductId()));
 
+                if (product.getStatus() != ProductStatus.ACTIVE || !product.isListed()) {
+                    throw new BadRequestException("Product " + item.getProductId() + " is not available for purchase");
+                }
+
                 BigDecimal unitPrice;
                 Long variantId = item.getVariantId();
                 if (variantId != null) {

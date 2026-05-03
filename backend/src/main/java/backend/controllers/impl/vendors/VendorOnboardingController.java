@@ -176,7 +176,7 @@ public class VendorOnboardingController {
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size) {
         try {
-            return ResponseEntity.ok(vendorOnboardingService.listVendors(marketplaceId, status, page, size));
+            return ResponseEntity.ok(vendorOnboardingService.listVendors(marketplaceId, status, page, size, resolveUserId()));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -190,7 +190,7 @@ public class VendorOnboardingController {
             @PathVariable long marketplaceId,
             @PathVariable long vendorId) {
         try {
-            return ResponseEntity.ok(vendorOnboardingService.getVendor(marketplaceId, vendorId));
+            return ResponseEntity.ok(vendorOnboardingService.getVendor(marketplaceId, vendorId, resolveUserId()));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {

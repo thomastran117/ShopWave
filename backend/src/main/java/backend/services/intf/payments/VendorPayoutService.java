@@ -9,11 +9,11 @@ import backend.models.enums.PayoutStatus;
 
 public interface VendorPayoutService {
 
-    VendorBalanceResponse getBalance(long vendorId);
+    VendorBalanceResponse getBalance(long vendorId, long actorUserId);
 
-    PagedResponse<VendorPayoutResponse> listPayouts(long vendorId, PayoutStatus status, int page, int size);
+    PagedResponse<VendorPayoutResponse> listPayouts(long vendorId, PayoutStatus status, int page, int size, long actorUserId);
 
-    VendorPayoutResponse getPayoutDetail(long payoutId, long vendorId);
+    VendorPayoutResponse getPayoutDetail(long payoutId, long vendorId, long actorUserId);
 
     /** Operator-triggered manual payout for a vendor with available balance. */
     VendorPayoutResponse triggerManualPayout(long vendorId, long marketplaceId, long operatorUserId);

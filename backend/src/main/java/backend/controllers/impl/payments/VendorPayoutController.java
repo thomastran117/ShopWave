@@ -37,7 +37,7 @@ public class VendorPayoutController {
     @GetMapping("/vendors/{vendorId}/balance")
     public ResponseEntity<VendorBalanceResponse> getBalance(@PathVariable long vendorId) {
         try {
-            return ResponseEntity.ok(vendorPayoutService.getBalance(vendorId));
+            return ResponseEntity.ok(vendorPayoutService.getBalance(vendorId, resolveUserId()));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -52,7 +52,7 @@ public class VendorPayoutController {
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size) {
         try {
-            return ResponseEntity.ok(vendorPayoutService.listPayouts(vendorId, status, page, size));
+            return ResponseEntity.ok(vendorPayoutService.listPayouts(vendorId, status, page, size, resolveUserId()));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {
@@ -65,7 +65,7 @@ public class VendorPayoutController {
             @PathVariable long vendorId,
             @PathVariable long payoutId) {
         try {
-            return ResponseEntity.ok(vendorPayoutService.getPayoutDetail(payoutId, vendorId));
+            return ResponseEntity.ok(vendorPayoutService.getPayoutDetail(payoutId, vendorId, resolveUserId()));
         } catch (AppHttpException e) {
             throw e;
         } catch (Exception e) {

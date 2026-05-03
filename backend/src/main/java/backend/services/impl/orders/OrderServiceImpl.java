@@ -86,6 +86,7 @@ import backend.repositories.FailedPaymentAttemptRepository;
 import backend.repositories.RiskAssessmentRepository;
 import backend.repositories.RiskReviewRepository;
 import backend.repositories.UserRepository;
+import backend.repositories.PromotionPerUserCountRepository;
 import backend.dtos.requests.return_.BuyerReturnItemRequest;
 import backend.dtos.requests.return_.MerchantInitiateReturnRequest;
 import backend.models.core.InventoryLocation;
@@ -178,6 +179,7 @@ public class OrderServiceImpl implements OrderService {
     private final ActivityEventPublisher activityEventPublisher;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
     private ReturnService returnService;
+    private PromotionPerUserCountRepository promotionPerUserCountRepository;
 
     public OrderServiceImpl(
             OrderRepository orderRepository,
@@ -258,6 +260,11 @@ public class OrderServiceImpl implements OrderService {
     @org.springframework.beans.factory.annotation.Autowired
     public void setReturnService(ReturnService returnService) {
         this.returnService = returnService;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setPromotionPerUserCountRepository(PromotionPerUserCountRepository repo) {
+        this.promotionPerUserCountRepository = repo;
     }
 
     @Override
@@ -725,6 +732,14 @@ public class OrderServiceImpl implements OrderService {
                                 + "' has reached its usage limit. Please try again.");
                     }
                     PromotionRule ruleRef = promotionRuleRepository.getReferenceById(ap.ruleId());
+                    if (ruleRef.getMaxUsesPerUser() != null) {
+                        int claimed = promotionPerUserCountRepository.tryIncrementUserCount(
+                                ap.ruleId(), userId, ruleRef.getMaxUsesPerUser());
+                        if (claimed == 0) {
+                            throw new ConflictException("Promotion '" + ap.name()
+                                    + "' has reached your personal usage limit.");
+                        }
+                    }
                     Company funder = companyRepository.getReferenceById(ap.fundedByCompanyId());
                     PromotionRedemption redemption = new PromotionRedemption();
                     redemption.setRule(ruleRef);
@@ -909,6 +924,7 @@ public class OrderServiceImpl implements OrderService {
             item.setFulfillmentStatus(FulfillmentStatus.CANCELLED);
         }
 
+        releaseCouponUsage(order);
         order.setCompensated(true);
         return toResponse(orderRepository.save(order));
     }
@@ -972,6 +988,7 @@ public class OrderServiceImpl implements OrderService {
                 }
             }
 
+            releaseCouponUsage(order);
             orderRepository.save(order);
         });
     }
@@ -1021,6 +1038,7 @@ public class OrderServiceImpl implements OrderService {
             order.setCancelledAt(Instant.now());
             order.setCancellationReason(backend.models.enums.CancellationReason.STALE_TIMEOUT);
         }
+        releaseCouponUsage(order);
         orderRepository.save(order);
 
         try {
@@ -1167,6 +1185,17 @@ public class OrderServiceImpl implements OrderService {
      * Deletes the Redis reservation manifest for this order.
      * Idempotent: safe to call even if the key has already expired or was never written.
      */
+    private void releaseCouponUsage(Order order) {
+        if (order.getCoupon() != null && order.getCoupon().getMaxUsesPerUser() != null) {
+            try {
+                couponPerUserCountRepository.decrementUserCount(
+                        order.getCoupon().getId(), order.getUser().getId());
+            } catch (Exception e) {
+                log.error("Failed to release coupon usage for order {}: {}", order.getId(), e.getMessage());
+            }
+        }
+    }
+
     private void releaseReservation(long orderId) {
         try {
             cacheService.delete("reserve:order:" + orderId);
@@ -1514,6 +1543,19 @@ public class OrderServiceImpl implements OrderService {
                         locationRepository.findById(fulfillmentLocationId).ifPresent(loc -> {
                             item.setFulfillmentLocation(loc);
                             item.setFulfillmentLocationName(loc.getName());
+                            // Decrement location stock to match the global decrement above.
+                            // Best-effort: location stock drifting low is recoverable; stopping
+                            // fulfillment here is not, so we log and continue on failure.
+                            long variantRef = variantId != null ? variantId : 0L;
+                            locationStockRepository
+                                    .findByLocationIdAndProductIdAndVariantRef(loc.getId(), productId, variantRef)
+                                    .ifPresent(ls -> {
+                                        int rows = locationStockRepository.decrementStock(ls.getId(), qty);
+                                        if (rows == 0) {
+                                            log.warn("fulfillPendingBackorders: location stock insufficient for location={} product={} qty={} — location stock not decremented",
+                                                    loc.getId(), productId, qty);
+                                        }
+                                    });
                         });
                     }
 
@@ -1950,7 +1992,7 @@ public class OrderServiceImpl implements OrderService {
     public RiskAssessmentResponse getOrderRisk(long companyId, long orderId, long ownerId) {
         companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
-        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+        Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
         requireExclusiveCompanyOrder(order, orderId, companyId);
         RiskAssessment latest = riskAssessmentRepository.findTopByOrderIdOrderByCreatedAtDesc(orderId)
@@ -1963,7 +2005,7 @@ public class OrderServiceImpl implements OrderService {
     public OrderResponse approveRiskReview(long companyId, long orderId, long ownerId, RiskDecisionRequest req) {
         companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
-        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+        Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
         requireExclusiveCompanyOrder(order, orderId, companyId);
         if (order.getStatus() != OrderStatus.UNDER_REVIEW) {
@@ -2012,7 +2054,7 @@ public class OrderServiceImpl implements OrderService {
     public OrderResponse rejectRiskReview(long companyId, long orderId, long ownerId, RiskDecisionRequest req) {
         companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
-        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+        Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
         requireExclusiveCompanyOrder(order, orderId, companyId);
         if (order.getStatus() != OrderStatus.UNDER_REVIEW) {

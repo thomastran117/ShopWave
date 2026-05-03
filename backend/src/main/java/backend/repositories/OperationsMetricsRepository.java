@@ -31,29 +31,30 @@ public interface OperationsMetricsRepository extends JpaRepository<Order, Long> 
     // -------------------------------------------------------------------------
 
     @Query(value =
-            "SELECT COUNT(*) AS count, " +
-            "       AVG(TIMESTAMPDIFF(SECOND, o.created_at, o.shipped_at)) AS avgSeconds " +
-            "FROM orders o " +
-            "JOIN order_items i ON i.order_id = o.id " +
-            "JOIN products p ON p.id = i.product_id " +
-            "WHERE p.company_id = :companyId " +
-            "AND o.shipped_at IS NOT NULL " +
-            "AND o.shipped_at BETWEEN :from AND :to",
+            "SELECT COUNT(*) AS count, AVG(avgSeconds) AS avgSeconds FROM (" +
+            "  SELECT DISTINCT o.id, TIMESTAMPDIFF(SECOND, o.created_at, o.shipped_at) AS avgSeconds " +
+            "  FROM orders o " +
+            "  JOIN order_items i ON i.order_id = o.id " +
+            "  JOIN products p ON p.id = i.product_id " +
+            "  WHERE p.company_id = :companyId " +
+            "  AND o.shipped_at IS NOT NULL " +
+            "  AND o.shipped_at BETWEEN :from AND :to" +
+            ") t",
             nativeQuery = true)
     DurationStatsProjection fulfillmentStats(@Param("companyId") long companyId,
                                              @Param("from") Instant from, @Param("to") Instant to);
 
     @Query(value =
-            "SELECT DATE(o.shipped_at) AS day, COUNT(*) AS count, " +
-            "       AVG(TIMESTAMPDIFF(SECOND, o.created_at, o.shipped_at)) AS avgSeconds " +
-            "FROM orders o " +
-            "JOIN order_items i ON i.order_id = o.id " +
-            "JOIN products p ON p.id = i.product_id " +
-            "WHERE p.company_id = :companyId " +
-            "AND o.shipped_at IS NOT NULL " +
-            "AND o.shipped_at BETWEEN :from AND :to " +
-            "GROUP BY DATE(o.shipped_at) " +
-            "ORDER BY DATE(o.shipped_at)",
+            "SELECT day, COUNT(*) AS count, AVG(avgSeconds) AS avgSeconds FROM (" +
+            "  SELECT DISTINCT o.id, DATE(o.shipped_at) AS day, " +
+            "         TIMESTAMPDIFF(SECOND, o.created_at, o.shipped_at) AS avgSeconds " +
+            "  FROM orders o " +
+            "  JOIN order_items i ON i.order_id = o.id " +
+            "  JOIN products p ON p.id = i.product_id " +
+            "  WHERE p.company_id = :companyId " +
+            "  AND o.shipped_at IS NOT NULL " +
+            "  AND o.shipped_at BETWEEN :from AND :to" +
+            ") t GROUP BY day ORDER BY day",
             nativeQuery = true)
     List<DailyDurationProjection> fulfillmentDaily(@Param("companyId") long companyId,
                                                    @Param("from") Instant from, @Param("to") Instant to);
@@ -99,29 +100,30 @@ public interface OperationsMetricsRepository extends JpaRepository<Order, Long> 
     // -------------------------------------------------------------------------
 
     @Query(value =
-            "SELECT COUNT(*) AS count, " +
-            "       AVG(TIMESTAMPDIFF(SECOND, o.paid_at, o.packed_at)) AS avgSeconds " +
-            "FROM orders o " +
-            "JOIN order_items i ON i.order_id = o.id " +
-            "JOIN products p ON p.id = i.product_id " +
-            "WHERE p.company_id = :companyId " +
-            "AND o.paid_at IS NOT NULL AND o.packed_at IS NOT NULL " +
-            "AND o.packed_at BETWEEN :from AND :to",
+            "SELECT COUNT(*) AS count, AVG(avgSeconds) AS avgSeconds FROM (" +
+            "  SELECT DISTINCT o.id, TIMESTAMPDIFF(SECOND, o.paid_at, o.packed_at) AS avgSeconds " +
+            "  FROM orders o " +
+            "  JOIN order_items i ON i.order_id = o.id " +
+            "  JOIN products p ON p.id = i.product_id " +
+            "  WHERE p.company_id = :companyId " +
+            "  AND o.paid_at IS NOT NULL AND o.packed_at IS NOT NULL " +
+            "  AND o.packed_at BETWEEN :from AND :to" +
+            ") t",
             nativeQuery = true)
     DurationStatsProjection pickDelayStats(@Param("companyId") long companyId,
                                            @Param("from") Instant from, @Param("to") Instant to);
 
     @Query(value =
-            "SELECT DATE(o.packed_at) AS day, COUNT(*) AS count, " +
-            "       AVG(TIMESTAMPDIFF(SECOND, o.paid_at, o.packed_at)) AS avgSeconds " +
-            "FROM orders o " +
-            "JOIN order_items i ON i.order_id = o.id " +
-            "JOIN products p ON p.id = i.product_id " +
-            "WHERE p.company_id = :companyId " +
-            "AND o.paid_at IS NOT NULL AND o.packed_at IS NOT NULL " +
-            "AND o.packed_at BETWEEN :from AND :to " +
-            "GROUP BY DATE(o.packed_at) " +
-            "ORDER BY DATE(o.packed_at)",
+            "SELECT day, COUNT(*) AS count, AVG(avgSeconds) AS avgSeconds FROM (" +
+            "  SELECT DISTINCT o.id, DATE(o.packed_at) AS day, " +
+            "         TIMESTAMPDIFF(SECOND, o.paid_at, o.packed_at) AS avgSeconds " +
+            "  FROM orders o " +
+            "  JOIN order_items i ON i.order_id = o.id " +
+            "  JOIN products p ON p.id = i.product_id " +
+            "  WHERE p.company_id = :companyId " +
+            "  AND o.paid_at IS NOT NULL AND o.packed_at IS NOT NULL " +
+            "  AND o.packed_at BETWEEN :from AND :to" +
+            ") t GROUP BY day ORDER BY day",
             nativeQuery = true)
     List<DailyDurationProjection> pickDelayDaily(@Param("companyId") long companyId,
                                                  @Param("from") Instant from, @Param("to") Instant to);
@@ -160,7 +162,7 @@ public interface OperationsMetricsRepository extends JpaRepository<Order, Long> 
     // 6) Cancellations
     // -------------------------------------------------------------------------
 
-    @Query("SELECT o.cancellationReason AS reason, COUNT(o) AS count " +
+    @Query("SELECT o.cancellationReason AS reason, COUNT(DISTINCT o) AS count " +
            "FROM Order o JOIN o.items i " +
            "WHERE i.product.company.id = :companyId " +
            "AND o.cancelledAt IS NOT NULL " +

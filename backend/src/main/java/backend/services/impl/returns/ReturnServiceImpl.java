@@ -346,6 +346,7 @@ public class ReturnServiceImpl implements ReturnService {
             ret.setMerchantNote(request.merchantNote());
         }
 
+        boolean anyRestockFailed = false;
         for (InspectReturnItemRequest ir : request.items()) {
             ReturnItem ri = ret.getItems().stream()
                     .filter(item -> item.getId().equals(ir.returnItemId()))
@@ -360,8 +361,14 @@ public class ReturnServiceImpl implements ReturnService {
                     ri.setStockRestored(true);
                 } catch (Exception e) {
                     log.error("Failed to restore stock for return item {} during inspection: {}", ri.getId(), e.getMessage());
+                    anyRestockFailed = true;
                 }
             }
+        }
+
+        if (anyRestockFailed) {
+            returnRepository.save(ret);
+            throw new ConflictException("Return " + returnId + " inspection failed: one or more items could not be restocked. Retry after resolving the inventory issue.");
         }
 
         ret.setStatus(ReturnStatus.COMPLETED);
@@ -774,9 +781,7 @@ public class ReturnServiceImpl implements ReturnService {
                 .allMatch(i -> i.getFulfillmentStatus() == FulfillmentStatus.RETURNED
                         || i.getFulfillmentStatus() == FulfillmentStatus.CANCELLED);
 
-        BigDecimal discount = order.getCouponDiscountAmount() != null
-                ? order.getCouponDiscountAmount() : BigDecimal.ZERO;
-        long orderTotalCents = order.getTotalAmount().subtract(discount)
+        long orderTotalCents = order.getTotalAmount()
                 .multiply(BigDecimal.valueOf(100)).longValue();
 
         boolean fullyRefunded = order.getRefundedAmountCents() >= orderTotalCents;

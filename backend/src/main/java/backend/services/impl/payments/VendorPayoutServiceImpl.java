@@ -69,7 +69,8 @@ public class VendorPayoutServiceImpl implements VendorPayoutService {
 
     @Override
     @Transactional(readOnly = true)
-    public VendorBalanceResponse getBalance(long vendorId) {
+    public VendorBalanceResponse getBalance(long vendorId, long actorUserId) {
+        assertVendorOwner(vendorId, actorUserId);
         VendorBalance balance = balanceRepository.findByVendorId(vendorId)
                 .orElseGet(() -> emptyBalance(vendorId));
         return toBalanceResponse(balance);
@@ -77,7 +78,8 @@ public class VendorPayoutServiceImpl implements VendorPayoutService {
 
     @Override
     @Transactional(readOnly = true)
-    public PagedResponse<VendorPayoutResponse> listPayouts(long vendorId, PayoutStatus status, int page, int size) {
+    public PagedResponse<VendorPayoutResponse> listPayouts(long vendorId, PayoutStatus status, int page, int size, long actorUserId) {
+        assertVendorOwner(vendorId, actorUserId);
         if (size > 50) size = 50;
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         var results = status != null
@@ -88,7 +90,8 @@ public class VendorPayoutServiceImpl implements VendorPayoutService {
 
     @Override
     @Transactional(readOnly = true)
-    public VendorPayoutResponse getPayoutDetail(long payoutId, long vendorId) {
+    public VendorPayoutResponse getPayoutDetail(long payoutId, long vendorId, long actorUserId) {
+        assertVendorOwner(vendorId, actorUserId);
         VendorPayout payout = payoutRepository.findByIdAndVendorId(payoutId, vendorId)
                 .orElseThrow(() -> new ResourceNotFoundException("Payout not found"));
         return toPayoutResponse(payout, true);
@@ -311,6 +314,12 @@ public class VendorPayoutServiceImpl implements VendorPayoutService {
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
+
+    private void assertVendorOwner(long vendorId, long userId) {
+        marketplaceVendorRepository.findById(vendorId)
+                .filter(v -> v.getVendorCompany().getOwner().getId() == userId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this vendor account"));
+    }
 
     private void assertOperator(long marketplaceId, long userId) {
         marketplaceProfileRepository.findByCompanyId(marketplaceId)

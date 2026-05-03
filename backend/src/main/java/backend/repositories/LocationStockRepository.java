@@ -102,8 +102,8 @@ public interface LocationStockRepository extends JpaRepository<LocationStock, Lo
             @Param("variantRef") long variantRef,
             Pageable pageable);
 
-    /** Used to guard against deleting a location that still has stock records. */
-    boolean existsByLocationId(long locationId);
+    /** Guards deletion: true only when at least one record still has stock above zero. */
+    boolean existsByLocationIdAndStockGreaterThan(long locationId, int stock);
 
     /**
      * Atomically decrements stock. Returns 1 on success (stock >= qty), 0 on failure.

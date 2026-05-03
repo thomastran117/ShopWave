@@ -301,13 +301,15 @@ public class VendorOnboardingServiceImpl implements VendorOnboardingService {
 
     @Override
     @Transactional(readOnly = true)
-    public MarketplaceVendorResponse getVendor(long marketplaceId, long vendorId) {
+    public MarketplaceVendorResponse getVendor(long marketplaceId, long vendorId, long operatorUserId) {
+        resolveMarketplaceAsOperator(marketplaceId, operatorUserId);
         return toResponse(resolveVendor(marketplaceId, vendorId));
     }
 
     @Override
     @Transactional(readOnly = true)
-    public PagedResponse<MarketplaceVendorResponse> listVendors(long marketplaceId, VendorStatus status, int page, int size) {
+    public PagedResponse<MarketplaceVendorResponse> listVendors(long marketplaceId, VendorStatus status, int page, int size, long operatorUserId) {
+        resolveMarketplaceAsOperator(marketplaceId, operatorUserId);
         if (size > 50) size = 50;
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         Page<MarketplaceVendor> vendors = status != null

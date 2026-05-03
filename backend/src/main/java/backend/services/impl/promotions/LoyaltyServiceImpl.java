@@ -291,7 +291,7 @@ public class LoyaltyServiceImpl implements LoyaltyService {
     public LoyaltyTransactionResponse adjustPoints(long accountId, long companyId, long ownerId, AdjustPointsRequest request) {
         assertOwner(companyId, ownerId);
 
-        LoyaltyAccount account = accountRepository.findById(accountId)
+        LoyaltyAccount account = accountRepository.findByIdAndCompanyId(accountId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Loyalty account not found"));
 
         int delta = request.getPointsDelta();

@@ -96,4 +96,11 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
            "AND i.fulfillmentStatus = backend.models.enums.FulfillmentStatus.BACKORDERED")
     long countOrdersWithBackorderedItemsInWindow(@Param("companyId") long companyId,
                                                  @Param("from") Instant from, @Param("to") Instant to);
+
+    @Query("SELECT COUNT(o) > 0 FROM Order o JOIN o.items i " +
+           "WHERE o.user.id = :userId " +
+           "AND i.product.id = :productId " +
+           "AND o.status IN (backend.models.enums.OrderStatus.SHIPPED, backend.models.enums.OrderStatus.DELIVERED)")
+    boolean existsDeliveredOrShippedOrderForProduct(@Param("userId") long userId,
+                                                    @Param("productId") long productId);
 }

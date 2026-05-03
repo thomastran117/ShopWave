@@ -39,6 +39,7 @@ import backend.exceptions.http.BadRequestException;
 import backend.exceptions.http.ConflictException;
 import backend.exceptions.http.ForbiddenException;
 import backend.exceptions.http.ResourceNotFoundException;
+import backend.exceptions.http.ServiceUnavaliableException;
 import backend.models.core.Company;
 import backend.models.core.Product;
 import backend.models.core.ProductAttribute;
@@ -752,10 +753,17 @@ public class ProductServiceImpl implements ProductService {
             return new PagedResponse<>(new PageImpl<>(content, pageable, hits.getTotalHits()));
 
         } catch (Exception e) {
-            log.warn("[CATALOG SEARCH] Elasticsearch unavailable, falling back to database: {}", e.getMessage());
+            log.warn("[CATALOG SEARCH] Elasticsearch unavailable: {}", e.getMessage());
+            boolean hasFilters = (q != null && !q.isBlank())
+                    || category != null || brand != null || vendorId != null
+                    || minPrice != null || maxPrice != null || featured != null;
+            if (hasFilters) {
+                throw new ServiceUnavaliableException("Search is temporarily unavailable. Please try again shortly.");
+            }
+            log.warn("[CATALOG SEARCH] Falling back to unfiltered database listing");
         }
 
-        // --- JPA fallback ---
+        // --- JPA fallback (unfiltered, no active search filters) ---
         List<Product> products = productRepository.findMarketplaceListed(marketplaceId);
         Map<Long, MarketplaceVendor> vendorMap = buildVendorMap(marketplaceId, products);
         List<MarketplaceCatalogProductResponse> all = products.stream()

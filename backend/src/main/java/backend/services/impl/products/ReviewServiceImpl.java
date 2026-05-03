@@ -15,6 +15,8 @@ import backend.models.core.Product;
 import backend.models.core.ProductReview;
 import backend.models.core.User;
 import backend.models.enums.ReviewStatus;
+import backend.exceptions.http.BadRequestException;
+import backend.repositories.OrderRepository;
 import backend.repositories.ProductRepository;
 import backend.repositories.ProductReviewRepository;
 import backend.repositories.UserRepository;
@@ -34,16 +36,19 @@ public class ReviewServiceImpl implements ReviewService {
     private final ProductReviewRepository reviewRepository;
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
+    private final OrderRepository orderRepository;
     private final ActivityEventPublisher activityEventPublisher;
 
     public ReviewServiceImpl(
             ProductReviewRepository reviewRepository,
             ProductRepository productRepository,
             UserRepository userRepository,
+            OrderRepository orderRepository,
             ActivityEventPublisher activityEventPublisher) {
         this.reviewRepository = reviewRepository;
         this.productRepository = productRepository;
         this.userRepository = userRepository;
+        this.orderRepository = orderRepository;
         this.activityEventPublisher = activityEventPublisher;
     }
 
@@ -76,6 +81,10 @@ public class ReviewServiceImpl implements ReviewService {
         Product product = resolveProduct(companyId, productId);
         User reviewer = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
+
+        if (!orderRepository.existsDeliveredOrShippedOrderForProduct(userId, productId)) {
+            throw new BadRequestException("You must have a delivered or shipped order for this product to leave a review");
+        }
 
         if (reviewRepository.existsByProductIdAndReviewerId(productId, userId)) {
             throw new ConflictException("You have already reviewed this product. Please update your existing review instead.");
