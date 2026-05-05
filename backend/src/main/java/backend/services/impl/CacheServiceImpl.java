@@ -94,12 +94,7 @@ public class CacheServiceImpl implements CacheService {
 
     @Override
     public String getAndDelete(String key) {
-        String k = key(key);
-        String value = redisTemplate.opsForValue().get(k);
-        if (value != null) {
-            redisTemplate.delete(k);
-        }
-        return value;
+        return redisTemplate.opsForValue().getAndDelete(key(key));
     }
 
     @Override

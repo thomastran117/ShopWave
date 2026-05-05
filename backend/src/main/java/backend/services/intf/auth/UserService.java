@@ -9,7 +9,7 @@ public interface UserService {
 
     void activateUser(long userId);
 
-    boolean changePassword(long id, String password);
+    boolean changePassword(long id, String currentPassword, String newPassword);
 
     boolean delete(long id);
 

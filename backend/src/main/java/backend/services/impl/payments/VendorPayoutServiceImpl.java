@@ -102,7 +102,7 @@ public class VendorPayoutServiceImpl implements VendorPayoutService {
     public VendorPayoutResponse triggerManualPayout(long vendorId, long marketplaceId, long operatorUserId) {
         assertOperator(marketplaceId, operatorUserId);
 
-        VendorBalance balance = balanceRepository.findByVendorId(vendorId)
+        VendorBalance balance = balanceRepository.findByVendorIdForUpdate(vendorId)
                 .orElseThrow(() -> new BadRequestException("Vendor has no balance"));
 
         if (balance.getAvailableCents() <= 0) {
@@ -111,6 +111,10 @@ public class VendorPayoutServiceImpl implements VendorPayoutService {
 
         var vendor = marketplaceVendorRepository.findById(vendorId)
                 .orElseThrow(() -> new ResourceNotFoundException("Vendor not found"));
+
+        if (vendor.getMarketplace().getId() != marketplaceId) {
+            throw new ForbiddenException("Vendor does not belong to this marketplace");
+        }
 
         if (!vendor.isChargesEnabled() || !vendor.isPayoutsEnabled()) {
             throw new BadRequestException("Vendor's Stripe Connect account is not fully enabled for payouts");

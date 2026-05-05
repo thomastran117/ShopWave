@@ -1,7 +1,9 @@
 package backend.repositories;
 
 import backend.models.core.VendorBalance;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -13,6 +15,10 @@ import java.util.Optional;
 public interface VendorBalanceRepository extends JpaRepository<VendorBalance, Long> {
 
     Optional<VendorBalance> findByVendorId(long vendorId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT b FROM VendorBalance b WHERE b.vendorId = :vendorId")
+    Optional<VendorBalance> findByVendorIdForUpdate(@Param("vendorId") long vendorId);
 
     /**
      * Upserts the pending balance for a vendor. Creates the row if it doesn't exist,

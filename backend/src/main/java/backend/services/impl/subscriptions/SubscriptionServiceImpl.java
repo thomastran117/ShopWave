@@ -384,7 +384,7 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     @Override
     @Transactional
     public SubscriptionResponse cancel(long userId, long subscriptionId, boolean atPeriodEnd) {
-        Subscription sub = requireOwnedSubscription(userId, subscriptionId);
+        Subscription sub = requireOwnedSubscriptionForUpdate(userId, subscriptionId);
         if (sub.getStatus() == SubscriptionStatus.CANCELLED) {
             throw new ConflictException("Subscription is already cancelled");
         }
@@ -408,7 +408,7 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     @Override
     @Transactional
     public void handleSubscriptionUpdated(String stripeSubscriptionId) {
-        Subscription sub = subscriptionRepository.findByStripeSubscriptionId(stripeSubscriptionId).orElse(null);
+        Subscription sub = subscriptionRepository.findByStripeSubscriptionIdForUpdate(stripeSubscriptionId).orElse(null);
         if (sub == null) return;
 
         SubscriptionResult fresh = paymentService.retrieveSubscription(stripeSubscriptionId);
@@ -533,6 +533,11 @@ public class SubscriptionServiceImpl implements SubscriptionService {
 
     private Subscription requireOwnedSubscription(long userId, long subscriptionId) {
         return subscriptionRepository.findByIdAndUserId(subscriptionId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Subscription not found: " + subscriptionId));
+    }
+
+    private Subscription requireOwnedSubscriptionForUpdate(long userId, long subscriptionId) {
+        return subscriptionRepository.findByIdAndUserIdForUpdate(subscriptionId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Subscription not found: " + subscriptionId));
     }
 

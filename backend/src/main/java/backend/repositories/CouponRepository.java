@@ -9,6 +9,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import backend.models.core.Coupon;
+import backend.models.enums.DiscountStatus;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -28,13 +29,21 @@ public interface CouponRepository extends JpaRepository<Coupon, Long> {
     Page<Coupon> findAllByCompanyId(long companyId, Pageable pageable);
 
     /**
-     * Atomically increments usedCount only when the coupon is still under its limit.
-     * Returns 1 on success, 0 if maxUses has been reached (race condition guard).
+     * Atomically increments usedCount only when the coupon is still active, not expired,
+     * and under its usage limit. Returns 1 on success, 0 if any guard fails.
      * A return value of 0 should cause the calling transaction to throw ConflictException.
      */
     @Modifying
-    @Query("UPDATE Coupon c SET c.usedCount = c.usedCount + 1 WHERE c.id = :id AND (c.maxUses IS NULL OR c.usedCount < c.maxUses)")
-    int tryIncrementUsedCount(@Param("id") long id);
+    @Query("""
+            UPDATE Coupon c SET c.usedCount = c.usedCount + 1
+            WHERE c.id = :id
+              AND c.status = :activeStatus
+              AND (c.startDate IS NULL OR c.startDate <= :now)
+              AND (c.endDate IS NULL OR c.endDate > :now)
+              AND (c.maxUses IS NULL OR c.usedCount < c.maxUses)
+            """)
+    int tryIncrementUsedCount(@Param("id") long id, @Param("now") Instant now,
+                              @Param("activeStatus") DiscountStatus activeStatus);
 
     /**
      * Bulk-deletes all coupons whose endDate has passed.

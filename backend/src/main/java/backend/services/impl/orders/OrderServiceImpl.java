@@ -714,9 +714,9 @@ public class OrderServiceImpl implements OrderService {
 
             // Atomically increment coupon usedCount and record redemption
             if (appliedCoupon != null) {
-                int incremented = couponRepository.tryIncrementUsedCount(appliedCoupon.getId());
+                int incremented = couponRepository.tryIncrementUsedCount(appliedCoupon.getId(), Instant.now(), DiscountStatus.ACTIVE);
                 if (incremented == 0) {
-                    throw new ConflictException("Coupon '" + appliedCouponCode + "' has reached its usage limit. Please try another.");
+                    throw new ConflictException("Coupon '" + appliedCouponCode + "' is no longer valid or has reached its usage limit. Please try another.");
                 }
                 CouponRedemption redemption = new CouponRedemption();
                 redemption.setCoupon(appliedCoupon);

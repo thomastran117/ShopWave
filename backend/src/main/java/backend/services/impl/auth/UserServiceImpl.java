@@ -79,10 +79,13 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public boolean changePassword(long id, String password) {
+    public boolean changePassword(long id, String currentPassword, String newPassword) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + id));
-        user.setPassword(passwordEncoder.encode(password));
+        if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+            throw new ForbiddenException("Current password is incorrect");
+        }
+        user.setPassword(passwordEncoder.encode(newPassword));
         userRepository.save(user);
         return true;
     }

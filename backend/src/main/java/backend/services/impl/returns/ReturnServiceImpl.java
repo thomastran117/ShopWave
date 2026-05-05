@@ -405,7 +405,7 @@ public class ReturnServiceImpl implements ReturnService {
         Company company = companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
 
-        Order order = orderRepository.findByIdAndProductCompanyId(orderId, companyId)
+        Order order = orderRepository.findByIdAndProductCompanyIdForUpdate(orderId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
 
         if (order.getStatus() != OrderStatus.DELIVERED && order.getStatus() != OrderStatus.SHIPPED) {
@@ -427,6 +427,17 @@ public class ReturnServiceImpl implements ReturnService {
 
         List<ReturnItem> returnItems = buildReturnItems(ret, request.items(), order, companyId);
         ret.setItems(returnItems);
+
+        RiskAssessmentResult riskResult = assessReturn(ret);
+        if (riskProperties.getMode() == RiskMode.ENFORCE
+                && (riskResult.action() == RiskAction.BLOCK || riskResult.action() == RiskAction.VERIFY)) {
+            String topReason = riskResult.signals().stream()
+                    .filter(s -> s.scoreContribution() > 0)
+                    .findFirst()
+                    .map(RiskSignal::reason)
+                    .orElse("Risk engine flagged this return");
+            throw new ConflictException("Return rejected by risk engine: " + topReason);
+        }
 
         processReturnItems(ret, request.restockItems());
         issueRefundAndFinalize(ret, request.refundAmountOverrideCents());

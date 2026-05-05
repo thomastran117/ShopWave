@@ -32,6 +32,7 @@ import com.stripe.param.PaymentMethodListParams;
 import com.stripe.param.PriceCreateParams;
 import com.stripe.param.RefundCreateParams;
 import com.stripe.param.SetupIntentCreateParams;
+import com.stripe.net.RequestOptions;
 import com.stripe.param.SubscriptionCancelParams;
 import com.stripe.param.SubscriptionCreateParams;
 import com.stripe.param.SubscriptionUpdateParams;
@@ -126,7 +127,12 @@ public class StripePaymentServiceImpl implements PaymentService {
                 params.setAmount(amountInCents);
             }
 
-            Refund refund = Refund.create(params.build());
+            String idempotencyKey = "refund:" + paymentIntentId + ":" + (amountInCents != null ? amountInCents : "full");
+            RequestOptions opts = RequestOptions.builder()
+                    .setIdempotencyKey(idempotencyKey)
+                    .build();
+
+            Refund refund = Refund.create(params.build(), opts);
             return new RefundResult(
                     refund.getId(),
                     refund.getAmount(),
