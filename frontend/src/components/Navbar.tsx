@@ -4,6 +4,7 @@ import { useNavigate, NavLink } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
 import type { RootState, AppDispatch } from "../stores";
 import { clearCredentials } from "../stores/authSlice";
+import api from "../api";
 import "../styles/navbar.css";
 
 export default function Navbar() {
@@ -55,13 +56,14 @@ export default function Navbar() {
     setUserTimeoutId(timeout);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setUserDropdownOpen(false);
-
+    try {
+      await api.post("/auth/logout");
+    } catch {
+      // Ignore errors — token may already be expired. Always clear local state.
+    }
     dispatch(clearCredentials());
-
-    // await api.post("/auth/logout");
-
     navigate("/auth");
   };
 

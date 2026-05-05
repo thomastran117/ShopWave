@@ -16,4 +16,5 @@ public interface CompanyRepository extends JpaRepository<Company, Long>, JpaSpec
     Optional<Company> findByIdAndOwnerId(long id, long ownerId);
     List<Company> findAllByIdInAndOwnerId(Collection<Long> ids, long ownerId);
     boolean existsByNameAndOwnerId(String name, long ownerId);
+    Optional<Company> findByNameAndOwnerId(String name, long ownerId);
 }

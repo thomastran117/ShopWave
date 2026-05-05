@@ -1,0 +1,39 @@
+package backend.models.core;
+
+import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
+
+import java.time.Instant;
+
+@Entity
+@Getter
+@Setter
+@NoArgsConstructor
+@Table(name = "user_preference")
+@EntityListeners(AuditingEntityListener.class)
+public class UserPreference {
+
+    @Id
+    @Column(name = "user_id")
+    private Long userId;
+
+    @Column(nullable = false)
+    private boolean trackingOptOut = false;
+
+    @CreatedDate
+    @Column(nullable = false, updatable = false)
+    private Instant createdAt;
+
+    @LastModifiedDate
+    @Column(nullable = false)
+    private Instant updatedAt;
+
+    public UserPreference(Long userId) {
+        this.userId = userId;
+    }
+}

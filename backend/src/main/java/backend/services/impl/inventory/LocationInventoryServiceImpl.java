@@ -1,0 +1,438 @@
+package backend.services.impl.inventory;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import backend.dtos.requests.inventory.AdjustStockRequest;
+import backend.dtos.requests.inventory.CreateLocationRequest;
+import backend.dtos.requests.inventory.SetLocationStockRequest;
+import backend.dtos.requests.inventory.UpdateLocationRequest;
+import backend.dtos.responses.inventory.LocationResponse;
+import backend.dtos.responses.inventory.LocationStockResponse;
+import backend.exceptions.http.BadRequestException;
+import backend.exceptions.http.ConflictException;
+import backend.exceptions.http.ForbiddenException;
+import backend.exceptions.http.ResourceNotFoundException;
+import backend.models.core.Company;
+import backend.models.core.InventoryAdjustment;
+import backend.models.core.InventoryLocation;
+import backend.models.core.LocationStock;
+import backend.models.core.Product;
+import backend.models.core.ProductVariant;
+import backend.models.enums.AdjustmentReason;
+import backend.repositories.CompanyRepository;
+import backend.repositories.InventoryAdjustmentRepository;
+import backend.repositories.InventoryLocationRepository;
+import backend.repositories.LocationStockRepository;
+import backend.repositories.ProductRepository;
+import backend.repositories.ProductVariantRepository;
+import backend.repositories.UserRepository;
+import backend.services.intf.CacheService;
+import backend.services.intf.inventory.LocationInventoryService;
+
+import java.util.List;
+import java.util.UUID;
+
+@Service
+public class LocationInventoryServiceImpl implements LocationInventoryService {
+
+    private static final Logger log = LoggerFactory.getLogger(LocationInventoryServiceImpl.class);
+
+    private static final String LOC_STOCK_LOCK_PREFIX = "lock:locstock:";
+    private static final long LOCK_TTL_SECONDS = 10;
+    private static final int LOCK_RETRY_ATTEMPTS = 5;
+    private static final long LOCK_RETRY_DELAY_MS = 100;
+
+    private final InventoryLocationRepository locationRepository;
+    private final LocationStockRepository locationStockRepository;
+    private final CompanyRepository companyRepository;
+    private final ProductRepository productRepository;
+    private final ProductVariantRepository variantRepository;
+    private final InventoryAdjustmentRepository adjustmentRepository;
+    private final UserRepository userRepository;
+    private final CacheService cacheService;
+    private final StockAlertService stockAlertService;
+
+    public LocationInventoryServiceImpl(
+            InventoryLocationRepository locationRepository,
+            LocationStockRepository locationStockRepository,
+            CompanyRepository companyRepository,
+            ProductRepository productRepository,
+            ProductVariantRepository variantRepository,
+            InventoryAdjustmentRepository adjustmentRepository,
+            UserRepository userRepository,
+            CacheService cacheService,
+            StockAlertService stockAlertService) {
+        this.locationRepository = locationRepository;
+        this.locationStockRepository = locationStockRepository;
+        this.companyRepository = companyRepository;
+        this.productRepository = productRepository;
+        this.variantRepository = variantRepository;
+        this.adjustmentRepository = adjustmentRepository;
+        this.userRepository = userRepository;
+        this.cacheService = cacheService;
+        this.stockAlertService = stockAlertService;
+    }
+
+    // --- Location CRUD ---
+
+    @Override
+    public List<LocationResponse> getLocations(long companyId, long ownerId) {
+        assertCompanyOwnership(companyId, ownerId);
+        return locationRepository.findAllByCompanyIdOrderByDisplayOrderAscNameAsc(companyId)
+                .stream()
+                .map(this::toLocationResponse)
+                .toList();
+    }
+
+    @Override
+    public LocationResponse getLocation(long companyId, long locationId, long ownerId) {
+        assertCompanyOwnership(companyId, ownerId);
+        InventoryLocation location = locationRepository.findByIdAndCompanyId(locationId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Location not found with id: " + locationId));
+        return toLocationResponse(location);
+    }
+
+    @Override
+    @Transactional
+    public LocationResponse createLocation(long companyId, long ownerId, CreateLocationRequest request) {
+        Company company = companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        if (locationRepository.existsByCodeAndCompanyId(request.getCode(), companyId)) {
+            throw new ConflictException("A location with code '" + request.getCode() + "' already exists in this company");
+        }
+
+        InventoryLocation location = new InventoryLocation();
+        location.setCompany(company);
+        location.setName(request.getName());
+        location.setCode(request.getCode().toUpperCase());
+        location.setAddress(request.getAddress());
+        location.setCity(request.getCity());
+        location.setCountry(request.getCountry());
+        location.setDisplayOrder(request.getDisplayOrder() != null ? request.getDisplayOrder() : 0);
+        location.setLatitude(request.getLatitude());
+        location.setLongitude(request.getLongitude());
+        location.setFulfillmentCost(request.getFulfillmentCost());
+
+        return toLocationResponse(locationRepository.save(location));
+    }
+
+    @Override
+    @Transactional
+    public LocationResponse updateLocation(long companyId, long locationId, long ownerId, UpdateLocationRequest request) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        InventoryLocation location = locationRepository.findByIdAndCompanyId(locationId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Location not found with id: " + locationId));
+
+        if (request.getCode() != null && !request.getCode().equalsIgnoreCase(location.getCode())) {
+            if (locationRepository.existsByCodeAndCompanyIdAndIdNot(request.getCode(), companyId, locationId)) {
+                throw new ConflictException("A location with code '" + request.getCode() + "' already exists in this company");
+            }
+            location.setCode(request.getCode().toUpperCase());
+        }
+
+        if (request.getName() != null) location.setName(request.getName());
+        if (request.getAddress() != null) location.setAddress(request.getAddress());
+        if (request.getCity() != null) location.setCity(request.getCity());
+        if (request.getCountry() != null) location.setCountry(request.getCountry());
+        if (request.getActive() != null) location.setActive(request.getActive());
+        if (request.getDisplayOrder() != null) location.setDisplayOrder(request.getDisplayOrder());
+        if (request.getLatitude() != null) location.setLatitude(request.getLatitude());
+        if (request.getLongitude() != null) location.setLongitude(request.getLongitude());
+        if (request.getFulfillmentCost() != null) location.setFulfillmentCost(request.getFulfillmentCost());
+
+        return toLocationResponse(locationRepository.save(location));
+    }
+
+    @Override
+    @Transactional
+    public void deleteLocation(long companyId, long locationId, long ownerId) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+
+        InventoryLocation location = locationRepository.findByIdAndCompanyId(locationId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Location not found with id: " + locationId));
+
+        if (locationStockRepository.existsByLocationIdAndStockGreaterThan(locationId, 0)) {
+            throw new ConflictException("Cannot delete location with remaining stock — zero out all stock first");
+        }
+
+        locationRepository.delete(location);
+    }
+
+    // --- Stock queries ---
+
+    @Override
+    public List<LocationStockResponse> getLocationStock(long companyId, long locationId, long ownerId) {
+        assertCompanyOwnership(companyId, ownerId);
+        locationRepository.findByIdAndCompanyId(locationId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Location not found with id: " + locationId));
+
+        return locationStockRepository.findAllByLocationId(locationId)
+                .stream()
+                .map(this::toLocationStockResponse)
+                .toList();
+    }
+
+    @Override
+    public List<LocationStockResponse> getProductLocationStocks(long companyId, long productId, long ownerId) {
+        assertCompanyOwnership(companyId, ownerId);
+        productRepository.findByIdAndCompanyId(productId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
+
+        return locationStockRepository.findAllByProductIdAndCompanyId(productId, companyId)
+                .stream()
+                .map(this::toLocationStockResponse)
+                .toList();
+    }
+
+    // --- Stock management ---
+
+    @Override
+    @Transactional
+    public LocationStockResponse setLocationStock(long companyId, long locationId, long productId,
+                                                   long ownerId, SetLocationStockRequest request,
+                                                   Long variantId) {
+        assertCompanyOwnership(companyId, ownerId);
+
+        InventoryLocation location = locationRepository.findByIdAndCompanyId(locationId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Location not found with id: " + locationId));
+
+        Product product = productRepository.findByIdAndCompanyId(productId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
+
+        long variantRef = 0L;
+        ProductVariant variant = null;
+        if (variantId != null) {
+            variant = variantRepository.findByIdAndProductId(variantId, productId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Variant not found with id: " + variantId));
+            variantRef = variantId;
+        }
+
+        String lockKey = LOC_STOCK_LOCK_PREFIX + locationId + ":" + variantRef;
+        String lockToken = UUID.randomUUID().toString();
+        boolean lockAcquired = false;
+
+        try {
+            for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
+                if (cacheService.tryLock(lockKey, lockToken, LOCK_TTL_SECONDS)) {
+                    lockAcquired = true;
+                    break;
+                }
+                try {
+                    Thread.sleep(LOCK_RETRY_DELAY_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new ConflictException("Stock update interrupted, please try again");
+                }
+            }
+
+            if (!lockAcquired) {
+                throw new ConflictException("Location stock is currently being updated, please try again shortly");
+            }
+
+            final long finalVariantRef = variantRef;
+            LocationStock locationStock = locationStockRepository
+                    .findByLocationIdAndProductIdAndVariantRef(locationId, productId, variantRef)
+                    .orElse(null);
+
+            int newStock = request.getStock();
+            int previousStock = locationStock != null ? locationStock.getStock() : 0;
+            int delta = newStock - previousStock;
+
+            if (locationStock == null) {
+                locationStock = new LocationStock();
+                locationStock.setLocation(location);
+                locationStock.setProduct(product);
+                locationStock.setVariant(variant);
+                locationStock.setVariantRef(finalVariantRef);
+                locationStock.setStock(newStock);
+                locationStock.setLowStockThreshold(request.getLowStockThreshold());
+                locationStock = locationStockRepository.save(locationStock);
+            } else {
+                locationStockRepository.setStock(locationStock.getId(), newStock, request.getLowStockThreshold());
+                locationStock.setStock(newStock);
+                locationStock.setLowStockThreshold(request.getLowStockThreshold());
+            }
+
+            if (delta != 0) {
+                InventoryAdjustment adjustment = new InventoryAdjustment();
+                adjustment.setProduct(productRepository.getReferenceById(productId));
+                if (variant != null) adjustment.setVariant(variantRepository.getReferenceById(variantId));
+                adjustment.setAdjustedBy(userRepository.getReferenceById(ownerId));
+                adjustment.setDelta(delta);
+                adjustment.setPreviousStock(previousStock);
+                adjustment.setNewStock(newStock);
+                adjustment.setReason(AdjustmentReason.MANUAL_ADJUSTMENT);
+                adjustment.setNote("Location stock set for location: " + location.getName());
+                adjustmentRepository.save(adjustment);
+
+                if (delta < 0) {
+                    stockAlertService.checkAndAlertLocation(
+                            locationStock.getId(), location.getName(),
+                            productId, product.getName(),
+                            variantId, newStock, locationStock.getLowStockThreshold());
+                }
+            }
+
+            return toLocationStockResponse(locationStock);
+
+        } finally {
+            if (lockAcquired) {
+                try {
+                    cacheService.unlock(lockKey, lockToken);
+                } catch (Exception e) {
+                    log.error("Failed to release location stock lock {}: {}", lockKey, e.getMessage());
+                }
+            }
+        }
+    }
+
+    @Override
+    @Transactional
+    public LocationStockResponse adjustLocationStock(long companyId, long locationId, long productId,
+                                                      long ownerId, AdjustStockRequest request,
+                                                      Long variantId) {
+        assertCompanyOwnership(companyId, ownerId);
+
+        InventoryLocation location = locationRepository.findByIdAndCompanyId(locationId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Location not found with id: " + locationId));
+
+        Product product = productRepository.findByIdAndCompanyId(productId, companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
+
+        long variantRef = 0L;
+        ProductVariant variant = null;
+        if (variantId != null) {
+            variant = variantRepository.findByIdAndProductId(variantId, productId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Variant not found with id: " + variantId));
+            variantRef = variantId;
+        }
+
+        LocationStock locationStock = locationStockRepository
+                .findByLocationIdAndProductIdAndVariantRef(locationId, productId, variantRef)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "No stock record found at this location for the specified product/variant"));
+
+        String lockKey = LOC_STOCK_LOCK_PREFIX + locationId + ":" + variantRef;
+        String lockToken = UUID.randomUUID().toString();
+        boolean lockAcquired = false;
+
+        try {
+            for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
+                if (cacheService.tryLock(lockKey, lockToken, LOCK_TTL_SECONDS)) {
+                    lockAcquired = true;
+                    break;
+                }
+                try {
+                    Thread.sleep(LOCK_RETRY_DELAY_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new ConflictException("Stock adjustment interrupted, please try again");
+                }
+            }
+
+            if (!lockAcquired) {
+                throw new ConflictException("Location stock is currently being updated, please try again shortly");
+            }
+
+            int previousStock = locationStock.getStock();
+            int delta = request.getDelta();
+
+            int rows = locationStockRepository.adjustStock(locationStock.getId(), delta);
+            if (rows == 0) {
+                throw new BadRequestException(
+                        "Adjustment would result in negative location stock. Current: " + previousStock + ", delta: " + delta);
+            }
+
+            InventoryAdjustment adjustment = new InventoryAdjustment();
+            adjustment.setProduct(productRepository.getReferenceById(productId));
+            if (variant != null) adjustment.setVariant(variantRepository.getReferenceById(variantId));
+            adjustment.setAdjustedBy(userRepository.getReferenceById(ownerId));
+            adjustment.setDelta(delta);
+            adjustment.setPreviousStock(previousStock);
+            adjustment.setNewStock(previousStock + delta);
+            adjustment.setReason(request.getReason());
+            adjustment.setNote(request.getNote());
+            adjustmentRepository.save(adjustment);
+
+            if (delta < 0) {
+                stockAlertService.checkAndAlertLocation(
+                        locationStock.getId(), location.getName(),
+                        productId, product.getName(),
+                        variantId, previousStock + delta, locationStock.getLowStockThreshold());
+            }
+
+            locationStock.setStock(previousStock + delta);
+            return toLocationStockResponse(locationStock);
+
+        } finally {
+            if (lockAcquired) {
+                try {
+                    cacheService.unlock(lockKey, lockToken);
+                } catch (Exception e) {
+                    log.error("Failed to release location stock lock {}: {}", lockKey, e.getMessage());
+                }
+            }
+        }
+    }
+
+    // --- Helpers ---
+
+    private void assertCompanyOwnership(long companyId, long ownerId) {
+        companyRepository.findByIdAndOwnerId(companyId, ownerId)
+                .orElseThrow(() -> new ForbiddenException("You do not own this company"));
+    }
+
+    private LocationResponse toLocationResponse(InventoryLocation loc) {
+        return new LocationResponse(
+                loc.getId(),
+                loc.getCompany().getId(),
+                loc.getName(),
+                loc.getCode(),
+                loc.getAddress(),
+                loc.getCity(),
+                loc.getCountry(),
+                loc.isActive(),
+                loc.getDisplayOrder(),
+                loc.getLatitude(),
+                loc.getLongitude(),
+                loc.getFulfillmentCost(),
+                loc.getCreatedAt(),
+                loc.getUpdatedAt()
+        );
+    }
+
+    private LocationStockResponse toLocationStockResponse(LocationStock ls) {
+        int stock = ls.getStock();
+        Integer threshold = ls.getLowStockThreshold();
+
+        String stockStatus;
+        if (stock == 0) {
+            stockStatus = "OUT_OF_STOCK";
+        } else if (threshold != null && stock <= threshold) {
+            stockStatus = "LOW_STOCK";
+        } else {
+            stockStatus = "IN_STOCK";
+        }
+
+        Long variantId = ls.isProductLevel() ? null : ls.getVariantRef();
+
+        return new LocationStockResponse(
+                ls.getId(),
+                ls.getLocation().getId(),
+                ls.getLocation().getName(),
+                ls.getProduct().getId(),
+                variantId,
+                stock,
+                threshold,
+                stockStatus,
+                ls.getUpdatedAt()
+        );
+    }
+}

@@ -1,6 +1,9 @@
 package backend.repositories;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import backend.models.core.OrderCompensation;
@@ -13,4 +16,12 @@ public interface OrderCompensationRepository extends JpaRepository<OrderCompensa
     List<OrderCompensation> findAllByOrderId(long orderId);
     List<OrderCompensation> findAllByStatus(CompensationStatus status);
     List<OrderCompensation> findAllByStatusAndAttemptsLessThan(CompensationStatus status, int maxAttempts);
+
+    /**
+     * Atomically claims a failed compensation row for retry. Returns 1 if this caller
+     * is the first to claim it, 0 if another scheduler worker already did.
+     */
+    @Modifying
+    @Query("UPDATE OrderCompensation c SET c.status = 'CLAIMED' WHERE c.id = :id AND c.status = backend.models.enums.CompensationStatus.FAILED")
+    int claimForRetry(@Param("id") long id);
 }

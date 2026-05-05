@@ -2,6 +2,7 @@ package backend.configurations.application;
 
 import backend.dtos.responses.general.ErrorResponse;
 import backend.exceptions.http.AppHttpException;
+import backend.exceptions.http.RiskStepUpRequiredException;
 import backend.security.oauth.InvalidOAuthTokenException;
 import backend.security.oauth.OAuthProviderTransientException;
 import backend.security.oauth.OAuthVerificationError;
@@ -130,6 +131,22 @@ public class GlobalExceptionHandler {
                 "An unexpected error occurred."
         );
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
+    }
+
+    @ExceptionHandler(RiskStepUpRequiredException.class)
+    public ResponseEntity<ErrorResponse> handleRiskStepUp(RiskStepUpRequiredException ex) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        if (ex.getOrderId() != null) {
+            details.put("orderId", ex.getOrderId());
+        }
+        details.put("verificationChannel", ex.getVerificationChannel());
+        ErrorResponse body = new ErrorResponse(
+                ex.getStatus().value(),
+                ex.getMessage(),
+                ex.getDetail(),
+                details
+        );
+        return ResponseEntity.status(ex.getStatus()).body(body);
     }
 
     @ExceptionHandler(AppHttpException.class)

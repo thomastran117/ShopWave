@@ -13,6 +13,9 @@ import backend.models.enums.UserRole;
 import backend.models.enums.UserStatus;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 @Getter
@@ -69,4 +72,31 @@ public class User {
 
     @Column(nullable = true, length = 255)
     private String address;
+
+    /**
+     * Stripe Customer ID linked to this user. Provisioned lazily the first time
+     * the user saves a payment method or creates a subscription. Null until then.
+     */
+    @Column(nullable = true, length = 100, unique = true)
+    private String stripeCustomerId;
+
+    /** Date of birth. Used by the LoyaltyScheduler for birthday rewards. Null if not provided. */
+    @Column(nullable = true, name = "birth_date")
+    private LocalDate birthDate;
+
+    /**
+     * Customer segments this user belongs to (VIP, WHOLESALE, …).
+     * Used by PricingEngine to gate segment-targeted promotion rules.
+     * Assigned manually by platform admins.
+     */
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+            name = "user_segments",
+            joinColumns = @JoinColumn(name = "user_id"),
+            inverseJoinColumns = @JoinColumn(name = "segment_id"),
+            uniqueConstraints = @UniqueConstraint(
+                    name = "uk_user_segment",
+                    columnNames = {"user_id", "segment_id"})
+    )
+    private Set<CustomerSegment> segments = new HashSet<>();
 }

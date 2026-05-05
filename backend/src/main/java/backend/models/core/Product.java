@@ -9,10 +9,14 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
+import org.hibernate.annotations.BatchSize;
+
 import backend.models.enums.ProductStatus;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Getter
@@ -21,7 +25,8 @@ import java.time.Instant;
 @AllArgsConstructor
 @Table(name = "products", indexes = {
         @Index(name = "idx_product_company", columnList = "company_id"),
-        @Index(name = "idx_product_sku_company", columnList = "sku, company_id", unique = true)
+        @Index(name = "idx_product_sku_company", columnList = "sku, company_id", unique = true),
+        @Index(name = "idx_product_marketplace", columnList = "marketplace_id")
 })
 @EntityListeners(AuditingEntityListener.class)
 public class Product {
@@ -33,6 +38,17 @@ public class Product {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "company_id", nullable = false)
     private Company company;
+
+    /**
+     * Non-null when this product is listed on a marketplace. Null for standalone (non-marketplace) products.
+     * The FK points to the marketplace Company (the operator), not the vendor Company.
+     */
+    @Column(name = "marketplace_id", nullable = true)
+    private Long marketplaceId;
+
+    /** When true, the vendor has enabled this product for marketplace display. Ignored when marketplaceId is null. */
+    @Column(nullable = false)
+    private boolean marketplaceListed = false;
 
     @Column(nullable = false, length = 255)
     private String name;
@@ -64,8 +80,47 @@ public class Product {
     @Column(nullable = true, length = 500)
     private String thumbnailUrl;
 
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @BatchSize(size = 50)
+    @OrderBy("displayOrder ASC")
+    private List<ProductImage> images = new ArrayList<>();
+
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @BatchSize(size = 50)
+    @OrderBy("position ASC")
+    private List<ProductOption> options = new ArrayList<>();
+
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @BatchSize(size = 50)
+    @OrderBy("displayOrder ASC")
+    private List<ProductVariant> variants = new ArrayList<>();
+
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @BatchSize(size = 50)
+    @OrderBy("displayOrder ASC")
+    private List<ProductAttribute> attributes = new ArrayList<>();
+
     @Column(nullable = true)
     private Integer stock;
+
+    @Column(nullable = true)
+    private Integer lowStockThreshold;
+
+    /** Alert when stock falls to this percentage of maxStock (0–100). Null = no percent threshold. */
+    @Column(nullable = true)
+    private Integer lowStockThresholdPercent;
+
+    /** Maximum / initial stock capacity. Used as denominator for percent threshold calculation. */
+    @Column(nullable = true)
+    private Integer maxStock;
+
+    /** When true, a PENDING RestockRequest is automatically created when stock breaches a threshold. */
+    @Column(nullable = false)
+    private boolean autoRestockEnabled = false;
+
+    /** Units to request in the auto-generated RestockRequest. Required when autoRestockEnabled is true. */
+    @Column(nullable = true)
+    private Integer autoRestockQty;
 
     @Column(nullable = true, precision = 10, scale = 3)
     private BigDecimal weight;
@@ -79,6 +134,38 @@ public class Product {
 
     @Column(nullable = false)
     private boolean featured = false;
+
+    @Column(nullable = false)
+    private boolean purchasable = true;
+
+    @Column(nullable = false)
+    private boolean backorderEnabled = false;
+
+    @Column(nullable = false)
+    private boolean listed = true;
+
+    // -------------------------------------------------------------------------
+    // Subscription / recurring orders
+    // -------------------------------------------------------------------------
+
+    /** When true, this product can be purchased as a recurring subscription. */
+    @Column(nullable = false)
+    private boolean subscribable = false;
+
+    /**
+     * Allowed billing cadences when subscribed, encoded as comma-separated
+     * {@code INTERVAL:COUNT} pairs (e.g. {@code "MONTH:1,MONTH:3,WEEK:2"}).
+     * Null/blank means every cadence is allowed when {@link #subscribable} is true.
+     */
+    @Column(nullable = true, length = 255)
+    private String subscriptionIntervals;
+
+    /**
+     * Optional subscriber discount applied to {@link #price} when ordered on a subscription.
+     * E.g. {@code 10.00} = 10% off. Null = no discount.
+     */
+    @Column(nullable = true, precision = 5, scale = 2)
+    private BigDecimal subscriptionDiscountPercent;
 
     @CreatedDate
     @Column(nullable = false, updatable = false)

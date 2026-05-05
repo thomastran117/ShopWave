@@ -1,0 +1,16 @@
+package backend.models.enums;
+
+public enum AdjustmentReason {
+    MANUAL_ADJUSTMENT,
+    PURCHASE,
+    RETURN,
+    ORDER_CANCELLED,
+    RESTOCK,
+    BACKORDER_FULFILLED,
+    FULFILLMENT_RETURN,
+    DAMAGE,
+    THEFT,
+    EXPIRY,
+    COUNT_CORRECTION,
+    OTHER
+}

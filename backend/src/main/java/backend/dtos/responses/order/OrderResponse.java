@@ -18,6 +18,17 @@ public class OrderResponse {
     private String status;
     private String paymentIntentId;
     private String paymentClientSecret;
+    private String couponCode;
+    private BigDecimal couponDiscountAmount;
+    // Fulfillment fields
+    private String trackingNumber;
+    private String carrier;
+    private Instant shippedAt;
+    private Instant deliveredAt;
+    private Instant returnedAt;
+    private String fulfillmentNote;
+    // Refund tracking
+    private long refundedAmountCents;
     private Instant createdAt;
     private Instant updatedAt;
 }

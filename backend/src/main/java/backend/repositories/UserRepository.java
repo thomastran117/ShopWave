@@ -1,11 +1,26 @@
 package backend.repositories;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import backend.models.core.User;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
 @Repository
 public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByEmail(String email);
+
+    /** Returns the segment ids a user belongs to. Empty for anonymous/unsegmented users. */
+    @Query("SELECT s.id FROM User u JOIN u.segments s WHERE u.id = :userId")
+    List<Long> findSegmentIdsByUserId(@Param("userId") long userId);
+
+    Optional<User> findByIdAndOwnerId(long id, long ownerId);
+
+    /** Returns IDs of users whose birth month and day match today, for birthday reward processing. */
+    @Query(value = "SELECT id FROM users WHERE birth_date IS NOT NULL " +
+                   "AND MONTH(birth_date) = :month AND DAY(birth_date) = :day",
+           nativeQuery = true)
+    List<Long> findUserIdsWithBirthday(@Param("month") int month, @Param("day") int day);
 }
