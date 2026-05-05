@@ -133,9 +133,11 @@ public class OrderServiceImpl implements OrderService {
 
     private static final String LOCK_PREFIX = "lock:product:";
     private static final String VARIANT_LOCK_PREFIX = "lock:variant:";
-    private static final long LOCK_TTL_SECONDS = 10;
     private static final int LOCK_RETRY_ATTEMPTS = 5;
     private static final long LOCK_RETRY_DELAY_MS = 100;
+
+    @Value("${app.lock.ttl-seconds:60}")
+    private long lockTtlSeconds;
     private static final Set<String> SORTABLE_FIELDS = Set.of("createdAt", "totalAmount");
 
     @Value("${app.order.reservation.ttl-seconds:900}")
@@ -418,7 +420,11 @@ public class OrderServiceImpl implements OrderService {
                         }
                     } else {
                         decrementedVariants.add(new long[]{variantId, qty});
-                        purchaseRecords.add(new PurchaseRecord(product, variant, prevVariantStock, prevVariantStock - qty));
+                        // Only record audit/alert entries for tracked stock (non-null); untracked
+                        // products (stock=null) have no stock to report.
+                        if (variant.getStock() != null) {
+                            purchaseRecords.add(new PurchaseRecord(product, variant, prevVariantStock, prevVariantStock - qty));
+                        }
                     }
 
                     item.setVariant(variant);
@@ -437,7 +443,9 @@ public class OrderServiceImpl implements OrderService {
                         }
                     } else {
                         decrementedProducts.add(new long[]{product.getId(), qty});
-                        purchaseRecords.add(new PurchaseRecord(product, null, prevProductStock, prevProductStock - qty));
+                        if (product.getStock() != null) {
+                            purchaseRecords.add(new PurchaseRecord(product, null, prevProductStock, prevProductStock - qty));
+                        }
                     }
 
                     item.setUnitPrice(product.getPrice());
@@ -508,13 +516,16 @@ public class OrderServiceImpl implements OrderService {
                                 "' (product: '" + bi.getProduct().getName() + "')");
                     }
 
-                    int newStock = prevStock - totalQty;
                     if (bi.getVariant() != null) {
                         decrementedVariants.add(new long[]{bi.getVariant().getId(), totalQty});
                     } else {
                         decrementedProducts.add(new long[]{bi.getProduct().getId(), totalQty});
                     }
-                    purchaseRecords.add(new PurchaseRecord(bi.getProduct(), bi.getVariant(), prevStock, newStock));
+                    // Only audit tracked stock; untracked (null) items are skipped.
+                    Integer biActualStock = bi.getVariant() != null ? bi.getVariant().getStock() : bi.getProduct().getStock();
+                    if (biActualStock != null) {
+                        purchaseRecords.add(new PurchaseRecord(bi.getProduct(), bi.getVariant(), biActualStock, biActualStock - totalQty));
+                    }
                 }
 
                 orderItems.add(bundleItem);
@@ -933,11 +944,15 @@ public class OrderServiceImpl implements OrderService {
     @Transactional
     public void handlePaymentSuccess(String paymentIntentId) {
         orderRepository.findByPaymentIntentId(paymentIntentId).ifPresent(order -> {
-            if (order.getStatus() == OrderStatus.PAID) {
-                log.debug("payment_intent.succeeded replay ignored — order {} already PAID", order.getId());
+            // Atomic transition: only the first concurrent webhook delivery succeeds.
+            // Returns 0 if the order is already PAID (or UNDER_REVIEW/FAILED), preventing
+            // double-commission recording when the same event is delivered twice.
+            int transitioned = orderRepository.transitionStatus(order.getId(), OrderStatus.RESERVED, OrderStatus.PAID);
+            if (transitioned == 0) {
+                log.debug("payment_intent.succeeded ignored — order {} already processed (status={})",
+                        order.getId(), order.getStatus());
                 return;
             }
-            // Always PAID — backordered items are tracked via FulfillmentStatus.BACKORDERED per item.
             order.setStatus(OrderStatus.PAID);
             order.setPaidAt(Instant.now());
             orderRepository.save(order);
@@ -1006,17 +1021,43 @@ public class OrderServiceImpl implements OrderService {
 
         log.info("Compensating order {} (status={})", order.getId(), order.getStatus());
 
+        // Acquire product/variant locks (sorted to prevent deadlock) before restoring stock,
+        // so concurrent createOrder calls see a consistent stock value after restoration.
+        java.util.TreeSet<Long> productIdSet = new java.util.TreeSet<>();
+        java.util.TreeSet<Long> variantIdSet = new java.util.TreeSet<>();
         for (OrderItem item : order.getItems()) {
-            try {
-                restoreItemStock(item);
-                recordCancelAdjustment(item, order.getId());
-                recordCompensation(order, CompensationType.STOCK_RESTORE,
-                        buildRestoreDetail(item) + " restored by scheduler", CompensationStatus.COMPLETED);
-            } catch (Exception e) {
-                log.error("Scheduled compensation: failed to restore stock for item on order {}: {}", order.getId(), e.getMessage());
-                recordCompensation(order, CompensationType.STOCK_RESTORE,
-                        buildRestoreDetail(item) + " failed in scheduler", CompensationStatus.FAILED, e.getMessage());
+            if (item.getBundle() != null) continue; // bundle constituent locks skipped — rare path
+            if (item.getProduct() != null) productIdSet.add(item.getProduct().getId());
+            if (item.getVariant() != null) variantIdSet.add(item.getVariant().getId());
+        }
+
+        String compensateLockToken = UUID.randomUUID().toString();
+        List<String> compensateLocks = new ArrayList<>();
+        try {
+            acquireLocks(new ArrayList<>(productIdSet), compensateLockToken, compensateLocks);
+            acquireVariantLocks(new ArrayList<>(variantIdSet), compensateLockToken, compensateLocks);
+        } catch (ConflictException e) {
+            // Best-effort: if we can't acquire locks quickly, proceed anyway.
+            // The atomic restoreStock SQL is still safe; the lock only improves
+            // consistency of concurrent entity reads in createOrder.
+            log.warn("compensateOrder: could not acquire all locks for order {} — proceeding without full lock coverage", order.getId());
+        }
+
+        try {
+            for (OrderItem item : order.getItems()) {
+                try {
+                    restoreItemStock(item);
+                    recordCancelAdjustment(item, order.getId());
+                    recordCompensation(order, CompensationType.STOCK_RESTORE,
+                            buildRestoreDetail(item) + " restored by scheduler", CompensationStatus.COMPLETED);
+                } catch (Exception e) {
+                    log.error("Scheduled compensation: failed to restore stock for item on order {}: {}", order.getId(), e.getMessage());
+                    recordCompensation(order, CompensationType.STOCK_RESTORE,
+                            buildRestoreDetail(item) + " failed in scheduler", CompensationStatus.FAILED, e.getMessage());
+                }
             }
+        } finally {
+            releaseLocks(compensateLocks, compensateLockToken);
         }
 
         if (order.getPaymentIntentId() != null && order.getStatus() != OrderStatus.CANCELLED) {
@@ -1341,7 +1382,7 @@ public class OrderServiceImpl implements OrderService {
             boolean acquired = false;
 
             for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
-                if (cacheService.tryLock(lockKey, lockToken, LOCK_TTL_SECONDS)) {
+                if (cacheService.tryLock(lockKey, lockToken, lockTtlSeconds)) {
                     acquiredLocks.add(lockKey);
                     acquired = true;
                     break;
@@ -1367,7 +1408,7 @@ public class OrderServiceImpl implements OrderService {
             boolean acquired = false;
 
             for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
-                if (cacheService.tryLock(lockKey, lockToken, LOCK_TTL_SECONDS)) {
+                if (cacheService.tryLock(lockKey, lockToken, lockTtlSeconds)) {
                     acquiredLocks.add(lockKey);
                     acquired = true;
                     break;
@@ -1479,7 +1520,7 @@ public class OrderServiceImpl implements OrderService {
         try {
             String productLockKey = LOCK_PREFIX + productId;
             for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
-                if (cacheService.tryLock(productLockKey, lockToken, LOCK_TTL_SECONDS)) {
+                if (cacheService.tryLock(productLockKey, lockToken, lockTtlSeconds)) {
                     acquiredLocks.add(productLockKey);
                     break;
                 }
@@ -1495,7 +1536,7 @@ public class OrderServiceImpl implements OrderService {
                 String variantLockKey = VARIANT_LOCK_PREFIX + variantId;
                 boolean variantAcquired = false;
                 for (int attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
-                    if (cacheService.tryLock(variantLockKey, lockToken, LOCK_TTL_SECONDS)) {
+                    if (cacheService.tryLock(variantLockKey, lockToken, lockTtlSeconds)) {
                         acquiredLocks.add(variantLockKey);
                         variantAcquired = true;
                         break;
@@ -1559,12 +1600,23 @@ public class OrderServiceImpl implements OrderService {
                         });
                     }
 
+                    // Capture stock before decrement from the JPA entity (loaded in this
+                    // transaction, reflects the DB value before our decrementStock call).
+                    Integer prevStockVal = (variantId != null && item.getVariant() != null)
+                            ? item.getVariant().getStock()
+                            : (item.getProduct() != null ? item.getProduct().getStock() : null);
+
                     InventoryAdjustment adj = new InventoryAdjustment();
                     adj.setProduct(item.getProduct());
                     adj.setVariant(item.getVariant());
-                    adj.setDelta(-qty); // stock was decremented to fulfill this item
-                    adj.setPreviousStock(0); // TOCTOU-safe: delta is authoritative
-                    adj.setNewStock(0);
+                    adj.setDelta(-qty);
+                    if (prevStockVal != null) {
+                        adj.setPreviousStock(prevStockVal);
+                        adj.setNewStock(prevStockVal - qty);
+                    } else {
+                        adj.setPreviousStock(0);
+                        adj.setNewStock(0);
+                    }
                     adj.setReason(AdjustmentReason.BACKORDER_FULFILLED);
                     adj.setNote("Backorder fulfilled for order #" + order.getId());
                     adj.setOrderId(order.getId());

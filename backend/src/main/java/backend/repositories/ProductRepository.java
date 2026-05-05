@@ -68,11 +68,13 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
     Optional<Product> findBySkuAndCompanyId(String sku, long companyId);
 
     /**
-     * Atomically decrements stock. Returns 1 (success) when stock >= quantity, 0 otherwise.
-     * The WHERE clause guarantees no oversell at the DB level.
+     * Atomically decrements stock. Returns 1 (success) when stock >= quantity or stock IS NULL
+     * (untracked inventory), 0 when stock is tracked but insufficient.
+     * NULL stock means no tracking — the decrement is a no-op (NULL - qty = NULL) but succeeds
+     * so that untracked products can always be purchased.
      */
     @Modifying
-    @Query("UPDATE Product p SET p.stock = p.stock - :quantity WHERE p.id = :id AND p.stock >= :quantity")
+    @Query("UPDATE Product p SET p.stock = p.stock - :quantity WHERE p.id = :id AND (p.stock IS NULL OR p.stock >= :quantity)")
     int decrementStock(@Param("id") long id, @Param("quantity") int quantity);
 
     /** Restores stock after a failed or cancelled order. */

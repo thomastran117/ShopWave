@@ -47,6 +47,17 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     int markCompensated(@Param("id") long id);
 
     /**
+     * Atomically transitions an order from expectedStatus to newStatus. Returns 1 if the
+     * transition succeeded, 0 if the order was already in a different state (concurrent webhook).
+     * Use this instead of READ-COMPARE-WRITE patterns for idempotent webhook handlers.
+     */
+    @Modifying
+    @Query("UPDATE Order o SET o.status = :newStatus WHERE o.id = :id AND o.status = :expectedStatus")
+    int transitionStatus(@Param("id") long id,
+                         @Param("expectedStatus") OrderStatus expectedStatus,
+                         @Param("newStatus") OrderStatus newStatus);
+
+    /**
      * FIFO: PAID orders that contain at least one BACKORDERED item for the given product.
      * Replaces the retired findBackordersByProductId (which queried BACKORDER-status orders).
      */

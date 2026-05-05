@@ -20,10 +20,11 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
     boolean existsByProductId(long productId);
 
     /**
-     * Atomically decrements variant stock. Returns 1 on success, 0 if stock < qty.
+     * Atomically decrements variant stock. Returns 1 on success, 0 if stock is tracked but < qty.
+     * NULL stock (untracked inventory) always succeeds — the decrement is a no-op (NULL - qty = NULL).
      */
     @Modifying
-    @Query("UPDATE ProductVariant v SET v.stock = v.stock - :qty WHERE v.id = :id AND v.stock >= :qty")
+    @Query("UPDATE ProductVariant v SET v.stock = v.stock - :qty WHERE v.id = :id AND (v.stock IS NULL OR v.stock >= :qty)")
     int decrementStock(@Param("id") long id, @Param("qty") int qty);
 
     /**

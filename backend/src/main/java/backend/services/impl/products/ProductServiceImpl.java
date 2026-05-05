@@ -456,7 +456,8 @@ public class ProductServiceImpl implements ProductService {
         companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
 
-        Product product = productRepository.findByIdAndCompanyId(productId, companyId)
+        // Pessimistic write lock prevents concurrent reorder calls from overwriting each other.
+        Product product = productRepository.findByIdAndCompanyIdWithLock(productId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
 
         List<ProductImage> existing = productImageRepository.findAllByProductIdOrderByDisplayOrderAsc(productId);
@@ -515,18 +516,20 @@ public class ProductServiceImpl implements ProductService {
         companyRepository.findByIdAndOwnerId(companyId, ownerId)
                 .orElseThrow(() -> new ForbiddenException("You do not own this company"));
 
-        Product product = productRepository.findByIdAndCompanyId(productId, companyId)
+        // Pessimistic write lock serializes concurrent option-add requests so the count
+        // check and the insert are atomic with respect to other writers.
+        Product product = productRepository.findByIdAndCompanyIdWithLock(productId, companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + productId));
 
-        if (productOptionRepository.countByProductId(productId) >= 3) {
+        int optionCount = productOptionRepository.countByProductId(productId);
+        if (optionCount >= 3) {
             throw new BadRequestException("Products can have at most 3 option types");
         }
 
-        int position = productOptionRepository.countByProductId(productId);
         ProductOption option = new ProductOption();
         option.setProduct(product);
         option.setName(request.getName());
-        option.setPosition(position);
+        option.setPosition(optionCount);
 
         return toOptionResponse(productOptionRepository.save(option));
     }

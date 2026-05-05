@@ -8,20 +8,9 @@ const api = axios.create({
   withCredentials: true, // send cookies for refresh
 });
 
-let isRefreshing = false;
-let failedQueue: any[] = [];
-
-const processQueue = (error: any, token: string | null = null) => {
-  failedQueue.forEach((prom) => {
-    if (error) {
-      prom.reject(error);
-    } else {
-      prom.resolve(token);
-    }
-  });
-
-  failedQueue = [];
-};
+// Single shared promise for the in-flight token refresh. All concurrent 401 responses
+// queue onto this promise rather than each triggering its own refresh request.
+let refreshPromise: Promise<string> | null = null;
 
 api.interceptors.request.use((config) => {
   const state = store.getState();
@@ -40,52 +29,41 @@ api.interceptors.response.use(
 
     const status = error.response?.status;
     if ((status === 401 || status === 403) && !originalRequest._retry) {
-      if (isRefreshing) {
-        return new Promise(function (resolve, reject) {
-          failedQueue.push({ resolve, reject });
-        })
-          .then((token) => {
-            if (originalRequest.headers && token) {
-              originalRequest.headers["Authorization"] = "Bearer " + token;
-            }
-            return api(originalRequest);
+      originalRequest._retry = true;
+
+      if (!refreshPromise) {
+        refreshPromise = axios
+          .post(
+            `${Environment.backend_url}/auth/refresh`,
+            {},
+            { withCredentials: true }
+          )
+          .then((resp) => {
+            const newToken: string = resp.data.accessToken;
+            store.dispatch(
+              setCredentials({
+                accessToken: newToken,
+                email: resp.data.email ?? null,
+                role: resp.data.role ?? null,
+              })
+            );
+            return newToken;
           })
-          .catch((err) => Promise.reject(err));
+          .catch((err) => {
+            store.dispatch(clearCredentials());
+            return Promise.reject(err);
+          })
+          .finally(() => {
+            refreshPromise = null;
+          });
       }
 
-      originalRequest._retry = true;
-      isRefreshing = true;
-
-      try {
-        const resp = await axios.post(
-          `${Environment.backend_url}/auth/refresh`,
-          {},
-          { withCredentials: true }
-        );
-
-        const newToken = resp.data.accessToken;
-
-        store.dispatch(
-          setCredentials({
-            accessToken: newToken,
-            email: resp.data.email ?? null,
-            role: resp.data.role ?? null,
-          })
-        );
-
-        processQueue(null, newToken);
-
+      return refreshPromise.then((newToken) => {
         if (originalRequest.headers) {
           originalRequest.headers["Authorization"] = "Bearer " + newToken;
         }
         return api(originalRequest);
-      } catch (err) {
-        processQueue(err, null);
-        store.dispatch(clearCredentials());
-        return Promise.reject(err);
-      } finally {
-        isRefreshing = false;
-      }
+      });
     }
 
     return Promise.reject(error);

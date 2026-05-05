@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { setCredentials } from "../stores/authSlice";
@@ -17,6 +17,11 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const dispatch = useDispatch<AppDispatch>();
   const authState = useSelector((state: RootState) => state.auth);
+
+  // Track the active OAuth popup and its listener so that a second click tears down
+  // the previous one before opening a new popup, preventing duplicate auth flows.
+  const oauthPopupRef = useRef<Window | null>(null);
+  const oauthListenerRef = useRef<((e: MessageEvent) => void) | null>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -52,6 +57,13 @@ export default function LoginPage() {
       return;
     }
 
+    // Tear down any previous popup and listener before opening a new one.
+    if (oauthListenerRef.current) {
+      window.removeEventListener("message", oauthListenerRef.current);
+      oauthListenerRef.current = null;
+    }
+    oauthPopupRef.current?.close();
+
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
@@ -73,15 +85,19 @@ export default function LoginPage() {
       "GoogleLogin",
       `width=${width},height=${height},left=${left},top=${top},resizable,scrollbars`
     );
+    oauthPopupRef.current = popup;
 
     const listener = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
       if (event.data.type === "google_oauth_token") {
-        popup?.close();
-        handleGoogleResponse(event.data.token);
+        oauthPopupRef.current?.close();
+        oauthPopupRef.current = null;
         window.removeEventListener("message", listener);
+        oauthListenerRef.current = null;
+        handleGoogleResponse(event.data.token);
       }
     };
+    oauthListenerRef.current = listener;
     window.addEventListener("message", listener);
   };
 
